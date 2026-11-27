@@ -53,7 +53,11 @@ def adapt(path, style=None):
     SL = float(get(R, 'outline.end')); f = 1.0 / SL
     def P(name, src): prov.append(dict(input=name, source=src))
     O = R['outline']
-    out = dict(species=D.get('species'), label=get(R, 'name', '', need=False), SL_mm=float(get(R, 'SL', SL, need=False)))
+    # real size: record.size.SL_mm (measured standard length of an adult); record.SL is the outline length in record
+    # units on older records, so it is only the fallback, listed as a DEFAULT row when used
+    sl_mm = get(R, 'size.SL_mm', None, need=False)
+    if sl_mm is None: sl_mm = get(R, 'SL', SL, need=False); DEFAULTS.append(dict(input='size.SL_mm', source='DEFAULT', value=f'record.SL ({sl_mm}), outline units, not mm'))
+    out = dict(species=D.get('species'), label=get(R, 'name', '', need=False), SL_mm=float(sl_mm))
     sc = lambda tab: [[a * f, b * f] for a, b in tab]
     out['outline'] = dict(top=sc(O['top']), bot=sc(O['bot']), hw=sc(O['hw']),
                           nUp=[[a * f, b] for a, b in O['nUp']], nLo=[[a * f, b] for a, b in O['nLo']])
