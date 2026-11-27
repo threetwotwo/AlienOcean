@@ -157,7 +157,7 @@ func apply(cam_y: float) -> Dictionary:
 		env.ambient_light_energy = mx
 	else:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-		var dz := dome(Vector3.UP, to_godot(st.sun.dir)); var dm := maxf(dz.x, maxf(dz.y, dz.z))
+		var dz := dome(Vector3.UP, _dome_sun); var dm := maxf(dz.x, maxf(dz.y, dz.z))
 		env.ambient_light_color = Color(dz.x / dm, dz.y / dm, dz.z / dm) if dm > 0.0 else Color.WHITE
 		env.ambient_light_energy = st.skylux / PI * exposure
 		light.look_at_from_position(Vector3.ZERO, -up_air, Vector3.FORWARD if absf(up_air.y) > 0.99 else Vector3.UP)
@@ -266,7 +266,16 @@ func _push_sky(st: Dictionary) -> void:
 	mat.set_shader_parameter("maria", SkyClock.MOON_LOOK.maria)
 	mat.set_shader_parameter("planetshine", SkyClock.MOON_LOOK.planetshine)
 	mat.set_shader_parameter("moon_edge", SkyClock.MOON_LOOK.moon_edge)
-	if not s.is_equal_approx(_dome_sun):      # the dome integral only changes with the sun
-		_dome_sun = s; _dome_g = ground_lux_of_dome(s)
+	# Godot's dome shape is black once the sun is down, while Unreal's SkyAtmosphere kept the twilight glow: until that
+	# is ported, the shape uses the sun held at 1 deg up (glow on the sun's side, blue overhead), scaled to the clock's
+	# twilight sky_lux (TWILIGHT table), so the brightness stays the clock's.
+	var lift := sin(deg_to_rad(1.0))
+	var ds := s
+	if s.y < lift:
+		var hz := Vector3(s.x, 0.0, s.z).normalized() if Vector2(s.x, s.z).length() > 1e-6 else Vector3.FORWARD
+		ds = (hz * cos(deg_to_rad(1.0)) + Vector3.UP * lift).normalized()
+	mat.set_shader_parameter("dome_sun", ds)
+	if not ds.is_equal_approx(_dome_sun):     # the dome integral only changes with the sun
+		_dome_sun = ds; _dome_g = ground_lux_of_dome(ds)
 	mat.set_shader_parameter("sky_norm", (st.skylux - SkyClock.NIGHT_SKY_LUX) / _dome_g if _dome_g > 1e-12 else 0.0)
 	mat.set_shader_parameter("sea_nits", SkyClock.OCEAN_ALBEDO * st.total / PI)

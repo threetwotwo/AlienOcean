@@ -1,4 +1,4 @@
-// Sky 0.1.0 (engine thread): the Unreal sky's drawn bodies, ported, over a clear-air dome.
+// Sky 0.1.1 (engine thread; 0.1.1: twilight dome = the shape with the sun held at 1 deg, scaled to the clock's twilight sky_lux): the Unreal sky's drawn bodies, ported, over a clear-air dome.
 // Sun disc + corona: SUN_HLSL (sun_v184) as is: limb-darkened disc carrying the sun's whole light, drawn x5.29
 // (2.8 deg), air extinction per band (0.0862, 0.1665, 0.2961) x air mass, masked by the moons.
 // Moons A and B: MOON_HLSL as is: Lommel-Seeliger face, maria noise, planetshine, soft edge; lit by the true sun.
@@ -23,6 +23,7 @@ uniform float moon_b_albedo = 0.20;
 uniform float maria = 0.3;
 uniform float planetshine = 2e-4;
 uniform float moon_edge = 1.5;
+uniform vec3 dome_sun = vec3(0.0, 1.0, 0.0);   // the sun for the dome's shape: lifted to >= 1 deg (twilight stand-in)
 uniform float sky_norm = 1.0;           // set by the driver: dome scale so its ground light = clock sky_lux
 uniform float sea_nits = 0.0;           // below the horizon: the sea, seen from above
 
@@ -88,7 +89,7 @@ void sky() {
 	if (v.y < -0.02) { COLOR = vec3(sea_nits); }
 	else {
 		vec3 s = normalize(sun_dir);
-		vec3 air = dome(v, s) * sky_norm;
+		vec3 air = dome(v, normalize(dome_sun)) * sky_norm;
 		vec3 col = air;
 		// sun disc + corona (SUN_HLSL)
 		float th = acos(clamp(dot(v, s), -1.0, 1.0));
