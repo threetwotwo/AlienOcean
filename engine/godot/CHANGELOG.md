@@ -1,5 +1,25 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (27 Nov 2026, evening): gameplay now built on Gary's Thalassa v20.19
+- M02 player motor 0.2.0 = Thalassa core/swimmer-physics.js ported line for line (SwimmerLocomotion: carve turns,
+  flipper-kick burst, glide-out braking, dive-to-pullout momentum, slipstream, surface treading with swell, dolphin
+  breach, plunge dip, shoreline walk/wade/jog/crouch, anticipation jump, running dive) + mover.js layered moves
+  (ocean current, impulses). Golden test against the JS: worst 0.05 mm over two 20 s runs.
+  Godot adapter adds what Thalassa's height field never needed: Jolt collisions, 0.35 m step limit (T1), swim sphere
+  0.42 m so a child fits a 1.0 m cave (T5), no standing up under low ceilings, steep dry slopes are walls, plus two
+  robustness guards found by monkey runs (no floor at a world edge; air-branch speed cap under ledges) and contact
+  velocity projection (Jolt's slide redirected a push against an edge sideways and snowballed to 13 m/s).
+  19/19 at 30/60/120 fps incl. 4 x 300 s monkey runs; T1 50 deg ramp test moved to 60 deg (Thalassa walks to 56 deg).
+- M01 input 0.2.0 = Thalassa core/input.js DualSense map and curves: move deadzone 0.11 / exponent 1.45, look 2.4 rad/s
+  with exponent 1.72, outer-zone boost 1.45, asymmetric accel/stop filter 22/34 Hz, L2 analog dive, L1 or Cross ascend,
+  R2 boost / L3 sprint latch, Circle observe, Triangle board, R1 sonar, R3 view, D-pad lights / silent / Atlas / TARS.
+  Changed from Thalassa for platform rules: TARS leaves the Create button (system capture) for D-pad right; radio off
+  Square and the touch pad. Golden test: worst 7.5e-8. 16/16 device tests.
+- M03 camera 0.2.0 = Thalassa core/cinematic-camera.js updateForActor (anchor-relative crit springs, rigid 1P lock,
+  Living Observer breath / lead room / landing settle, binary-refined spring arm). Golden: worst 0.004 mm over 15 s.
+  Adapter: Jolt floor ray and sphere overlap answer the arm's probes; water-line rule kept from 0.1.0 for third person
+  (sprung, 3-tick crossings). 11/11 incl. 4 x 300 s camera monkeys; probe-off fault caught. Replaces the 0.1.0 director.
+
 ## 0.6.0-dev (27 Nov 2026), slice setup, not yet in a git repo
 - Engine: ported Unreal systems, round 1 (Gary 27 Nov 15:13Z "port working Unreal systems to Godot").
   M30 world clock 0.1.0 (`core/m30_world_clock/sky_clock.gd`): the Unreal sky clock's maths (sun_v184) as is: G2V sun twin,

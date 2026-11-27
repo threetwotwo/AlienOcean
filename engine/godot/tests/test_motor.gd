@@ -10,6 +10,7 @@ const Packet := preload("res://core/m01_input/input_packet.gd")
 const Body := preload("res://adapters/godot/player_body.gd")
 const Env := preload("res://core/m23_harness/test_env.gd")
 const Motor := preload("res://core/m02_motor/player_motor.gd")
+const Worlds := preload("res://core/m23_harness/test_worlds.gd")
 
 var rate := 60     # frames per second (pass the same number to --fixed-fps)
 var tick := 60     # physics ticks per second: the fixed simulation step (project setting)
@@ -46,70 +47,11 @@ func _initialize() -> void:
 	_define_cases()
 	print("M02 harness: physics=%s fps=%d tick=%d cases=%d" % [ProjectSettings.get_setting("physics/3d/physics_engine"), rate, tick, cases.size()])
 
-# ---------------------------------------------------------------- worlds
-func _box(parent: Node3D, center: Vector3, size: Vector3, rot_x_deg: float = 0.0) -> void:
-	var sb := StaticBody3D.new()
-	var cs := CollisionShape3D.new()
-	var bs := BoxShape3D.new(); bs.size = size
-	cs.shape = bs
-	sb.add_child(cs)
-	sb.transform = Transform3D(Basis(Vector3.RIGHT, deg_to_rad(rot_x_deg)), center)
-	sb.collision_layer = 1
-	parent.add_child(sb)
-
-func _ramp(parent: Node3D, top: Vector3, length: float, angle_deg: float, width: float) -> Vector3:
-	# a slab going down toward -z from 'top' (top edge), returns the bottom edge point
-	var a := deg_to_rad(angle_deg)
-	var dir := Vector3(0, -sin(a), -cos(a))
-	var mid := top + dir * length * 0.5 + Vector3(0, -0.25 * cos(a), 0.25 * sin(a))
-	_box(parent, mid, Vector3(width, 0.5, length), -angle_deg)
-	return top + dir * length
-
+# ---------------------------------------------------------------- worlds (shared: core/m23_harness/test_worlds.gd)
 func _build(kind: String, p: Dictionary) -> void:
 	world = Node3D.new()
 	root.add_child(world)
-	env = Env.new()
-	env.level = -1000.0
-	match kind:
-		"ramp":   # flat approach at y=0 for z in [0, 6], ramp rising toward -z, plateau
-			_box(world, Vector3(0, -0.25, 3), Vector3(10, 0.5, 6), 0)
-			var a := deg_to_rad(p.angle)
-			var L := 6.0
-			var top := Vector3(0, L * sin(a), -L * cos(a))
-			_box(world, Vector3(0, top.y * 0.5 - 0.25 * cos(a), top.z * 0.5 - 0.25 * sin(a)), Vector3(10, 0.5, L), p.angle)
-			_box(world, Vector3(0, top.y - 0.25, top.z - 5), Vector3(10, 0.5, 10), 0)
-		"step":
-			_box(world, Vector3(0, -0.25, 0), Vector3(10, 0.5, 20), 0)
-			_box(world, Vector3(0, p.h * 0.5, -8), Vector3(10, p.h, 10), 0)
-		"shore":  # dry beach y=+1, 12 deg slope down to -6, flat sea floor; water at 0
-			env.level = 0.0
-			env.wave_amp = p.get("waves", 0.0)
-			_box(world, Vector3(0, 0.75, 5), Vector3(40, 0.5, 10), 0)
-			var bottom := _ramp(world, Vector3(0, 1.0, 0), 7.0 / sin(deg_to_rad(12.0)), 12.0, 40.0)
-			_box(world, Vector3(0, bottom.y - 0.25, bottom.z - 30), Vector3(40, 0.5, 60), 0)
-		"pool":
-			env.level = 0.0
-			env.wave_amp = p.get("waves", 0.0)
-			_box(world, Vector3(0, -20.25, -20), Vector3(200, 0.5, 200), 0)
-			if p.has("current"):
-				env.current_vec = p.current
-		"cave":   # wall across the pool at z=-5 with a square tube (inner side s) through it, centre y=-10
-			env.level = 0.0
-			_box(world, Vector3(0, -20.25, -20), Vector3(200, 0.5, 200), 0)
-			var s: float = p.s
-			var L := 20.0
-			var zc := -5.0 - L * 0.5
-			var th := 2.0
-			_box(world, Vector3(0, -10 + s * 0.5 + th * 0.5, zc), Vector3(s + 2 * th, th, L), 0)   # roof
-			_box(world, Vector3(0, -10 - s * 0.5 - th * 0.5, zc), Vector3(s + 2 * th, th, L), 0)   # floor
-			_box(world, Vector3(-s * 0.5 - th * 0.5, -10, zc), Vector3(th, s, L), 0)               # left
-			_box(world, Vector3(s * 0.5 + th * 0.5, -10, zc), Vector3(th, s, L), 0)                # right
-			# the wall plate around the entrance (closes the way around)
-			var W := 60.0
-			_box(world, Vector3(0, -10 + s * 0.5 + (W * 0.5) * 0.5, -5.0 - th * 0.5), Vector3(W, W * 0.5, th), 0)
-			_box(world, Vector3(0, -10 - s * 0.5 - (W * 0.5) * 0.5, -5.0 - th * 0.5), Vector3(W, W * 0.5, th), 0)
-			_box(world, Vector3(-s * 0.5 - W * 0.25, -10, -5.0 - th * 0.5), Vector3(W * 0.5, s, th), 0)
-			_box(world, Vector3(s * 0.5 + W * 0.25, -10, -5.0 - th * 0.5), Vector3(W * 0.5, s, th), 0)
+	env = Worlds.build(world, kind, p)
 	body = Body.new()
 	if fault:
 		body.swim_shape.radius = 0.30
@@ -134,7 +76,7 @@ func _define_cases() -> void:
 	for ang in [15.0, 30.0]:
 		_case("T1 ramp %d deg climbs" % ang, "ramp", {"angle": ang, "start": Vector3(0, 0.05, 4)}, 8.0, fwd,
 			func(r): return [r.end.y > 6.0 * sin(deg_to_rad(ang)) - 0.3, "end y %.2f" % r.end.y])
-	_case("T1 ramp 50 deg refuses", "ramp", {"angle": 50.0, "start": Vector3(0, 0.05, 4)}, 8.0, fwd,
+	_case("T1 ramp 60 deg refuses (Thalassa walks up to 56 deg)", "ramp", {"angle": 60.0, "start": Vector3(0, 0.05, 4)}, 8.0, fwd,
 		func(r): return [r.end.y < 1.0, "end y %.2f" % r.end.y])
 	for h in [0.10, 0.30]:
 		_case("T1 step %d cm climbs" % int(h * 100), "step", {"h": h, "start": Vector3(0, 0.05, 2)}, 6.0, fwd,
@@ -162,7 +104,7 @@ func _define_cases() -> void:
 		func(tt):
 			var k = _pk(Vector2(0, 1), 0.0, -0.9 if tt < 4.0 else 0.0)
 			k.ascend = tt >= 4.0
-			if tt > 9.0: k.move = Vector2.ZERO; k.ascend = false
+			if tt > 11.0: k.move = Vector2.ZERO; k.ascend = false   # Thalassa rise is diagonal (~2.4 m/s up): hold to the top
 			return k,
 		func(r): return [r.min_y < -6.0 and r.mode == "TREAD", "min y %.2f end %s" % [r.min_y, r.mode]])
 	# T4 tread under waves
@@ -246,16 +188,20 @@ func _invariants(dt: float) -> void:
 	rec.ticks += 1
 	if not rec.visited.has(m):
 		rec.visited.append(m)
-	if m != rec.last_mode and rec.last_mode != "":
+	# I5 counts changes of the real movement mode (Thalassa: ShoreWalking / Wading / Swimming); TREAD, SWIM and a
+	# breach arc are labels inside Swimming, and a held-Cross dolphin breach chain is a feature, not flicker
+	var mm: String = body.motor.mover_mode_name()
+	if mm != rec.get("last_mm", "") and rec.get("last_mm", "") != "":
 		rec.trans_times.append(t)
 		var n := 0
 		for tt in rec.trans_times:
 			if t - tt <= 1.0: n += 1
 		rec.max_trans_per_s = maxi(rec.max_trans_per_s, n)
 	rec.last_mode = m
+	rec.last_mm = mm
 	var sd: Dictionary = body.last_sense
 	if not sd.is_empty():
-		rec.ring.append("t=%.2f %s d=%.2f floor=%s blocked=%s y=%.2f vy=%.2f" % [t, m, sd.water_y - sd.feet.y, sd.on_floor, sd.get("stand_blocked", false), p.y, v.y])
+		rec.ring.append("t=%.2f %s d=%.2f floor=%s y=%.2f v=%s eye=%s tread=%.2f" % [t, m, sd.water_y - sd.feet.y, sd.on_floor, p.y, v, body.motor.swimmer.pos, body.motor.swimmer.surface_tread_blend])
 		if rec.ring.size() > 40: rec.ring.pop_front()
 	if m == "TREAD": rec.tread_ticks += 1
 	rec.min_y = minf(rec.min_y, p.y)
