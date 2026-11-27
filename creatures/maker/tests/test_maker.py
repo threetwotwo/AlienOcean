@@ -61,6 +61,15 @@ def test_swim_clip_loops(tmp_path):
     env = R['extras']['wave']['amplitude_envelope_BL']
     assert env[-1][1] > 2 * env[0][1] > 0
     for k in ('wave', 'beat_law', 'clips', 'amp_law'): assert k in R['extras']
+    bs = R['extras']['wave']['envelopes_by_speed']          # shader blends between speeds: rising beat, U_rec entry = the main table
+    assert len(bs) == 3 and [b['U_BLps'] for b in bs] == sorted(b['U_BLps'] for b in bs)
+    assert bs[0]['beat_Hz'] < bs[1]['beat_Hz'] < bs[2]['beat_Hz'] and bs[0]['rows'] == env
+    assert all(len(r) == 3 for b in bs for r in b['rows']) and bs[0]['rows'] != bs[2]['rows']
+    assert all(b['loop_closure_BL'] < 1e-4 for b in bs)
+    # a cruise below the gait's steady band (the engine swims burst-and-coast there): the loop is taken at the band's floor and closes
+    raw['body']['motion'] = dict(raw['body']['motion'], U=0.968, f=1.452)
+    R2 = swim_clip.clips(C, V, raw, bl); st = R2['extras']['steady']
+    assert R2['loop_err'] < 1e-4 and st['U_loop_BLps'] == st['U_min_BLps'] > st['U_rec_BLps'] == 0.968
 
 
 def test_traced_fin_outline_sets_the_silhouette(tmp_path):

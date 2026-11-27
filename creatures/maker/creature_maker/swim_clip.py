@@ -80,9 +80,33 @@ def body_frames(R, M):
     return names, rest, W, Q
 
 
+ENVELOPE_SPEEDS = (1.0, 1.5, 2.0)   # multiples of the loop speed (steady band), capped at the gait's Umax
+
+
+def gait_style(M):
+    """the gait style the engine itself resolves for this model (resolveGait in swim.js), so the bands read here are its own"""
+    return run_engine(M, float(M['motion']['U']), 0.0, 30, 0.0, breath=False)['gait']
+
+
+def envelope(W, rest, chain, L):
+    """per chain joint: [s, half the sideways excursion over the beat in BL (recoil included), phase lag in turns behind the snout
+    (first harmonic; recoil shifts it off the pure travelling wave, so a shader needs it per station, not only lam)]"""
+    Z = W[:-1, :, 2]; n = len(Z); k = np.exp(-2j * np.pi * np.arange(n) / n)
+    ph = np.unwrap(np.array([float(np.angle(np.sum(Z[:, i] * k))) for i in chain])); ph = (ph[0] - ph) / (2 * np.pi)
+    return [[round(-rest[i][0] / L, 4), round(float((W[:, i, 2].max() - W[:, i, 2].min()) / 2 / L), 5), round(float(q), 4)]
+            for i, q in zip(chain, ph)]
+
+
 def clips(C, V, raw_record, bone_list, checks=None):
     M = model(C, V, raw_record, bone_list); mo = M['motion']
-    U = float(mo['U'])
+    U_rec = float(mo['U'])
+    G = json.load(open(os.path.join(MOTION, 'gaits.json')))
+    gs = gait_style(M); g = dict(G['styles'][gs]); g = {**G['styles'].get(g.get('base', ''), {}), **g}
+    # the engine swims a steady, beat-periodic body wave only once the gait's body-wave band is fully on (Ulab + UlabBand); below it
+    # it swims burst-and-coast phrases (v16, Videler & Weihs 1982), which no single-beat loop can hold. The loop and the envelopes
+    # are taken in the steady band: at the record cruise when that is in it, else at the band's floor.
+    U_steady = round(float(g.get('Ulab', 0.0)) + float(g.get('UlabBand', 0.0)), 4)
+    U = max(U_rec, U_steady)
     # one beat at cruise: the engine's own f(U) after the warm-up
     probe = run_engine(M, U, 0.5, 60, 4.0, breath=False)
     f = float(probe['frames'][-1]['f']); T = 1.0 / f; fps = KEYS_PER_BEAT * f
@@ -93,28 +117,37 @@ def clips(C, V, raw_record, bone_list, checks=None):
     Tb = 1.0 / br; fpsb = 24.0 / Tb
     Rb = run_engine(M, 0.0, Tb, fpsb, 6.0 * Tb, breath=True)
     breathe = body_frames(Rb, M)
-    # measured envelope: half the lateral excursion of each chain joint over the beat, in BL (includes recoil: the head sways)
     names, rest, W, Q = swim; NB, _ = rig.spine_stations(C); L = M['L']
     chain = [names.index(n) for n in chain_names(NB)]
-    env = [[round(-rest[i][0] / L, 4), round(float((W[:, i, 2].max() - W[:, i, 2].min()) / 2 / L), 5)] for i in chain]
+    env = envelope(W, rest, chain, L)
     loop_err = float(np.abs(W[-1] - W[0]).max() / L)
-    # phase of each station's sideways swing (first harmonic over the beat, in turns, snout = 0): recoil shifts it off the pure
-    # travelling wave, so a shader wave needs it per station, not only lam
-    Z = W[:-1, :, 2]; ph = [float(np.angle(np.sum(Z[:, i] * np.exp(-2j * np.pi * np.arange(len(Z)) / len(Z))))) for i in chain]
-    ph = np.unwrap(np.array(ph)); ph = (ph[0] - ph) / (2 * np.pi)
-    env = [e + [round(float(q), 4)] for e, q in zip(env, ph)]
-    G = json.load(open(os.path.join(MOTION, 'gaits.json')))
-    g = dict(G['styles'][R['gait']]); g = {**G['styles'].get(g.get('base', ''), {}), **g}
+    loop_err_all = loop_err
+    # the same measurement at other speeds, so a shader can blend shapes (alpha_law and the low-speed amp_law change the shape,
+    # not only its scale): one beat each, same warm-up
+    by_speed = []
+    for Uk in sorted({round(min(U * k, float(g.get('Umax', 9e9))), 4) for k in ENVELOPE_SPEEDS}):
+        if abs(Uk - U) < 1e-9:
+            by_speed.append(dict(U_BLps=U, beat_Hz=round(f, 4), rows=env, loop_closure_BL=round(loop_err, 6))); continue
+        fk = float(run_engine(M, Uk, 0.5, 60, 4.0, breath=False)['frames'][-1]['f'])
+        Rk = run_engine(M, Uk, 1.0 / fk, KEYS_PER_BEAT * fk, 4.0, breath=False)
+        _, rk, Wk, _ = body_frames(Rk, M)
+        ek = float(np.abs(Wk[-1] - Wk[0]).max() / L); loop_err_all = max(loop_err_all, ek)
+        by_speed.append(dict(U_BLps=Uk, beat_Hz=round(fk, 4), rows=envelope(Wk, rk, chain, L), loop_closure_BL=round(ek, 6)))
+    assert R['gait'] == gs, (R['gait'], gs)
     ext = dict(
         version=1, units=dict(length='BL (body length, snout to tail end)', speed='BL/s', angle='deg'),
         body_length_m=round(L, 5), engine='motion/swim.js v18 (project swim engine, ported verbatim)', gait=R['gait'],
         record_motion=mo, record_motion_source=mo.get('src', 'record body.motion'),
+        steady=dict(U_min_BLps=U_steady, U_rec_BLps=U_rec, U_loop_BLps=U,
+                    rule='at or above U_min the engine swims a steady body wave (swim_loop, envelopes_by_speed); below it it swims burst-and-coast phrases (beats then a glide, motion/swim.js v16), so a loop or a steady shader wave is not the engine there'),
         clips=dict(swim_loop=dict(U_BLps=U, beat_Hz=round(f, 4), beats=1, seconds=round(T, 5), loop=True, loop_closure_BL=round(loop_err, 6)),
                    breathe_loop=dict(U_BLps=0.0, breath_Hz=round(br, 4), seconds=round(Tb, 5), loop=True),
                    gape=dict(seconds=1.0, peak_deg=None), flare=dict(seconds=1.0, peak_deg=None)),
         wave=dict(formula='z(s) = A_U * exp(alpha_U * (s - 1)) * sin(2 pi (s / lam - phase)), s = 0 snout .. 1 tail, behind s_rigid; Lighthill recoil removes sideways momentum and moment',
                   A_BL=mo.get('A'), alpha=mo.get('alpha'), lam_BL=mo.get('lam'), s_rigid=round(float(R['sRigid']), 4),
-                  amplitude_envelope_BL=env, envelope_columns=['s', 'half sideways swing BL (recoil included)', 'phase lag turns behind the snout']),
+                  amplitude_envelope_BL=env, envelope_columns=['s', 'half sideways swing BL (recoil included)', 'phase lag turns behind the snout'],
+                  envelopes_by_speed=by_speed,
+                  envelopes_by_speed_rule='rows as amplitude_envelope_BL, measured from the engine at each U (alpha_law, amp_law and recoil included); blend linearly in U between the two nearest, hold the end rows outside the range; amplitude_envelope_BL is the U_rec entry'),
         frame=dict(forward_axis_gltf=[-1, 0, 0], up_axis_gltf=[0, 1, 0], left_axis_gltf=[0, 0, 1], snout_at_origin=True,
                    s_of_vertex='s = position.x / body_length_m (glTF metres, snout 0 -> tail 1)'),
         beat_law=dict(formula='f(U) = f_rec * (c + U) / (c + U_rec)  (Bainbridge offset law, lessons swim v3)', f_rec_Hz=mo.get('f'), U_rec_BLps=U,
@@ -122,10 +155,10 @@ def clips(C, V, raw_record, bone_list, checks=None):
         amp_law=dict(formula='A_U = A * clamp(ampMin + (1 - ampMin) * U / ampU1, 0, 1)', ampMin=g.get('ampMin'), ampU1=g.get('ampU1')),
         alpha_law=dict(formula='alpha_U = clamp(alpha - alphaSlope * (U - U_rec), alphaMin, alphaMax)', alphaSlope=mo.get('alphaSlope'),
                        alphaMin=mo.get('alphaMin'), alphaMax=mo.get('alphaMax')),
-        playback=dict(rule='for U >= ampU1 play swim_loop at rate f(U) / f(U_rec); below ampU1 also scale the bend by A_U / A'),
+        playback=dict(rule='U >= steady.U_min: skinned, play swim_loop at rate f(U) / f(U_loop); shader, blend wave.envelopes_by_speed in U and take the beat from beat_law. Below steady.U_min the engine swims phrases (see steady.rule)'),
         Strouhal=mo.get('St'), slip=mo.get('slip'),
     )
     if checks:
         ext['pose_limits'] = dict(SR1_safe=checks.get('SR1_safe'), real=dict(gape_deg=checks.get('real_gape_deg'), flare_deg=checks.get('real_flare_deg')),
                                   source='creature_maker check (SR1 stylized range: largest amplitude with no crossing, fold or crush), measured on the cage with pose.py deformers, NOT on the exported 10-bone skin: treat body limits as upper bounds')
-    return dict(model=M, swim=swim, breathe=breathe, swim_fps=fps, breathe_fps=fpsb, extras=ext, loop_err=loop_err)
+    return dict(model=M, swim=swim, breathe=breathe, swim_fps=fps, breathe_fps=fpsb, extras=ext, loop_err=loop_err_all)

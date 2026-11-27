@@ -18,7 +18,7 @@ validator, P11 silhouette against the ceiling frame (info), and the export stage
   EX3 every cavity and gill face is on the 'interior' material, and every LOD keeps interior faces (the mouth never turns see-through)
   EX4 clips swim_loop, breathe_loop, gape, flare exist; swim_loop closes (last frame = first within 1e-4 BL)
   EX5 collision: at least 3 hulls (a body that bends), >= 99 % of the form's inside covered, hull volume <= 1.3 x form volume
-  EX6 the swim settings ride in the glTF (rig node extras alien_ocean.swim: envelope, wavelength, beat law, clips)
+  EX6 the swim settings ride in the glTF (rig node extras alien_ocean.swim: envelope with phase, envelopes at >= 2 speeds, wavelength, beat law, clips)
 """
 import json, os, sys, math, copy, hashlib, subprocess
 from collections import Counter, defaultdict, deque
@@ -245,7 +245,8 @@ def ex_checks(out, st):
         sw = next((n['extras']['alien_ocean']['swim'] for n in js.get('nodes', []) if n.get('name') == 'rig' and 'alien_ocean' in n.get('extras', {})), None)
     elif 'swim_extras' in st: sw = st['swim_extras']
     need = ('wave', 'beat_law', 'clips')
-    R['EX6_pass'] = bool(sw) and all(k in sw for k in need) and bool(sw['wave'].get('amplitude_envelope_BL')) and bool(sw['wave'].get('lam_BL'))
+    R['EX6_pass'] = bool(sw) and all(k in sw for k in need) and bool(sw['wave'].get('amplitude_envelope_BL')) and bool(sw['wave'].get('lam_BL')) \
+        and len(sw['wave'].get('envelopes_by_speed') or []) >= 2 and all(len(r) == 3 for r in sw['wave']['amplitude_envelope_BL'])
     return R
 
 
@@ -287,7 +288,7 @@ def planted(C0, V0, VN0, form, rec):
                 interior_faces=10, lods=dict(LOD1=dict(tris=1, interior_tris=5), LOD2=dict(tris=1, interior_tris=2)),
                 clips=dict(swim_loop={}, breathe_loop={}, gape={}, flare={}), swim_loop_closure_BL=0.0,
                 collision=dict(hulls=5, coverage=1.0, hull_over_form_volume=1.2),
-                swim_extras=dict(wave=dict(amplitude_envelope_BL=[[0, 0.02]], lam_BL=1.0), beat_law={}, clips={}))
+                swim_extras=dict(wave=dict(amplitude_envelope_BL=[[0, 0.02, 0.0]], lam_BL=1.0, envelopes_by_speed=[{}, {}]), beat_law={}, clips={}))
     ex = lambda **kw: ex_checks('/nonexistent', {**good, **kw})
     PL['EX planted baseline passes'] = all(ex()[k] for k in ('EX1_pass', 'EX2_pass', 'EX3_pass', 'EX4_pass', 'EX5_pass', 'EX6_pass'))
     PL['EX1 (jaw skinned off the stress pose by 0.5 % SL)'] = not ex(EX1_gape_max_err_pctSL=0.5)['EX1_pass']
@@ -296,6 +297,7 @@ def planted(C0, V0, VN0, form, rec):
     PL['EX4 (swim loop does not close)'] = not ex(swim_loop_closure_BL=0.01)['EX4_pass']
     PL['EX5 (one rigid hull for a bending body)'] = not ex(collision=dict(hulls=1, coverage=1.0, hull_over_form_volume=1.1))['EX5_pass']
     PL['EX6 (no swim settings in the glTF)'] = not ex(swim_extras=None)['EX6_pass']
+    PL['EX6 (one speed only, no envelopes to blend)'] = not ex(swim_extras=dict(wave=dict(amplitude_envelope_BL=[[0, 0.02, 0.0]], lam_BL=1.0, envelopes_by_speed=[{}]), beat_law={}, clips={}))['EX6_pass']
     return PL
 
 
