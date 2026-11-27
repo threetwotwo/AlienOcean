@@ -1,5 +1,13 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): the moons' night face
+- Engine: Sky 0.2.1. The rest of MOON_HLSL is ported: at night the face is scaled so that its highlands sit at
+  MoonCap 3 (in exposed units, so the maria keep their contrast), it takes the night tint (MoonBlue 0.2, MoonTint
+  mixed 0.5), and it keeps MoonSat 0.5 of its colour. NightCut 0 is wired. The moon's day colour is now Unreal's
+  (planck(moon) / planck(sun) at luminance 1), replacing a 6500 K-white blackbody fit. Before this, the full Moon B
+  clipped to a white disc under the night eye. Now it reads as a pale blue-white face with its maria. Day is unchanged
+  (the cap only lowers).
+
 ## 0.6.0-dev (28 Nov 2026): the Unreal night eye
 - Engine: WorldRoot.apply now has sun_v184's night eye (exposure()): night_weight (0 at 1000 lux, 1 at 1 lux), the
   exposure limits (NIGHT_SHUT -3.25, NIGHT_OPEN -4.75, BRIGHTEN_STOPS 1.5), night_key_stops (Krawczyk key) plus
