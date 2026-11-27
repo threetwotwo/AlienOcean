@@ -17,8 +17,9 @@ of the JavaScript.
 | Clock | `SkyClock`: game time, sun and moon directions, tide inputs | core/world/sky_clock.gd (SkyClock, M30) | same |
 | InputSource | one `InputPacket` per tick (core/m01_input/input_packet.gd) | adapters/godot/input_reader.gd | scripted packets in tests |
 
-In the running game adapters/godot/world_root.gd (WorldRoot) owns the shared instances: `.clock`, `.water`,
-`.exposure` (core/world/water_optics.gd), `.streamer`. game_root adds it and hands it the camera.
+In the running game adapters/godot/world_root.gd (WorldRoot) owns the shared instances: `.clock` (SkyClock),
+`.state` (its last sky_state), `.water` (LagoonWaterField), `.optics` (WaterOptics), `.exposure` (buffer units per nit),
+`.streamer` (later). game_root adds it, calls `attach_camera(cam)`, and calls `apply(cam_y)` when the clock moves.
 
 Cores take these as a Dictionary of Callables (`env`) or as the object itself. A new service gets a row here before
 any module uses it.
