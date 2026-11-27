@@ -155,8 +155,9 @@ def self_intersections(V, T):
     return int(hit.sum()), list(zip(a[hit].tolist(), b[hit].tolist()))
 
 
-def stress(C, V, rec, gape_steps=(0, 10, 20, 30), flare_steps=(0, 10, 20), jaw_w=None):
-    """returns per step: crossing triangle pairs (new versus rest), flipped faces, eye rim drift; and the pass flags."""
+def stress(C, V, rec, gape_steps=None, flare_steps=(0, 10, 20), jaw_w=None):
+    """gape steps run to the record's real gape (jaw.linkage.gape, DEFAULT 30) in 10 deg steps. Returns per step: crossing triangle pairs (new versus rest), flipped faces, eye rim drift; and the pass flags."""
+    if gape_steps is None: g = rec.get('gape_deg', 30.0); gape_steps = sorted(set(list(range(0, int(g), 10)) + [g]))
     T = triangles(C['faces']); n0, p0 = self_intersections(V, T); rest = set(map(tuple, p0))
     def new_pairs(P): return len(set(map(tuple, self_intersections(P, T)[1])) - rest)     # a pair fixed elsewhere hides nothing
     def normals(P):
@@ -186,8 +187,14 @@ def stress(C, V, rec, gape_steps=(0, 10, 20, 30), flare_steps=(0, 10, 20), jaw_w
 # stylized art direction knows the safe range per species, and a rule change that shrinks it shows up on the board.
 # Amplitude ladders and targets are DEFAULTS of the test (cartoon-scale), not record values. A step fails on a new
 # crossing pair, a new fold, or a crush (a skin triangle squeezed under CRUSH of its rest area: it pinches on screen).
-RANGE = dict(gape=(5, 70), flare=(5, 45), bend=(15, 330), wave=(10, 150), arch=(15, 240), twist=(30, 360), combo=(10, 150))
+RANGE = dict(gape=(5, 65), flare=(5, 45), bend=(15, 330), wave=(10, 150), arch=(15, 240), twist=(30, 360), combo=(10, 150))
 CRUSH = 0.1
+GAPE_HEADROOM, GAPE_MIN, GAPE_MAX = 1.3, 45, 65     # stylized gape target: 1.3 x the record gape, kept within 45..65 deg
+
+
+def gape_target(rec): return float(np.clip(GAPE_HEADROOM * rec.get('gape_deg', 30.0), GAPE_MIN, GAPE_MAX))
+
+
 TARGET = dict(gape=45, flare=30, bend=90, wave=45, arch=45, twist=90, combo=50)
 UNIT = dict(gape='deg', flare='deg', bend='deg tail heading', wave='deg peak heading', arch='deg tail heading',
             twist='deg roll at tail', combo='% of every target at once')
@@ -250,7 +257,7 @@ def range_sweep(C, V, rec, jaw_w=None, only=None):
         if name == 'arch': return body_pose(V, x0, xend, lambda u: r * u, 'y', yc)
         if name == 'twist': return twist(V, x0, xend, a, yc)
         f = a / 100.0                                                # combo: every pose at once, a fraction of its target
-        P = gape(V, wj, O['jaw_joint'], f * TARGET['gape']); P = flare(P, wc, O['opercle_hinge'], f * TARGET['flare'], zh)
+        P = gape(V, wj, O['jaw_joint'], f * gape_target(rec)); P = flare(P, wc, O['opercle_hinge'], f * TARGET['flare'], zh)
         rw = np.radians(f * TARGET['wave'])
         return body_pose(P, x0, xend, lambda u: rw * np.sin(2 * np.pi * u), 'z')
     out = {}
@@ -262,5 +269,6 @@ def range_sweep(C, V, rec, jaw_w=None, only=None):
             sq = float((A[big] / A0[big]).min())
             if new or folds or sq < CRUSH: fail = dict(at=a, new_crossings=new, new_folds=folds, squash=round(sq, 3)); break
             clean = a; squash = min(squash, sq)
-        out[name] = dict(safe=clean, max=mx, target=TARGET[name], unit=UNIT[name], first_fail=fail, worst_squash=round(squash, 3))
+        tg = gape_target(rec) if name == 'gape' else TARGET[name]
+        out[name] = dict(safe=clean, max=mx, target=tg, unit=UNIT[name], first_fail=fail, worst_squash=round(squash, 3))
     return out

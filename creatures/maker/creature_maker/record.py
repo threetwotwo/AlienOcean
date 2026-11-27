@@ -86,6 +86,10 @@ def adapt(path, style=None):
     else:
         top_ = max(preop, key=lambda p: p[1]); out['opercle_hinge'] = [float(top_[0]), float(top_[1])]
         DEFAULTS.append(dict(input='skeleton.gills.opercle.hinge', source='DEFAULT', value='top of the preopercle margin'))
+    gp = get(R, 'jaw.linkage.gape', None, need=False)
+    if gp is not None: out['gape_deg'] = float(gp); P('real gape (deg)', 'record.jaw.linkage.gape')
+    else:
+        out['gape_deg'] = 30.0; DEFAULTS.append(dict(input='jaw.linkage.gape', source='DEFAULT', value=30))
     M = R['skeleton']['median']; fins = {}
     med = []
     for key, top in (('d1', True), ('d2', True), ('an', False)):
