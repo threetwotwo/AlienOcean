@@ -5,6 +5,12 @@ Entries 0.1.0 to 0.5.0 were filed on 27 Nov 2026 from the audit log, memory inde
 day the milestone was reached.
 
 ## [Unreleased]
+- Fish schools in Godot (engine/godot/core/m31_school, adapters/godot/school_node.gd): the Nov 1 paper's numpy rules
+  ("Fish Schools at Sixty", school.py "ao") ported step for step and golden-checked; per-species behaviour records
+  keyed by the maker's species id; FishSchool node thinks at 30 Hz on a worker thread and draws with MultiMesh LODs;
+  rock guard, calm reaction to the girl, startle wave on a rush. Pass checks S1-S10 in PASS.md, stress harness with
+  random monkey runs and a planted fault (tests/run_school.sh). Stand-in fish mesh and swim law until the maker's
+  trevally lands. Supersedes the parked Unreal school lab (schools/, schoollab v1-v87) as the live school system.
 - Creature maker moves into the repo as stage modules (creatures/maker/, tool version 0.3.0-dev): record, form, chart,
   cage features (template, eye, mouth, gill, finish), UV, maps, fins, Blender export, checks, board. Output is
   byte-identical to the last fish-restart proof script. Real openings: mouth, throat and both gill passages are topology

@@ -87,13 +87,20 @@ func _ready() -> void:
 	_take_snapshot(); _take_snapshot()
 	_bank.resize(n)
 
-## Fish spawned inside rock (the school's start cloud overlapping a reef) start at home instead, a little apart.
+## Fish spawned behind rock (the school's start cloud overlapping a reef) move to free spots of the cloud (seeded).
 func _spawn_outside_rock() -> void:
 	if not is_inside_tree(): return
+	var r := RandomNumberGenerator.new(); r.seed = seed_ * 7919 + 17
 	for i in sim.N:
 		var wp: Vector3 = sim.origin + sim.x[i] * sim.bl
-		if not segment_hit(home, wp).is_empty():
-			sim.x[i] = Vector3(randf_range(-1, 1), randf_range(-0.3, 0.3), randf_range(-1, 1)) * 0.5
+		if segment_hit(home, wp).is_empty(): continue
+		# a fish spawned behind rock moves to a free spot of the spawn cloud (not onto home: that packs them)
+		var sp: float = sim.p.spread / 2.5
+		for _try in 32:
+			var q := Vector3(r.randf_range(-1, 1), r.randf_range(-0.3, 0.3), r.randf_range(-1, 1)) * sp * 2.0
+			if segment_hit(home, sim.origin + q * sim.bl).is_empty():
+				sim.x[i] = q
+				break
 	sim.x_prev = sim.x.duplicate()
 
 func env() -> Dictionary:

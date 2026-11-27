@@ -31,7 +31,7 @@ const DEFAULTS := {
 	"pred_R": 10.0,          # BL: predator detection radius (school.py experiments)
 	"burst_v": 8.0, "burst_turn_deg": 900.0, "startle_k": 1.0,
 	"pitch_max_deg": 50.0,   # schoollab v46
-	"no_overlap": true, "overlap": 0.3,
+	"no_overlap": true, "overlap": 0.36,   # BL; above the 0.3 BL clump line of PASS S5 so a pressed crowd sits outside it
 	"school_size": 120, "bl_m_standin": 0.2,
 }
 

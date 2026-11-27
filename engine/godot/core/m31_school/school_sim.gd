@@ -17,7 +17,10 @@
 ##   D4 rocks are the world's own surfaces (env.nearest_surface ahead of the fish + a swept-segment guard), not spheres
 ##   D5 calm and scared personal space differ (behaviour v3: 0.8 vs 0.48 BL) and the girl is perceived calmly (M08)
 ##   D6 an actor's push also changes speed (Katz split) and urgency raises the swim speed (escape swim, flee_v);
-##      no fish ends a step inside the girl's keep-out sphere; a touch startles
+##      no fish ends a step inside the girl's keep-out sphere; a touch startles; a fast mover on a collision course
+##      inside the flight zone startles (behaviour v18 senseThreat), as does a short time to contact
+##   D7 the overlap guard separates every close pair after the move, not only each fish's nearest (overlap_pairs;
+##      golden traces turn it off to match school.py)
 extends RefCounted
 
 const Rng := preload("res://core/m31_school/school_rng.gd")
@@ -26,6 +29,7 @@ const LAT_S := 2.0 / 30.0       # visual startle latency, two 30 Hz frames
 const REFRACTORY := 3.0
 
 # ---------------------------------------------------------------- parameters (BL, BL/s, s, rad); see school_species.gd
+const CLOSE_MAX := 12          # close neighbours kept per fish for the pair separation (D7)
 var p: Dictionary = {}
 var N := 0
 var bl := 0.2                   # metres per body length
@@ -104,6 +108,7 @@ func setup(params: Dictionary, n: int, seed_: int, body_m: float, origin_m: Vect
 		_floor_y[i] = -INF
 	x_prev = x.duplicate()
 	assert(p.look_R >= p.env_period * p.burst_v * dt, "look_R must cover a burst between world queries")
+	assert(2.0 * p.overlap <= p.grid_cell, "D7 close pairs are collected from grid ring 1 (d < grid_cell)")
 
 ## Overwrite the state (golden traces): arrays in BL / BL/s.
 func load_state(xs: Array, es: Array, vs: Array, Ls: Array, v0s: Array, ph: Array) -> void:
@@ -172,6 +177,10 @@ func step(env: Dictionary = {}) -> void:
 	var trig := PackedByteArray(); trig.resize(N)
 	var nearest_j := PackedInt32Array(); nearest_j.resize(N)
 	var nearest_d := PackedFloat64Array(); nearest_d.resize(N)
+	var pairs_on: bool = p.get("overlap_pairs", true)
+	var close_j := PackedInt32Array(); close_j.resize(N * CLOSE_MAX if pairs_on else 0)
+	var close_n := PackedInt32Array(); close_n.resize(N)
+	var close_d := PackedFloat64Array(); close_d.resize(N * CLOSE_MAX if pairs_on else 0)
 	var cs: float = p.grid_cell
 	var inv := 1.0 / cs
 	var rmax := int(ceil(p.search_R / cs))
@@ -202,6 +211,15 @@ func step(env: Dictionary = {}) -> void:
 							var d := rv.length()
 							if d < nd:
 								nd = d; nj = j
+							if pairs_on and d < 2.0 * p.overlap:   # wide: pairs that close up during the move; keep the nearest
+								var b := i * CLOSE_MAX
+								var c := close_n[i]
+								if c < CLOSE_MAX or d < close_d[b + CLOSE_MAX - 1]:
+									var q3 := c if c < CLOSE_MAX else CLOSE_MAX - 1
+									while q3 > 0 and close_d[b + q3 - 1] > d:
+										close_d[b + q3] = close_d[b + q3 - 1]; close_j[b + q3] = close_j[b + q3 - 1]; q3 -= 1
+									close_d[b + q3] = d; close_j[b + q3] = j
+									if c < CLOSE_MAX: close_n[i] = c + 1
 							if d > p.search_R: continue
 							if ei.dot(rv) < cosfov * d: continue      # blind cone behind
 							if cnt < kk:
@@ -318,6 +336,8 @@ func step(env: Dictionary = {}) -> void:
 			var ov2 := xi - wp
 			var dist2 := ov2.length()
 			var nrm := _wall_n[i] if ov2.dot(_wall_n[i]) >= 0.0 or dist2 < 1e-6 else ov2 / dist2
+			if nrm == _wall_n[i]:
+				dist2 = maxf(ov2.dot(nrm), 0.0)    # the fish's own distance from the face (the cached point is ahead)
 			var push2: Vector3 = nrm * (exp(-maxf(dist2 - p.rock_clear, 0.0) / p.rock_fade) * p.rock_push)
 			Si += push2 - ei * push2.dot(ei)
 			dvv[i] += p.k_speed * push2.dot(ei)      # D4: heading into rock slows the fish (Katz split, as for actors)
@@ -330,7 +350,6 @@ func step(env: Dictionary = {}) -> void:
 		var direct := false
 		var flee := Vector3.ZERO
 		var flee_v := 0.0
-		var keep_out := []
 		for a in actors:
 			var ap: Vector3 = _closest_on_actor(a, xi)
 			var av: Vector3 = a.vel / bl
@@ -341,10 +360,13 @@ func step(env: Dictionary = {}) -> void:
 			if dp >= R: continue
 			var ph := av.normalized() if av.length() > 1e-6 else -pv.normalized()
 			var side := pv - ph * pv.dot(ph)
-			side = side.normalized() if side.length() > 1e-6 else ei.cross(Vector3.UP).normalized()
+			if side.length() <= 1e-6:      # she is still or the fish is on her line: any side square to pv (never toward her)
+				side = ei.cross(Vector3.UP)
+				side -= pv * (side.dot(pv) / maxf(pv.length_squared(), 1e-12))
+			side = side.normalized() if side.length() > 1e-6 else Vector3.ZERO
 			var fv := (pv.normalized() * 0.6 + side * 0.8).normalized()
 			var gain := 1.0 - dp / R
-			var closing := maxf(-av.dot(pv / maxf(dp, 1e-6)), 0.0)    # BL/s toward this fish
+			var closing := maxf(av.dot(pv / maxf(dp, 1e-6)), 0.0)     # BL/s toward this fish (pv points from her to the fish)
 			var F := Vector3.ZERO
 			var ra: float = a.get("radius", 0.0) / bl
 			if is_pred:
@@ -357,7 +379,16 @@ func step(env: Dictionary = {}) -> void:
 				F = fv * (p.calm_push * urg)
 				# startle by time to contact (behaviour v1/v4: look ahead by the closing speed, not a fixed radius)
 				var ttc := (dp - ra) / maxf(closing, 1e-6)
-				if (closing > p.rush_speed and ttc < p.rush_ttc) or dp < ra + p.touch_R:
+				# or she is on a collision course inside the flight zone and coming fast (behaviour v18 brain.js
+				# senseThreat: predicted miss distance from the relative motion, the mover's own speed toward the fish)
+				var rv: Vector3 = av - ei * v[i]
+				var rr := rv.length_squared()
+				var course := false
+				if rr > 1e-4:
+					var tc := pv.dot(rv) / rr              # her offset from the fish is -pv, closing at rv
+					var miss := (rv * tc - pv).length()
+					course = tc > 0.0 and tc < maxf(2.5, 1.2 * R / sqrt(rr)) and miss < ra + a.get("half_len", 0.0) / bl * 0.5 + 0.3
+				if (closing > p.rush_speed and (ttc < p.rush_ttc or course)) or (dp < ra + p.touch_R and closing > 0.0):     # a touch she moves into (not fish parked on her keep-out)
 					direct = true; flee = fv
 			# Katz split for the actor's push too: the sideways part turns, the along-heading part changes speed;
 			# and a fish swims away faster (an escape swim, not a C-start) the more urgent the threat (D6)
@@ -366,7 +397,6 @@ func step(env: Dictionary = {}) -> void:
 			var fu: float = gain * (1.0 + closing / maxf(p.v0, 0.1))
 			flee_v = maxf(flee_v, minf(p.flee_v * fu, p.flee_v))
 			if fu > 0.5: t_alert[i] = t      # a fish that had to flee keeps the alarm too: it seeks the school after
-			keep_out.append([ap, ra + p.keep_out])
 		var refr := (t - t_on[i]) > REFRACTORY
 		if direct and refr and trig[i] == 0:
 			trig[i] = 1
@@ -412,7 +442,23 @@ func step(env: Dictionary = {}) -> void:
 	for i in N:
 		xn[i] = x[i] + (e[i] * v[i] + flow) * dt
 	var pushes := PackedVector3Array(); pushes.resize(N)
-	if p.no_overlap:
+	if p.no_overlap and pairs_on:
+		# D7: every close neighbour (not only the nearest), measured after the move, each pair shares the gap; two
+		# passes. school.py's one-neighbour guard lets a crowd pressed on a rock face or the tether stay packed.
+		var xs := xn.duplicate()
+		for _pass in 2:
+			var dp := PackedVector3Array(); dp.resize(N)
+			for i in N:
+				for q in close_n[i]:
+					var j := close_j[i * CLOSE_MAX + q]
+					var away := xs[i] - xs[j]
+					var dl := away.length()
+					if dl < p.overlap and dl > 1e-9:
+						dp[i] += away / dl * ((p.overlap - dl) * 0.5)   # j moves its half when it sees i
+			for i in N:
+				xs[i] += dp[i].limit_length(0.5 * p.overlap)
+		for i in N: pushes[i] = xs[i] - xn[i]
+	elif p.no_overlap:
 		for i in N:
 			if nearest_j[i] >= 0 and nearest_d[i] < p.overlap:
 				var away := xn[i] - xn[nearest_j[i]]
@@ -427,6 +473,7 @@ func step(env: Dictionary = {}) -> void:
 	_swept.fill(0)
 	for i in N:
 		x[i] = xn[i] + pushes[i]
+		if pushes[i] != Vector3.ZERO: _swept[i] = 1      # a pair push can carry a fish past what look_R covers
 		# no fish inside the girl (D6): a fish that would end inside her keep-out sphere stays on its surface
 		for ka in aps:
 			var cpt := _closest_on_actor(ka[0], x[i])

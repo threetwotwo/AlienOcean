@@ -7,14 +7,14 @@ school lab schoollab v1-v87 (schools/). Run: `tests/run_school.sh` (all) or the 
 | ID | Check | Measure | Bar | Test |
 |---|---|---|---|---|
 | S1 | Port | GDScript step vs numpy school.py ao step (shared random stream), 60 fish, startle wave through the school | steps 1-40 worst < 0.001 BL; after: <= 10 % of fish on another branch (32-bit vs 64-bit floats), < 0.1 BL | test_golden_school.gd |
-| S2 | Same school as the paper | P, mean nearest neighbour, speed, 3 seeds, 300 fish, after 20 s | within 10 % or two seed spreads of schoollab REF (open: P 0.965, NND 0.80, 1.91 BL/s; lagoon: P 0.59, NND 1.02, 0.39 BL/s) | test_school.gd S2 |
+| S2 | Same school as the paper | P, mean nearest neighbour, speed, 3 seeds, 300 fish, after 20 s | within 10 % or two seed spreads of the reference (open: numpy school.py in the same setup, P 0.988, NND 0.833, 1.93 BL/s; lagoon: schoollab REF P 0.59, NND 1.02, 0.39 BL/s). Changed 27 Nov: schoollab's open REF (NND 0.80) is a different implementation, 4 % under school.py | test_school.gd S2 |
 | S3 | No fish through rock | fish inside any rock box, every step, trevally through a 9-rock reef and under an overhang, 60 s | 0 | S3 |
 | S4 | No explosion | NaN, speed, spread from the centre | no NaN, speed <= burst + 2 BL/s, spread < 60 BL | S3 run, S9, monkeys |
 | S5 | No clumping | min nearest neighbour; share of fish closer than 0.3 BL | min >= 0.2 BL; share <= 3 % | S3 run, S9, monkeys |
 | S6 | Cohesion | largest group linked by gaps < 3 BL | >= 85 % after the reef | S6 |
 | S7 | Frame-rate free | positions after 300 sim steps at 30 / 60 / 120 fps, threaded and main thread | worst < 0.0001 BL | S7 |
 | S8 | Calm girl (no-harm tone) | she swims through at 0.6 m/s: startled fish, gap to her body, cohesion 10 s later | <= 5 % startled; gap >= 0.9 x keep-out; >= 85 % one group | S8 |
-| S9 | Rush | she darts in at 2.5 m/s: startle share; cohesion 15 s later | >= 30 % startled (the wave), >= 85 % regrouped | S9 |
+| S9 | Rush | she darts in at 2.5 m/s, 5 seeds: startle share; cohesion 15 s later | median >= 30 % startled (the wave), every seed >= 85 % regrouped | S9 |
 | S10 | Cost (cloud CPU) | worker step, main-thread ms a frame, 120 fish | step <= 6 ms (a 30 Hz step has 33 ms on its worker); main mean <= 0.8 ms, p95 <= 1.5 ms | S10 |
 | Planted fault | swept guard and rock push off | S3 must FAIL | caught | --fault |
 | Monkeys | random reefs, species, sizes, actor paths, 30/60/120 fps, threaded or not | S3-S5 every step | all pass | --monkey N |

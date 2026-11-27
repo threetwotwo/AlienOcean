@@ -11,6 +11,8 @@ const Species := preload("res://core/m31_school/school_species.gd")
 
 var out_path := ""
 var monkey_runs := 0
+var monkey_from := 0
+var diag := false
 var monkey_secs := 40.0
 var fault := false
 var only := ""
@@ -28,6 +30,8 @@ func _initialize() -> void:
 			"--monkey-secs": monkey_secs = float(a[i + 1])
 			"--fault": fault = true
 			"--only": only = a[i + 1]
+			"--monkey-from": monkey_from = int(a[i + 1])
+			"--diag": diag = true
 	Engine.physics_ticks_per_second = 60
 	process_frame.connect(_run, CONNECT_ONE_SHOT)
 
@@ -102,6 +106,7 @@ func _run_school(s: FishSchool, secs: float, dt: float, actor_fn = null, watch :
 			var m: Dictionary = sim.metrics()
 			rec.nnd_min = minf(rec.nnd_min, m.nnd_min)
 			rec.close_max = maxf(rec.close_max, m.close)
+			if diag and m.close > 0.03: _diag_close(sim, actor_fn.call(sim.t - t0) if actor_fn != null else [])
 			if watch.get("series", false):
 				rec.series.append([snappedf(sim.t - t0, 0.01), snappedf(m.P, 0.001), snappedf(m.nnd_mean, 0.001), st, snappedf(sim.largest_group(watch.get("link", 3.0)), 0.001)])
 	rec["step_ms"] = rec.step_ms_sum / maxf(rec.steps, 1)
@@ -110,6 +115,28 @@ func _run_school(s: FishSchool, secs: float, dt: float, actor_fn = null, watch :
 	rec["main_ms_mean"] = (ml.reduce(func(a, b): return a + b, 0.0) / ml.size()) if ml.size() > 0 else 0.0
 	rec.erase("main_list")
 	return rec
+
+## Where the crowded fish are: near the girl, near rock, startled, or in open water.
+func _diag_close(sim, actors) -> void:
+	var drs := []; var sw := 0
+	var near_actor := 0; var near_rock := 0; var startled := 0; var open := 0; var n := 0
+	for i in sim.N:
+		var m := INF
+		for j in sim.N:
+			if j != i: m = minf(m, sim.x[i].distance_to(sim.x[j]))
+		if m >= 0.3: continue
+		n += 1
+		var wp: Vector3 = sim.origin + sim.x[i] * sim.bl
+		var da := INF
+		for a in actors: da = minf(da, (wp - a.pos).length() / sim.bl)
+		var dr: float = sim.x[i].distance_to(sim._wall_pt[i]) if sim._wall_pt[i].is_finite() else INF
+		if da < 3.0: near_actor += 1
+		elif dr < 1.5:
+			near_rock += 1
+			drs.append(snappedf(dr, 0.01)); sw += sim._swept[i]
+		elif sim.s[i] > 0.5: startled += 1
+		else: open += 1
+	print("DIAG t=%.1f close=%d near_actor=%d near_rock=%d startled=%d open=%d swept=%d hits=%d dr=%s" % [sim.t, n, near_actor, near_rock, startled, open, sw, sim.hits, str(drs.slice(0, 8))])
 
 func _invariants(rec: Dictionary, p: Dictionary) -> Dictionary:
 	var ok_rock: bool = rec.inside == 0
@@ -125,7 +152,10 @@ func _add(id: String, name: String, ok: bool, detail: Dictionary) -> void:
 func _run() -> void:
 	# S2: agreement with the paper's numbers (schoollab REF, its I3 tolerance: 10 % or two seed spreads)
 	if _want("S2"):
-		var REF := {"open": {"P": [0.9652, 0.013], "nnd": [0.7986, 0.0028], "speed": [1.9105, 0.0014], "N": 300, "species": "open_scad"},
+		# open: numpy school.py itself (the code ported, S1), same start (15 BL over the floor, band 3-40 BL), seeds 1-3,
+		# 20 s warm + 10 s: P 0.988, NND 0.833, 1.929 BL/s (27 Nov). schoollab's Unreal REF (P 0.965, NND 0.80) was a
+		# different implementation and sits 4 % under school.py on NND.
+		var REF := {"open": {"P": [0.988, 0.0015], "nnd": [0.833, 0.005], "speed": [1.929, 0.009], "N": 300, "species": "open_scad"},
 			"lagoon": {"P": [0.587, 0.0896], "nnd": [1.0229, 0.0363], "speed": [0.3917, 0.0082], "N": 300, "species": "lagoon"}}
 		for preset in ["open", "lagoon"]:
 			var acc := {"P": 0.0, "nnd": 0.0, "speed": 0.0}
@@ -150,7 +180,7 @@ func _run() -> void:
 				var tol := maxf(0.10 * ref[0], 2.0 * ref[1])
 				var good: bool = absf(acc[key] - ref[0]) <= tol
 				ok = ok and good
-				det[key] = "%.3f (paper %.3f +- %.3f)" % [acc[key], ref[0], tol]
+				det[key] = "%.3f (ref %.3f +- %.3f)" % [acc[key], ref[0], tol]
 			_add("S2", "agreement, %s preset, 3 seeds" % preset, ok, det)
 	# S3-S6: a reef of rocks across the school's path, open school roaming through
 	if _want("S3") or _want("S4") or _want("S5") or _want("S6"):
@@ -222,20 +252,27 @@ func _run() -> void:
 			{"startled_max": startled, "min_gap_m": snappedf(min_gap, 0.001), "keep_out_m": snappedf(s.sim.p.keep_out * bl, 0.001), "largest_group_after_10s": lg})
 	# S9: a rush: the startle wave crosses the school, then the alarm brings it back together
 	if _want("S9"):
-		_new_world(); await _settle_physics()
-		var s := _school("trevally", 160, 5, Vector3(0, -8, 0), true)
-		await _run_school(s, 10.0, 1.0 / 30.0)
-		var c: Vector3 = s.sim.metrics().centre_m
-		var rush := func(tt: float) -> Array:
-			if tt > 3.0: return []
-			return [{"pos": c + Vector3(-4.0 + 2.5 * tt, 0, 0), "vel": Vector3(2.5, 0, 0), "radius": 0.25, "axis": Vector3.RIGHT, "half_len": 0.55}]
-		var rec := await _run_school(s, 3.0, 1.0 / 30.0, rush)
-		var hit_share: float = float(rec.startled_max) / s.sim.N
-		var rec2 := await _run_school(s, 15.0, 1.0 / 30.0, null, {"series": true, "link": 3.0})
-		var lg: float = s.sim.largest_group(3.0)
-		var inv := _invariants(rec, s.sim.p)
-		_add("S9", "rush (2.5 m/s): startle wave reaches the school, regroups within 15 s", hit_share >= 0.3 and lg >= 0.85 and inv.S4 and inv.S5,
-			{"startled_share_max": snappedf(hit_share, 0.01), "largest_group_15s": lg, "nnd_min": snappedf(minf(rec.nnd_min, rec2.nnd_min), 0.001)})
+		# the cascade is random: five seeds, judged on the median startle share and the worst regroup
+		var shares := []; var groups := []; var nmin := INF; var inv_ok := true
+		for sd in [5, 6, 7, 8, 9]:
+			_new_world(); await _settle_physics()
+			var s := _school("trevally", 160, sd, Vector3(0, -8, 0), true)
+			await _run_school(s, 10.0, 1.0 / 30.0)
+			var c: Vector3 = s.sim.metrics().centre_m
+			var rush := func(tt: float) -> Array:
+				if tt > 3.0: return []
+				return [{"pos": c + Vector3(-4.0 + 2.5 * tt, 0, 0), "vel": Vector3(2.5, 0, 0), "radius": 0.25, "axis": Vector3.RIGHT, "half_len": 0.55}]
+			var rec := await _run_school(s, 3.0, 1.0 / 30.0, rush)
+			shares.append(snappedf(float(rec.startled_max) / s.sim.N, 0.01))
+			var rec2 := await _run_school(s, 15.0, 1.0 / 30.0)
+			groups.append(snappedf(s.sim.largest_group(3.0), 0.01))
+			nmin = minf(nmin, minf(rec.nnd_min, rec2.nnd_min))
+			var inv := _invariants(rec, s.sim.p)
+			inv_ok = inv_ok and inv.S4 and inv.S5
+		var srt := shares.duplicate(); srt.sort()
+		var med: float = srt[2]
+		_add("S9", "rush (2.5 m/s), 5 seeds: startle wave reaches the school (median), all regroup within 15 s", med >= 0.3 and groups.min() >= 0.85 and inv_ok,
+			{"startled_share": shares, "median": med, "largest_group_15s": groups, "nnd_min": snappedf(nmin, 0.001)})
 	# S10: cost (cloud CPU; the Mac's P-cores are faster)
 	if _want("S10"):
 		_new_world(); await _settle_physics()
@@ -245,7 +282,7 @@ func _run() -> void:
 		_add("S10", "cost, 120 fish (cloud CPU): worker step <= 6 ms, main thread mean <= 0.8 ms, p95 <= 1.5 ms a frame", rec.step_ms <= 6.0 and rec.main_ms_mean <= 0.8 and rec.main_ms_p95 <= 1.5,
 			{"step_ms_mean": snappedf(rec.step_ms, 0.01), "main_ms_mean": snappedf(rec.main_ms_mean, 0.01), "main_ms_p95": snappedf(rec.main_ms_p95, 0.01), "main_ms_max": snappedf(rec.main_ms_max, 0.01)})
 	# monkey runs: random reefs, species, actor paths, frame rates; invariants S3-S5 throughout
-	for mrun in monkey_runs:
+	for mrun in range(monkey_from, monkey_from + monkey_runs):
 		rng.seed = 1000 + mrun
 		_new_world()
 		for k in rng.randi_range(4, 14):
