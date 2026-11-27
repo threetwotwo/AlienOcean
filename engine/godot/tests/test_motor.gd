@@ -76,7 +76,7 @@ func _define_cases() -> void:
 	for ang in [15.0, 30.0]:
 		_case("T1 ramp %d deg climbs" % ang, "ramp", {"angle": ang, "start": Vector3(0, 0.05, 4)}, 8.0, fwd,
 			func(r): return [r.end.y > 6.0 * sin(deg_to_rad(ang)) - 0.3, "end y %.2f" % r.end.y])
-	_case("T1 ramp 50 deg refuses", "ramp", {"angle": 50.0, "start": Vector3(0, 0.05, 4)}, 8.0, fwd,
+	_case("T1 ramp 60 deg refuses (Thalassa walks up to 56 deg)", "ramp", {"angle": 60.0, "start": Vector3(0, 0.05, 4)}, 8.0, fwd,
 		func(r): return [r.end.y < 1.0, "end y %.2f" % r.end.y])
 	for h in [0.10, 0.30]:
 		_case("T1 step %d cm climbs" % int(h * 100), "step", {"h": h, "start": Vector3(0, 0.05, 2)}, 6.0, fwd,
@@ -104,7 +104,7 @@ func _define_cases() -> void:
 		func(tt):
 			var k = _pk(Vector2(0, 1), 0.0, -0.9 if tt < 4.0 else 0.0)
 			k.ascend = tt >= 4.0
-			if tt > 9.0: k.move = Vector2.ZERO; k.ascend = false
+			if tt > 11.0: k.move = Vector2.ZERO; k.ascend = false   # Thalassa rise is diagonal (~2.4 m/s up): hold to the top
 			return k,
 		func(r): return [r.min_y < -6.0 and r.mode == "TREAD", "min y %.2f end %s" % [r.min_y, r.mode]])
 	# T4 tread under waves
@@ -188,16 +188,20 @@ func _invariants(dt: float) -> void:
 	rec.ticks += 1
 	if not rec.visited.has(m):
 		rec.visited.append(m)
-	if m != rec.last_mode and rec.last_mode != "":
+	# I5 counts changes of the real movement mode (Thalassa: ShoreWalking / Wading / Swimming); TREAD, SWIM and a
+	# breach arc are labels inside Swimming, and a held-Cross dolphin breach chain is a feature, not flicker
+	var mm: String = body.motor.mover_mode_name()
+	if mm != rec.get("last_mm", "") and rec.get("last_mm", "") != "":
 		rec.trans_times.append(t)
 		var n := 0
 		for tt in rec.trans_times:
 			if t - tt <= 1.0: n += 1
 		rec.max_trans_per_s = maxi(rec.max_trans_per_s, n)
 	rec.last_mode = m
+	rec.last_mm = mm
 	var sd: Dictionary = body.last_sense
 	if not sd.is_empty():
-		rec.ring.append("t=%.2f %s d=%.2f floor=%s blocked=%s y=%.2f vy=%.2f" % [t, m, sd.water_y - sd.feet.y, sd.on_floor, sd.get("stand_blocked", false), p.y, v.y])
+		rec.ring.append("t=%.2f %s d=%.2f floor=%s y=%.2f v=%s eye=%s tread=%.2f" % [t, m, sd.water_y - sd.feet.y, sd.on_floor, p.y, v, body.motor.swimmer.pos, body.motor.swimmer.surface_tread_blend])
 		if rec.ring.size() > 40: rec.ring.pop_front()
 	if m == "TREAD": rec.tread_ticks += 1
 	rec.min_y = minf(rec.min_y, p.y)

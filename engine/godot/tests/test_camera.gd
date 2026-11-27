@@ -3,7 +3,7 @@
 ## Invariants every tick: camera sphere never inside geometry; line of sight eye -> camera clear; no jump > 0.5 m
 ## relative to the head or
 ## > 20 deg between ticks (no cuts, ever); 1P sits on the eye; body hidden when the lens is inside the head;
-## lens at least 0.15 m off the water line. Planted fault: probe disabled -> camera goes into walls and must FAIL.
+## third-person lens at least 0.15 m off the water line (3-tick crossings allowed). Planted fault: probe disabled -> camera goes into walls and must FAIL.
 extends SceneTree
 
 const Packet := preload("res://core/m01_input/input_packet.gd")
@@ -89,7 +89,7 @@ func _monkey(seed: int) -> Callable:
 		if Vector2(p.x, p.z + 20).length() > 35:
 			# steer back with look input like a player would (never by setting the camera directly)
 			var home_yaw := atan2(p.x, p.z + 20)
-			st.look = Vector2(clampf(-angle_difference(cam.director.yaw, home_yaw) * -3.0, -2.6, 2.6), 0.0)
+			st.look = Vector2(clampf(-angle_difference(cam.yaw, home_yaw) * 3.0, -2.6, 2.6), 0.0)   # yaw -= look.x dt
 			st.k.move = Vector2(0, 1)
 		return [st.k, st.look, st.shot]
 
@@ -104,8 +104,8 @@ func _build(c: Dictionary) -> void:
 	if c.p.has("mode"): body.motor.mode = c.p.mode
 	cam = Rig.new(); world.add_child(cam)
 	cam.exclude.append(body.get_rid())
+	cam.body = body
 	if fault:
-		cam.director.radius = 0.001
 		cam.probe_enabled = false
 
 func _start_next() -> bool:
@@ -126,8 +126,8 @@ func _physics_process(dt: float) -> bool:
 	var inp: Array = cur.input.call(t)
 	var k = inp[0]
 	if inp[2] != rec.last_shot:
-		cam.director.request(inp[2]); rec.blends += 1; rec.last_shot = inp[2]
-	k.cam_yaw = cam.director.yaw; k.cam_pitch = cam.director.pitch
+		cam.request(inp[2]); rec.blends += 1; rec.last_shot = inp[2]
+	k.cam_yaw = cam.yaw; k.cam_pitch = cam.pitch
 	body.tick(dt, k, env, t)
 	t += dt
 	var eye := _eye()
@@ -144,7 +144,7 @@ func _fail(msg: String) -> void:
 
 func _check(f: Dictionary, eye: Vector3, wy: float) -> void:
 	var pos: Vector3 = f.pos
-	var rot := Vector3(f.pitch, f.yaw, 0)
+	var rot := Vector3(f.pitch, f.yaw, 0)   # view direction angles from the core
 	if rec.ticks > 0:
 		# a cut is the lens moving relative to the head: the whole rig travelling with a sprinting girl is not one
 		var j := (pos - eye).distance_to(prev_pos - prev_eye)
@@ -152,9 +152,9 @@ func _check(f: Dictionary, eye: Vector3, wy: float) -> void:
 		rec.max_jump = maxf(rec.max_jump, j); rec.max_rot = maxf(rec.max_rot, r)
 		if j > 0.5:
 			_fail("I6 jump %.2f m at t=%.2f" % [j, t])
-			if OS.get_environment("CAMDBG") != "": print("  jump t=%.2f prev %s now %s eye %s\n    dbg %s\n    prev %s" % [t, prev_pos, pos, eye, cam.director.dbg, rec.get("pd", {})])
+			if OS.get_environment("CAMDBG") != "": print("  jump t=%.2f prev %s now %s eye %s\n    dbg %s\n    prev %s" % [t, prev_pos, pos, eye, cam.last.get("arm_pull", 0.0), rec.get("pd", {})])
 		if r > 20.0: _fail("I6 turn %.1f deg at t=%.2f" % [r, t])
-	prev_pos = pos; prev_eye = eye; prev_rot = rot; rec.pd = cam.director.dbg.duplicate()
+	prev_pos = pos; prev_eye = eye; prev_rot = rot; rec.pd = {"arm": cam.last.get("arm_pull", 0.0), "blend": cam.last.get("third_person_blend", 0.0)}
 	rec.ticks += 1
 	var space: PhysicsDirectSpaceState3D = cam.get_world_3d().direct_space_state
 	var q := PhysicsShapeQueryParameters3D.new()
@@ -174,16 +174,26 @@ func _check(f: Dictionary, eye: Vector3, wy: float) -> void:
 	var d := eye.distance_to(pos)
 	if d < 0.2 and f.body_alpha > 0.0:
 		rec.alpha += 1; _fail("body visible with lens inside head at t=%.2f" % t)
-	var settled_fp: bool = (cam.director.shot == "first_person" or cam.director.shot == "observe") and f.blend >= 1.0
+	var settled_fp: bool = (cam.shot == "first_person" or cam.shot == "observe") and f.blend >= 1.0
 	if settled_fp and (wy < -1e8 or absf(eye.y - wy) > 0.4):
-		rec.fp_err = maxf(rec.fp_err, d)
-		if d > 0.03: _fail("1P lens %.3f m off the eye at t=%.2f" % [d, t])
-	if wy > -1e8 and absf(pos.y - wy) < 0.15:
-		rec.water += 1; _fail("lens %.2f m from the water line at t=%.2f" % [absf(pos.y - wy), t])
+		# (at the surface the water-line rule moves the lens off the eye on purpose)
+		# Thalassa 1P lens = the eye plus its heave / stroke bob / plunge dip (fp_pos), rigidly locked
+		var de: float = pos.distance_to(f.fp_pos)
+		rec.fp_err = maxf(rec.fp_err, de)
+		if de > 0.03: _fail("1P lens %.3f m off the eye at t=%.2f" % [de, t])
+	# the lens may touch the water line for at most 3 ticks in a row (crossing sides when the eye crosses the surface)
+	# third person only: a first-person lens at the surface bobs through the water line as in Thalassa (heave and
+	# chop near the surface); the renderer draws the meniscus there (engine thread)
+	if wy > -1e8 and absf(pos.y - wy) < 0.15 and cam.last.third_person_blend > 0.5:
+		rec.water += 1
+		if rec.water > 3: _fail("lens %.2f m from the water line over 3 ticks at t=%.2f" % [absf(pos.y - wy), t])
+		if rec.water > 3 and OS.get_environment("CAMDBG") != "" and rec.fail.size() <= 1: print("  water t=%.2f lens %s wy %.2f eye %s blend %.2f arm %.2f" % [t, pos, wy, eye, cam.last.third_person_blend, cam.last.arm_pull])
+	else:
+		rec.water = 0
 
 func _end() -> void:
 	var okk: bool = rec.fail.is_empty()
-	var detail := "%d blends, max jump %.2f m, max turn %.1f deg, 1P err %.3f m, longest occlusion %d ticks, snaps %d" % [rec.blends, rec.max_jump, rec.max_rot, rec.fp_err, rec.get("max_los", 0), cam.director.hard_snaps]
+	var detail := "%d blends, max jump %.2f m, max turn %.1f deg, 1P err %.3f m, longest occlusion %d ticks, snaps %d" % [rec.blends, rec.max_jump, rec.max_rot, rec.fp_err, rec.get("max_los", 0), cam.hard_snaps]
 	print("%s  %s  (%s)%s" % ["PASS" if okk else "FAIL", cur.name, detail, "" if okk else "  " + "; ".join(rec.fail)])
 	var p: Vector3 = cam.global_position
 	results.append({"name": cur.name, "ok": okk, "detail": detail, "end": [p.x, p.y, p.z]})

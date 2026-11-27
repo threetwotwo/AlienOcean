@@ -83,7 +83,7 @@ func _initialize() -> void:
 	we.environment = e; world.add_child(we)
 	var sun := DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-55, 35, 0); sun.light_energy = 1.4; sun.shadow_enabled = true; world.add_child(sun)
 	if scene.begins_with("cam_"):
-		rig = Rig.new(); world.add_child(rig); rig.exclude.append(body.get_rid()); rig.current = true
+		rig = Rig.new(); world.add_child(rig); rig.exclude.append(body.get_rid()); rig.body = body; rig.current = true
 	else:
 		cam = Camera3D.new(); cam.fov = 50.0; world.add_child(cam); cam.current = true
 
@@ -95,7 +95,7 @@ func _input_for(tt: float):
 		"cam_wall": k.move = Vector2.ZERO
 		_: k.move = Vector2(0, 1)
 	if rig != null:
-		k.cam_yaw = rig.director.yaw; k.cam_pitch = rig.director.pitch
+		k.cam_yaw = rig.yaw; k.cam_pitch = rig.pitch
 	return k
 
 ## camera script for the cam_ scenes: [look input, shot]
@@ -125,7 +125,7 @@ func _physics_process(dt: float) -> bool:
 	if rig != null:
 		var c := _cam_for(t, m)
 		shot = c[1]
-		rig.director.request(shot)
+		rig.request(shot)
 		var wy: float = env.water_y(p.x, p.z, t) if env.level > -999.0 else -INF
 		var f: Dictionary = rig.tick(dt, body.eye_point(), c[0], wy)
 		for mt in suit_mats: mt.albedo_color.a = f.body_alpha

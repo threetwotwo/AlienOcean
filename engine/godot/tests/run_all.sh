@@ -9,6 +9,10 @@ rc=0
 echo "== M01 input"
 "$G" --headless --fixed-fps 60 --path . --script res://tests/test_input.gd 2>&1 | grep -E "FAIL|M01" || true
 "$G" --headless --fixed-fps 60 --path . --script res://tests/test_input.gd >/dev/null 2>&1 || rc=1
+echo "== Thalassa port checks (golden traces from the v20.19 JS)"
+"$G" --headless --path . --script res://tests/test_golden_input.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_golden_input.gd >/dev/null 2>&1 || rc=1
+"$G" --headless --path . --script res://tests/test_golden_swimmer.gd 2>&1 | grep -E "PASS|FAIL|M02"; "$G" --headless --path . --script res://tests/test_golden_swimmer.gd >/dev/null 2>&1 || rc=1
+"$G" --headless --path . --script res://tests/test_golden_camera.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_golden_camera.gd >/dev/null 2>&1 || rc=1
 echo "== M29 buoyancy"
 for r in 30 60 120; do
   "$G" --headless --fixed-fps $r --path . --script res://tests/test_buoyancy.gd -- --rate $r --out "$OUT/m29_$r.json" 2>&1 | grep -E "FAIL|M29" || true
