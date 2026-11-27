@@ -1,4 +1,4 @@
-// Seabed surface 0.2.0 (engine thread). Static world pieces whose COLOR_0 is paint (floor, rocks, corals, grass).
+// Seabed surface 0.3.0 (engine thread). Static world pieces whose COLOR_0 is paint (floor, rocks, corals, grass).
 // Lit by the ported lagoon water physics (look/water_optics.gd globals): the sun's beam loses exp(-Kd z) on its
 // way down (the key light arrives pre-attenuated to water_zref; this corrects to the pixel's own depth), the
 // sky's diffuse light exp(-Ku z) from above, and the sand's upwelling from below, as in under_model.py.
@@ -16,6 +16,11 @@ global uniform float water_ek0;
 global uniform float water_zref;
 global uniform vec4 water_sand;
 
+// Better sand colour lock (SD2, Gary-approved design 14 Nov; passed in Unreal: #cbc8c2 vs lock #cdcac4): bare sand takes the
+// locked colour, darker sorted sand #c8c4bb in the paint's darker patches. Floor pieces only (sand_lock 1).
+uniform float sand_lock : hint_range(0.0, 1.0) = 0.0;
+uniform vec3 sand_c : source_color = vec3(0.804, 0.792, 0.769);    // #cdcac4
+uniform vec3 sand_d : source_color = vec3(0.784, 0.769, 0.733);    // #c8c4bb
 uniform float roughness_base : hint_range(0.0, 1.0) = 0.92;
 uniform float caustic_strength : hint_range(0.0, 2.0) = 1.0;
 uniform float caustic_scale = 0.55;      // cells per metre
@@ -39,6 +44,10 @@ void vertex() {
 }
 void fragment() {
 	ALBEDO = COLOR.rgb;
+	if (sand_lock > 0.0) {
+		float pm = clamp(dot(COLOR.rgb, vec3(0.2126, 0.7152, 0.0722)) / 0.30, 0.0, 1.0);   // the paint's own light/dark patches
+		ALBEDO = mix(COLOR.rgb, mix(sand_d, sand_c, smoothstep(0.6, 1.0, pm)), sand_lock);
+	}
 	ROUGHNESS = roughness_base;
 	float z = max(water_y - wpos.y, 0.0);
 	float H = max(water_y - water_floor_y, 0.05);
