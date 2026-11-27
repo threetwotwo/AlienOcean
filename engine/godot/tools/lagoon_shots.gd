@@ -6,7 +6,7 @@
 ## 0.3.0: the world (light, sky, exposure, water) comes from adapters/godot/world_root.gd, the same node the game uses.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/lagoon_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
 ## Env: AO_TIDE=1 (the sea follows the tide; default pinned at the mean), AO_DRESS=<world_dress/x.json> + AO_DRESS_PIECES=<dir> (an authored place built by world_dress/dress_cell.gd; its cameras become shots 09+), AO_UNDER_EV (art stops under water), AO_GLOW_K (haze strength, 2.5), AO_LIGHT_NEUTRAL=0..1 (art direction: sunlight keeps its colour on the way down), AO_DEPTH_COLOUR=1 (Unreal's depth colour give-back; AO_DEPTH_SHARE its share, default 0.25), AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_AGX_MODE=1 (raw buffer, for checks), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
-## Light net: AO_CAUS=pixel (per pixel instead of the map), AO_CAUS_T=<s> (hold the net at that second), AO_CAUS_DUMP=<file> (the map as raw float32 RGBA).
+## Light net: AO_CAUS=pixel (per pixel instead of the map), AO_CAUS=waves (the map from the 32 waves instead of the FFT sea), AO_CAUS_T=<s> (hold the net and the sea at that second), AO_CAUS_DUMP=<file> (the map as raw float32 RGBA).
 ## God rays: AO_GOD=0 turns them off (WorldRoot.god_rays), for before/after. AO_TAA=1: Godot TAA on (Unreal ran TSR; the rays' jitter is averaged).
 ## Night: the Unreal night eye (WorldRoot.apply) and the Unreal stars (look/sky_stars.gdshaderinc). Try AO_HOUR=22 (moonless), 94 (moonlit).
 ## Still to port: the surface's waves and tide (the light net and the god rays are in: look/caustics.gdshaderinc, adapters/godot/caustics_map.gd).
@@ -81,7 +81,11 @@ func _setup():
 	if OS.get_environment("AO_GOD") == "0": wr.god_rays = false   # the god rays off (before/after)
 	if OS.get_environment("AO_TAA") == "1": root.use_taa = true
 	if OS.get_environment("AO_CAUS_DUMP") != "": _caus_dump = OS.get_environment("AO_CAUS_DUMP")
-	world.add_child(wr.make_surface())
+	var sea := wr.make_surface() as SeaSurface
+	world.add_child(sea)
+	if OS.get_environment("AO_CAUS") == "waves": wr.caustics.from_sea = false   # the net from the 32 waves instead of the FFT sea (checks)
+	if OS.get_environment("AO_CAUS_T") != "":   # ... and hold the sea at the same second, so stills match run to run
+		sea.fft.hold = true; sea.fft.time_s = float(OS.get_environment("AO_CAUS_T"))
 	var dress: DressCell = null
 	if OS.get_environment("AO_DRESS") != "":   # an authored place (world_dress/<name>.json) built from its pieces (AO_DRESS_PIECES), seated on the floor
 		dress = DressCell.new(); dress.setup(OS.get_environment("AO_DRESS"), OS.get_environment("AO_DRESS_PIECES")); dress.ground_material = ground
