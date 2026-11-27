@@ -14,6 +14,9 @@ import numpy as np
 BRIDGE_DSLOPE = 0.8
 BASE_GAP = 0.10       # share of SL: the widest stretch of hidden body edge that may be bridged without a measured base point
 CORNER_DEG = 35      # a turn away from the body sharper than this, near a fin gap, is where the fin's own edge starts
+PAIRED_ROOT = ('pelvic',)   # paired fins whose root can sit on the body edge
+ROOT_NEAR = 0.015    # share of SL: a paired fin with its base this close to the edge is rooted on it
+ROOT_SPAN = 0.04     # share of SL either side of that base searched for the root stub
 CORNER_SPAN = 0.15   # share of SL from the gap end searched for that corner
 
 
@@ -111,10 +114,25 @@ def body_edge(T, fr, side, SL):
     pieces = [as_function(P, side) for P in trimmed]
     near, far = 0.015 * SL, 0.06 * SL
     base = fr.to_rec(T['fin_base'][side]) if T.get('fin_base', {}).get(side) else np.zeros((0, 2))
+    runs = []
     if len(base):
         # a base point read on the photo wins over the traced piece: inside each run of base points (no step over BASE_GAP) the
         # piece is cut out, so a piece that ran onto a fin root, spine or flap (triggerfish pelvic spine) gives way to the reads
-        b = np.sort(base[:, 0]); runs = np.split(b, np.nonzero(np.diff(b) > BASE_GAP * SL)[0] + 1); cut = []
+        b = np.sort(base[:, 0]); runs = [(r[0], r[-1]) for r in np.split(b, np.nonzero(np.diff(b) > BASE_GAP * SL)[0] + 1)]
+    allp = np.vstack(pieces); allp = allp[np.argsort(allp[:, 0])]; sg = 1 if side == 'top' else -1
+    for k in PAIRED_ROOT:
+        # a paired fin rooted on this edge (pelvic fins on the belly): the traced piece runs down the fin's root stub, so the
+        # stretch where the fin's own outline lies on or past the edge is cut and bridged like any fin gap (Fable, 27 Nov: 1-2 %
+        # SL steps at the pelvic root on butterflyfish, parrotfish, surgeonfish)
+        F = (T.get('fins') or {}).get(k) or {}
+        if not (F.get('silhouette') and F.get('base')): continue
+        bq = fr.to_rec([F['base']])[0]
+        if abs(bq[1] - np.interp(bq[0], allp[:, 0], allp[:, 1])) > ROOT_NEAR * SL: continue
+        Q = fr.to_rec(F['silhouette']); ey = np.interp(Q[:, 0], allp[:, 0], allp[:, 1])
+        on = (sg * (Q[:, 1] - ey) > -ROOT_NEAR * SL) & (np.abs(Q[:, 0] - bq[0]) < ROOT_SPAN * SL)   # the root, not a fin folded along the belly
+        if on.sum() >= 2: runs.append((Q[on, 0].min() - 0.005 * SL, Q[on, 0].max() + 0.005 * SL))
+    if runs:
+        cut = []
         for P in pieces:
             keep = np.ones(len(P), bool)
             for r in runs: keep &= ~((P[:, 0] > r[0]) & (P[:, 0] < r[-1]))

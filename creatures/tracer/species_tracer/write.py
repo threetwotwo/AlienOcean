@@ -12,7 +12,7 @@ Order (one rule for every species, no species names):
     photo, the trace and the tool version.
 """
 import copy, json, numpy as np
-from . import trace as TR, reseat as RS
+from . import trace as TR, reseat as RS, size as SZ
 
 VERSION = '0.1.0'
 ADAPT_TOL = 0.0015  # share of SL: the most a straight run between outline stations may leave the photo edge
@@ -68,6 +68,7 @@ def apply(D, T, trace_name, photo, parts=PARTS):
         E = edges[side]; u_last = min(E[-1, 0], SL)                     # each side runs as far as its own traced edge
         st = [s * SL for s in STATIONS if s * SL <= u_last - 0.005 * SL]; ends[side] = r2(st[-1])
         new = [[r2(u), r2(interp(E, u))] for u in refine(E, st, ADAPT_TOL * SL)]
+        new = [p for i, p in enumerate(new) if i == 0 or p[0] > new[i - 1][0]]     # strictly increasing u after rounding (maker PCHIP)
         # u 0: the photo edge closes to the snout landmark, but the closed lips there have height; the first station takes the
         # photo's own section at LIP_U (the lip block), so the snout is the photo's blunt lip front, not a knife point
         if new: new[0][1] = r2(interp(E, LIP_U * SL))
@@ -175,6 +176,7 @@ def apply(D, T, trace_name, photo, parts=PARTS):
     for p in sk['gills'].get('preopercle', []):
         cand = [q for q in rear if abs(q[1] - p[1]) < 0.06 * SL]
         if cand and p[0] > min(q[0] for q in cand): rep['notes'].append(f'FAULT preopercle point {p[:2]} behind the opercle margin'); break
+    SZ.apply(D, T, fr, rep)               # adult size in mm and size-scaled swim timing (size.py)
     D['_trace'] = dict(tool=f'species_tracer {VERSION}', trace=trace_name, photo=photo, frame='u along snout tip -> caudal base (= SL), y up, snout (0, 0)',
                        measured=rep['measured'], estimate=rep['estimate'], notes=rep['notes'])
     return D, rep

@@ -5,7 +5,8 @@
       (check.py) before and after with planted faults, overlay picture (draft red, traced green, photo edge white) and the SIL1
       reference silhouette. Without --write the traced records go to OUT only; with --write a record that passes SIL2 (and
       catches its planted faults) replaces the record file (the old one is kept beside it in before_trace_<date>/) and its
-      silhouette goes to <records root>/silhouettes/<record name>.json. A failing record is never written.
+      silhouette goes to <records root>/silhouettes/<record name>.json. A failing record, or one with a span under a fin
+      that has no base points (status ESTIMATE), is never written.
   python -m species_tracer check MANIFEST        SIL2 on the records as they stand (exit 1 if any fails or has no trace)
 
 MANIFEST (JSON): {"records_root": DIR, "fin_bases": DIR, "rows": [{"species", "record", "trace", "photo", "box"?}]}, paths
@@ -46,13 +47,14 @@ def main(argv=None):
         T['appendages'] = FB.get('appendages') or []
         if not r.get('photo') or not os.path.exists(r['photo']):
             rows.append(dict(species=sp, status='NO_PHOTO')); bad += 1; print(sp, 'NO_PHOTO'); continue
-        mask = check.photo_mask(r['photo'], r.get('box'))
+        mask = check.photo_mask(r['photo'], r.get('box')); img = check.photo_rgb(r['photo'])
         if a.cmd == 'check':
-            h = check.silhouette_check(D, T, mask); rows.append(dict(species=sp, **h)); bad += not h['pass']; print(sp, h); continue
-        before = check.silhouette_check(D, T, mask)
+            h = check.silhouette_check(D, T, mask, img=img); rows.append(dict(h, species=sp)); bad += not h['pass']; print(sp, 'pass' if h['pass'] else h['fails']); continue
+        before = check.silhouette_check(D, T, mask, img=img)
         D2, rep = write.apply(D, T, os.path.basename(r['trace'])[:-5], r.get('photo') or T.get('photo'))
-        after = check.silhouette_check(D2, T, mask, rep['notes']); planted = check.planted(D2, T, mask)
-        ok = after['pass'] and all(planted.values()) and not FB.get('wait')
+        after = check.silhouette_check(D2, T, mask, rep['notes'], img=img); planted = check.planted(D2, T, mask)
+        est = after['estimate_spans']      # a span under a fin with no base points is a guess: never written as a traced outline
+        ok = after['pass'] and all(planted.values()) and not FB.get('wait') and not est
         ref = silhouette.reference(T, float(D2['record']['outline']['end']), r.get('photo') or T.get('photo'), f'species_tracer {write.VERSION}')
         name = os.path.basename(r['record'])[:-5]
         json.dump(D2, open(os.path.join(a.out, name + '.json'), 'w'), indent=1)
@@ -65,7 +67,7 @@ def main(argv=None):
             json.dump(D2, open(r['record'], 'w'), indent=1)
             sd = os.path.join(M['records_root'], 'silhouettes'); os.makedirs(sd, exist_ok=True)
             json.dump(ref, open(os.path.join(sd, name + '.json'), 'w'))
-        row = dict(species=sp, record=name, status='WAIT' if FB.get('wait') else ('PASS' if ok else 'FAIL'), wait=FB.get('wait'),
+        row = dict(species=sp, record=name, status='WAIT' if FB.get('wait') else ('PASS' if ok else ('ESTIMATE' if after['pass'] and est else 'FAIL')), wait=FB.get('wait'),
                    written=bool(a.write and ok), before=before, after=after, planted_caught=planted, notes=rep['notes'],
                    measured=rep['measured'], estimate=rep['estimate'])
         rows.append(row); bad += not ok

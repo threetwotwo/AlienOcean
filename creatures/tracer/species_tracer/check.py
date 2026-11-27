@@ -11,7 +11,8 @@ Along the record outline, sampled every 0.5 % SL from 1 % SL to the last traced 
  FREE  (any run longer than SIL2_RUN) where the body edge is free (no fin over it: not inside a bridged span, not where a traced pectoral or pelvic fin hangs past
        the edge, not over an appendage span read by eye such as chin barbels), the outline is within SIL2_FREE of the mask edge
  BASE  under a fin, the outline is within SIL2_BASE of every fin-base point read on the photo (perpendicular to u)
- EYE   the record eye centre is within SIL2_EYE of the photo's eye landmark
+ EYE   the record eye centre is within SIL2_EYE of the eye centre found on the image (circle transform near the landmark);
+       when none is found the eye is reported unverified
  FAULT the writer's own sanity notes (eye circle crossing the outline, cover bone order) fail the record
 Spans bridged with no base point (kind 'estimate') cannot be checked from the photo; they are listed, never passed silently.
 A record with no photo trace fails as NO_TRACE.
@@ -42,6 +43,28 @@ def photo_mask(photo, box=None):
     return m
 
 
+def photo_rgb(photo):
+    from PIL import Image
+    return np.asarray(Image.open(photo).convert('RGB'))
+
+
+def eye_fit(img, T):
+    """the eye's centre found on the image itself (circle transform on a crop around the eye landmark), photo px, or None.
+    Only the centre is used: the transform finds the eyeball or the orbit ring, so its radius is not a measurement."""
+    import cv2
+    H, W = img.shape[:2]; ex, ey, er = T['eye'][0] * W / 100, T['eye'][1] * H / 100, T['eye'][2] * W / 100
+    R = int(er * 3) + 2; x0, y0 = int(max(0, ex - R)), int(max(0, ey - R)); crop = img[y0:int(ey + R), x0:int(ex + R)]
+    if crop.size == 0: return None
+    s = max(1, int(round(120 / crop.shape[1]))); g = cv2.cvtColor(np.ascontiguousarray(crop), cv2.COLOR_RGB2GRAY)
+    g = cv2.GaussianBlur(cv2.resize(g, None, fx=s, fy=s, interpolation=cv2.INTER_CUBIC), (5, 5), 1.5)
+    cs = cv2.HoughCircles(g, cv2.HOUGH_GRADIENT, dp=1, minDist=3, param1=80, param2=12, minRadius=max(2, int(er * 0.4 * s)),
+                          maxRadius=int(er * 1.6 * s) + 1)
+    if cs is None: return None
+    c = min(cs[0][:15], key=lambda c: np.hypot(c[0] / s + x0 - ex, c[1] / s + y0 - ey))
+    cx, cy = c[0] / s + x0, c[1] / s + y0
+    return (float(cx), float(cy)) if np.hypot(cx - ex, cy - ey) < er else None
+
+
 def signed_dist(mask):
     """per pixel: distance to the mask edge, + outside, - inside (pixels)."""
     import cv2
@@ -49,7 +72,7 @@ def signed_dist(mask):
     return cv2.distanceTransform(1 - m, cv2.DIST_L2, 5) - cv2.distanceTransform(m, cv2.DIST_L2, 5)
 
 
-def silhouette_check(D, T, mask, notes=()):
+def silhouette_check(D, T, mask, notes=(), img=None):
     R = D['record']; O = R['outline']; SL = float(O['end'])
     T2 = dict(T); T2['px'] = [mask.shape[1], mask.shape[0]]; fr = TR.Frame(T2, SL); fr0 = TR.Frame(T, SL); sd = signed_dist(mask)
     br = O.get('_bridges')
@@ -95,10 +118,12 @@ def silhouette_check(D, T, mask, notes=()):
             B = fr.to_rec(fb); e = np.abs(np.interp(B[:, 0], P[:, 0], P[:, 1]) - B[:, 1]) / SL
             j = int(np.argmax(e)); worst['base'] = max(worst['base'], float(e[j]))
             if e[j] > SIL2_BASE: out['fails'].append(f'BASE {side} at u {B[j, 0] / SL:.3f} SL: {e[j]:.1%} SL off the fin-base point')
-    L = TR.landmarks(T, TR.Frame(T, SL)); e = R['skeleton']['eye']
-    if 'eye' in L:
-        out['eye_off'] = round(float(np.hypot(e['u'] - L['eye']['u'], e['y'] - L['eye']['y'])) / SL, 4)
-        if out['eye_off'] > SIL2_EYE: out['fails'].append(f'EYE centre {out["eye_off"]:.1%} SL off the photo eye')
+    e = R['skeleton']['eye']; fit = eye_fit(img, T) if img is not None and 'eye' in T else None
+    if fit is not None:                # against the eye found on the image, not the landmark the writer copied
+        Ti = dict(T); Ti['px'] = [img.shape[1], img.shape[0]]; c = TR.Frame(Ti, SL).to_rec([[fit[0] / img.shape[1] * 100, fit[1] / img.shape[0] * 100]])[0]
+        out['eye_off'] = round(float(np.hypot(e['u'] - c[0], e['y'] - c[1])) / SL, 4)
+        if out['eye_off'] > SIL2_EYE: out['fails'].append(f'EYE centre {out["eye_off"]:.1%} SL off the eye found on the photo')
+    else: out['eye_unverified'] = True
     out['fails'] += [n for n in notes if n.startswith('FAULT')]
     out.update({k: round(v, 4) for k, v in worst.items()}); out['pass'] = not out['fails']
     return out

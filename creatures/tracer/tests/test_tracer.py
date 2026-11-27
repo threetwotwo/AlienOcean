@@ -19,7 +19,7 @@ def test_draft_fails_traced_passes():
     D2, rep = write.apply(D, T, 'trevally_trace', 'test')
     h = check.silhouette_check(D2, T, MASK, rep['notes']); assert h['pass'], h
     assert 'outline.top' in rep['measured'] and D2['_trace']['tool'].startswith('species_tracer')
-    assert all(b['kind'] == 'measured' for b in D2['record']['outline']['_bridges'])
+    assert not [b for b in D2['record']['outline']['_bridges'] if b['kind'] == 'estimate']   # pelvic root: a short arc
 
 
 def test_planted_faults_caught():
@@ -66,3 +66,15 @@ def test_eye_held_inside_outline():
 def test_silhouette_reference_units():
     ref = silhouette.reference(T, SL, 'test', 'test')
     xs = [p[0] for p in ref['side']]; assert min(xs) < 0.02 and max(xs) > 1.05      # snout at 0, caudal fin past SL end
+
+
+def test_outline_u_strictly_increasing():
+    D2, _ = write.apply(D, T, 'trevally_trace', 'test')
+    for side in ('top', 'bot'):
+        u = [p[0] for p in D2['record']['outline'][side]]; assert all(b > a for a, b in zip(u, u[1:])), side
+
+
+def test_adult_size_and_swim_timing():
+    D2, rep = write.apply(D, T, 'trevally_trace', 'test'); S = D2['record']['size']; M = D2['body']['motion']
+    assert S['TL_mm'] == D['body']['L'] and 1.05 < S['TL_over_SL'] < 1.4 and abs(S['SL_mm'] - S['mm_per_unit'] * SL) < 0.5
+    assert M['U'] < 1.5 and abs(M['f'] - 0.3 * M['U'] / (2 * M['A'])) < 0.01      # a 60 cm fish cruises at fewer BL/s than the 25 cm reference
