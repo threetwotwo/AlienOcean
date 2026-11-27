@@ -3,12 +3,12 @@
 ## ceiling at the level; from above: low over the water toward the sun and away, and high over it (tile check).
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/surface_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
 ## Env as lagoon_shots, plus AO_TIDE=1 (let the tide move the level; default pinned at the mean so frames compare),
-## AO_SEA_T (the waves' clock, s; default 37.0, held), AO_SURF_SHOTS (two-character prefixes, e.g. s1,s4; AO_SHOTS
+## AO_DRESS (lagoon_shots': adds s8_arch_mirror, the key frame's arch in the ceiling), AO_SEA_T (the waves' clock, s; default 37.0, held), AO_SURF_SHOTS (two-character prefixes, e.g. s1,s4; AO_SHOTS
 ## filters lagoon_shots' own list and must stay unset here).
 extends "res://tools/lagoon_shots.gd"
 
 func _setup():
-	super._setup()
+	await super._setup()
 	if "tide_on" in wr: wr.tide_on = OS.get_environment("AO_TIDE") == "1"
 	var sea := root.find_child("FftSea", true, false)
 	if sea:
@@ -28,6 +28,13 @@ func _setup():
 		["s6_above_high", Vector3(0.0, y + 20.0, 30.0), Vector3(0.0, y, 0.0), 60.0],
 		["s7_reef_mirror", Vector3(-6.0, 1.4, 3.0), Vector3(2.0, 2.4, -12.0), 65.0],
 	]
+	for n in root.find_children("*", "Node3D", true, false):   # with AO_DRESS: the key frame's arch, mirrored in the ceiling
+		if n is DressCell:
+			var cc: Array = n.cam("key_arch")
+			var e: Vector3 = cc[0] + Vector3(0, 0.3, 0)
+			var f: Vector3 = (cc[1] - cc[0]); f.y = 0.0
+			shots.append(["s8_arch_mirror", e, e + f.normalized() * 10.0 + Vector3(0, tan(deg_to_rad(22.0)) * 10.0, 0), 70.0])
+			break
 	if OS.get_environment("AO_SURF_SHOTS") != "":
 		var keep := OS.get_environment("AO_SURF_SHOTS").split(",")
 		shots = shots.filter(func(sh): return sh[0].substr(0, 2) in keep)
@@ -44,7 +51,7 @@ func _process(d):
 				for x in range(0, ia.get_width(), 8):
 					sa += ia.get_pixel(x, y); n += 1
 					var h := ih.get_pixel(x, y)
-					if h.a > 0.5: hit += 1; hmin = minf(hmin, h.r / h.g * 100.0 - 50.0); hmax = maxf(hmax, h.r / h.g * 100.0 - 50.0)
+					if h.a > 0.5: hit += 1; hmin = minf(hmin, h.r / h.g); hmax = maxf(hmax, h.r / h.g)
 			print("FLOOR MAP ", shots[i][0], " albedo mean ", sa / n,  " height ", hmin, " .. ", hmax, " hit ", float(hit) / n)
 			var ic := ia.duplicate(); ic.convert(Image.FORMAT_RGBA8); ic.save_png(args[2].path_join("floor_albedo.png"))
 	return super._process(d)

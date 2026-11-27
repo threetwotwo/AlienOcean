@@ -6,7 +6,7 @@
 ## (layer 4) and this map's own height pass (layer 3): radiance at exposure x 1, height from the depth buffer. Re-centred on the eye
 ## (snapped) whenever it moves far enough, so it follows the eye through an open world with nothing baked or streamed.
 ## Shader globals: water_floor_albedo (sampler2D: the floor's radiance in nits, linear; alpha 0 = nothing there),
-## water_floor_height (sampler2D: world y = r / g x 100 - 50, alpha 0 = nothing there),
+## water_floor_height (sampler2D: world y = r / g, alpha 0 = nothing there),
 ## water_floor_org (vec4: centre x, centre z, size m, 1 = valid).
 class_name SeaFloorMap
 extends Node3D
