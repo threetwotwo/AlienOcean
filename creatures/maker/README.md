@@ -31,7 +31,7 @@ as a comment that says why.
 | # | Stage | Module | Reads | Writes |
 |---|---|---|---|---|
 | 1 | Record | `record.py` | native Species record (`alien-ocean/sculptor-record/1`) | adapted record in SL units, provenance rows, defaults used, input faults |
-| 2 | Form | `form.py` | adapted record | `Form`: loft + bone plates + orbit ring + mouth cleft as a signed-distance solid (bake source, snap target) |
+| 2 | Form | `form.py` | adapted record | `Form`: loft + bone plates (side: opercle, preopercle, maxilla; from below: lower-jaw rami, branchiostegal membrane) + orbit ring + mouth cleft as a signed-distance solid (bake source, snap target) |
 | 3 | Chart | `chart.py` | Form | unrolled (length, arc) chart of the loft, near-isometric, where patches are laid out |
 | 4 | Cage | `cage/` | Form, Chart, record | quad cage: vertices, tagged faces, designed-crease registers, openings |
 | 5 | UV | `uv.py` | cage | two skin islands (left above, right below at the same place: twins) at one texel density, each flattened from the built half skin: Tutte's map, then SLIM with a free border; interior island for its own texture |
@@ -49,7 +49,7 @@ as a comment that says why.
 | `template.py` | 50 rings x 36 columns evaluated on the loft; tail-root pole | denser rings at the head |
 | `eye.py` | eye hole in the template filled with 4 rings to the rim, then a tuck ring into the orbit | block = the columns within the eye margin of the rim plus one each side; rings laid out in the loft (x, theta) plane with radial spokes (border vertex to the rim point at its own angle), spaced by length on the skin; rim on the record eye circle (EY1); tuck goes down the socket axis, depth scaled to the eye and kept on its own side |
 | `mouth.py` | lip loop on the record mouth line, loops out to the shared head ring, lip roll, mouth lining, oval cavity, domed pharynx | snout chart (no snout pole); corner fan at the rictus, its spoke laid between the first loop's two neighbours of the corner; shared head ring bends round the eye (same eye margin as the eye block, measured on the skin; eye and lip margins shrink together, the ring never enters the eye); each lip column's lining runs straight in to its own point on the first oval behind the rictus (upper lip to the roof arc, lower lip to the floor arc), so the corner column is a hinge line |
-| `gill.py` | one ring bent onto the cover edge and cut into a slit (flap over body lip), flat passage to a hole in the cavity wall | passage loops match the hole loop |
+| `gill.py` | one ring bent onto the cover edge and cut into a slit (flap over body lip); where the cover has a free membrane the cut turns the corner and runs forward under the head along one column, bent onto the form's gill V; flat passage to a hole in the cavity wall | passage loops match the hole loop; the hole is planned with the slit (`gill.holes`): a slot along one cavity band, turning forward along the floor edge behind the jaw joint when the slit has a ventral leg; the leg stops two rings behind the mouth ring, at 17 slit edges (what one side of a cavity ring holds) and where the head's half-width falls under 3 % SL (DEFAULT `HW_MIN`); a leg that cannot run forward past the cavity slot it drains into is not built (long side slits on deep bodies, tube snouts: the form still carries the V); first passage row designed near the leg (the flap lining turns back under the flap) |
 | `finish.py` | one winding over skin and interior; snap onto the full form | rims, linings and the first lip loop follow their neighbours' snap; the snap ignores the form's mouth cleft; quads at a slit corner are split from the corner vertex |
 | `../mesh.py` | the mesh under construction, `relax_rings` | rings slide, never shrink across a corner |
 
@@ -63,6 +63,19 @@ one scale, the right island exactly half a texture below the left. The unrolled 
 blocks are sized; as a UV map it folded on all 28 traced records (a midline vertex written as theta 2 pi went to the
 belly on the left island only; midline faces of deep heads sheared past their neighbours; mouth loops live on another
 chart), so SLIM, which needs a fold-free start, never ran on them.
+
+### The underside of the head
+
+Two Vs show from below, both from the record:
+
+| V | Record fields | Rule |
+|---|---|---|
+| lower jaw | `jaw.dentary`, `jaw.mandibleLow` (DEFAULT: mouth tip to jaw joint on the skin; inner edge at half the width, meeting at the chin) | form plate per ramus: between the dentary line (outer) and the mandible's lower edge (inner) seen from below, under the dentary line seen from the side and at least 0.6 % SL under the mouth line (it stays under the lips), out to the jaw joint |
+| gill | `skeleton.gills.opercle.margin`, `subopercle` (down to the cover's lower corner, where it turns to run more forward than down), `interopercle` (front end = apex; DEFAULT jaw joint x), `branchiostegals.th0, dth, n` (DEFAULT -70, 9, 6) | seen from below the free edge runs from the corner to the isthmus at the apex, at a share of the head's half-width that falls evenly (a straight V on an evenly tapering head); it keeps 1.2 % SL of skin (or half the half-width) to the midline, so the two openings never meet on a keel; isthmus half-width = half-width x sin(90 + th0); a cover whose corner lies above the membrane's top ray (wider than half-width x cos(th0 + (n - 1) dth)) has no free membrane and keeps a side slit (puffers, triggerfish, filefish). The slit's ring is the one nearest the mean x of the whole free edge, ventral margin included. Form: a membrane plate with its stepped free edge on that line. Cage: the slit's ventral leg on the same line. Pose: the membrane takes the cover's weight and the flare swings it about the line from the opercle hinge to the V's apex |
+
+The branchiostegal angles are read round the section scaled to its half-width (0 = flank, -90 = ventral midline); `t0, dt, u1,
+du` place the rays inside the head and are not used. The record has no field yet for membranes joined to the isthmus (gobies,
+blennies): those get a V like the others.
 
 Designed creases are registered where they are made (`rolls`, `junctions`, `commissures` in `cage.json`), so the fold
 check can tell a designed crease from a fault.
@@ -91,7 +104,7 @@ Cage (no Blender): P2 quad share and corners, P3 manifold, P4 skin on the form, 
 under two skin faces), IC1 parts
 from the record, EY1 eye size, OP1 openings are topology (genus 2, the lips reach both gill slits through interior faces),
 OP2 interior inside the body, OP3 no fold outside designed creases, GP0 no crossing faces at rest, GP1 gape to the record's real gape
-(`jaw.linkage.gape`, DEFAULT 30) and GF1 gill flare 0-20 deg add no crossings or flipped faces and leave the eye rims in place (`pose.py`), SR1 stylized range:
+(`jaw.linkage.gape`, DEFAULT 30) and GF1 gill flare 0-20 deg (cover and branchiostegal membrane together, about the hinge-to-apex line when there is a gill V) add no crossings or flipped faces and leave the eye rims in place (`pose.py`), SR1 stylized range:
 gape, flare, body C-bend, S-wave, arch and all of them at once are each swept until the first new crossing, fold
 (neighbours turning past 90 deg) or crush (a skin triangle under 10 % of its rest area). The target is what the species
 can really do, times 1.3: the record gape (capped at 65 deg); for the body, the muscle strain limit (the inside of a bend

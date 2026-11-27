@@ -4,10 +4,10 @@ Order (each step names what it reads and writes on the builder):
   template   rings x columns on the loft                         -> B.T
   eye.blocks eye holes in the template                            -> B.blk
   mouth.plan lip loop, shared head ring iK (clamps the eye blocks) -> B.mouth
-  gill.plan  slit ring and its bend onto the cover edge           -> B.gill
+  gill.plan  slit ring and its bend onto the cover edge; ventral leg and its column bend onto the gill V -> B.gill
   grid       template vertices and body quads                     -> mesh
   eye        eye patches + orbit tucks                            -> B.eye
-  mouth      loops round the lips, cavity, pharynx dome           -> B.mouth
+  mouth      loops round the lips, cavity, pharynx dome, gill holes (gill.holes) -> B.mouth
   gill       slits + passages to the cavity holes                 -> B.gill.slits
   cap        tail-root pole                                       -> B.tail
   finish     winding, snap onto the full form                     -> V, VN
@@ -55,12 +55,14 @@ class CageBuilder:
 def commissures(B):
     """a closed slit is a lens, and its two corners are hairpins by design until the slit opens. Mouth: the rictus spokes
     through the lip roll and the first cavity rings. Gill: the two ends of the slit loop through every passage row (the
-    passage is a flat duct, like the real opercular chamber)."""
+    passage is a flat duct, like the real opercular chamber), and along a ventral leg the first passage row, where the
+    flap's lining turns back under the flap."""
     M, NT = B.mouth, B.T.NT
     out = [[int(M.CROWS[c_][jc]) for c_ in range(0, 4)] for jc in (M.jr, NT - M.jr)]
     for s in B.gill.slits:
         L_ = len(s['loop'])
         for e_ in (0, L_ // 2): out.append([int(r[e_]) for r in s['rows']])
+        if len(s['turn']) > 1: out.append(list(map(int, s['turn'])))
     return out
 
 

@@ -24,9 +24,9 @@ class Template:
 
 
 def build_grid(B):
-    """template vertices and body quads outside the feature holes. Reads B.blk, B.mouth.iK, B.mouth.XK, B.gill.ring_dx."""
+    """template vertices and body quads outside the feature holes. Reads B.blk, B.mouth.iK, B.mouth.XK, B.gill.ring_dx, B.gill.col_dth."""
     T, form, mesh = B.T, B.form, B.mesh; NU, NT, XS, TH, grid = T.NU, T.NT, T.XS, T.TH, T.grid
-    blk, iK, XK, ring_dx = B.blk, B.mouth.iK, B.mouth.XK, B.gill.ring_dx
+    blk, iK, XK, ring_dx, col_dth = B.blk, B.mouth.iK, B.mouth.XK, B.gill.ring_dx, B.gill.col_dth
 
     def in_block(i, j):
         for (i0, i1, j0, j1, sg) in blk:
@@ -37,6 +37,7 @@ def build_grid(B):
         for j, th in enumerate(TH):
             if in_block(i, j): continue
             xx = XK[j] if i == iK else x + ring_dx(i, j)
+            th = th + col_dth(i, j)                 # the gill V bends one ventral column (gill.plan_leg)
             grid[i, j] = len(mesh.verts); mesh.verts.append(form.loft_point(np.array(xx), np.array(th))); mesh.vuv.append((xx, th))
     for i in range(NU - 1):
         for j in range(NT):

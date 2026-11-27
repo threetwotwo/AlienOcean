@@ -1,7 +1,7 @@
 """Stage 2, FORM: the creature as a signed-distance solid, built only from the adapted record.
 
 Structure level 0 is the body mass (a loft of record sections). Structure level 1 is bone plates under the skin (opercle,
-preopercle, maxilla), the orbit ring and the mouth cleft. The form is never shipped: it is the bake source and the surface the
+preopercle, maxilla; from below the lower-jaw rami and the branchiostegal membrane), the orbit ring and the mouth cleft. The form is never shipped: it is the bake source and the surface the
 cage snaps to. Input: the adapted record (record.adapt). Output: a Form object (and, optionally, a dense mesh for the bake).
 """
 import numpy as np
@@ -24,6 +24,7 @@ def poly_sd2(px, py, poly):
     for i in range(len(P)):
         a, b = P[i], P[(i + 1) % len(P)]
         e = b - a; wx, wy = px - a[0], py - a[1]
+        if e @ e < 1e-18: continue                # a repeated record point
         t = np.clip((wx * e[0] + wy * e[1]) / (e @ e), 0, 1)
         dx, dy = wx - e[0] * t, wy - e[1] * t; d = np.minimum(d, dx * dx + dy * dy)
         c1 = py >= a[1]; c2 = py < b[1]; c3 = e[0] * wy > e[1] * wx
@@ -64,6 +65,7 @@ class Form:
         _xs = np.linspace(0, self.XEND, 400); self.ORBIT_LIFT = float(np.max(self.TOP(_xs) - self._TOP0(_xs)))
         # bone plates: (name, outline, thickness, free (stepped) edge curve or None, buried-side fade width, provenance)
         self.rear, self.preop = smooth_curve(CV['rear']), smooth_curve(CV['preop'])
+        self.ring_x = float(np.mean([p[0] for p in smooth_curve(CV['edge_all'])]))      # where the slit's ring goes (see record.py)
         OPERCLE = self.rear + self.preop[::-1]                                         # between preopercle margin and cover rear edge
         PREOPERCLE = self.preop + [[p[0] - 0.07, p[1]] for p in self.preop[::-1]]      # strip in front of the margin
         self.ml = ml = np.array(MO['line']); mh = MO['maxilla_h']
@@ -73,6 +75,60 @@ class Form:
             ('preopercle', PREOPERCLE, CV['step'] * 0.55, self.preop, 0.05, 'preopercle bone: record cover.preop margin'),
             ('maxilla', MAXILLA, CV['step'] * 0.6, None, 0, 'maxilla bone: record mouth.line + mouth.maxilla_h'),
         ]
+        self.VPLATES = self.ventral_plates(rec)
+
+    def ventral_plates(self, rec):
+        """plates seen from below: (name, outline in the bottom view (x, |z|), thickness, free edge (front x, |z| at x) or None, fade,
+        side-view line the plate stays under, provenance). Sets self.vedge, the gill V's free edge (None: no V)."""
+        CV, MO = self.CV, self.MO; out = []; xj, yj = rec['jaw_joint']; on = lambda x, y: 0.92 * float(self.z_on(x, y))
+        # lower jaw: each ramus lies between the dentary line (outer) and the mandible's lower edge (inner); the two meet
+        # at the chin, so from below they read as a V with the throat skin between
+        JW = rec.get('jaw') or {}; dn, lo = JW.get('dentary'), JW.get('low'); tip = self.ml[np.argmin(self.ml[:, 0])]
+        if not dn: dn = [[x, y, on(x, y)] for x, y in zip(np.linspace(tip[0] + 0.001, xj, 5), np.linspace(tip[1] - 0.004, yj, 5))]
+        dn = sorted(dn, key=lambda p: p[0])
+        if xj > dn[-1][0] + 1e-4: dn = dn + [[xj, yj, max(on(xj, yj), dn[-1][2])]]          # the ramus ends at the jaw joint
+        if not lo: lo = [[p[0], 0, 0.5 * p[2] * k / (len(dn) - 1)] for k, p in enumerate(dn)]
+        lo = sorted(lo, key=lambda p: p[0]); d_ = np.array(dn)
+        if len(dn) >= 2 and dn[-1][0] - dn[0][0] > 0.01:
+            poly = [[p[0], p[2]] for p in dn] + [[p[0], p[2]] for p in lo[::-1]]
+            # the plate keeps under the lips (two lip thicknesses below the mouth line), or the first loops round the mouth cross
+            lip = lambda x: np.interp(x, self.ml[:, 0], self.ml[:, 1] - 0.006, right=1e9)
+            out.append(('mandible', poly, CV['step'] * 0.6, None, 0, lambda x: np.minimum(np.interp(x, d_[:, 0], d_[:, 1]), lip(x)),
+                        'lower jaw rami: record jaw.dentary + jaw.mandibleLow (to the jaw joint)'))
+        # gill V: from the cover's lower corner the free edge runs straight (seen from below) to the isthmus at the apex.
+        # A cover whose corner stays above the membrane's top ray has no free membrane: a side slit only (puffers).
+        self.vedge = None
+        xc, yc = self.rear[-1]; zc = float(self.z_on(xc, yc)); xa = CV.get('apex_x'); xa = xj if xa is None else xa
+        # the fan's angles are taken round the section scaled to its half-width: |z| = half-width x cos(angle)
+        if zc <= float(self.HW(xc)) * np.cos(np.radians(CV.get('membrane_top_deg', 25))) and xa < xc - 0.03:
+            za = max(float(self.HW(xa)) * np.sin(np.radians(CV.get('isthmus_deg', 20))), self.isthmus_z(xa))
+            if za < zc:
+                self.vedge = dict(xa=xa, za=za, xc=xc, zc=zc, fa=za / float(self.HW(xa)), fc=zc / float(self.HW(xc)))
+                px, py = self.preop[int(np.argmin([p[0] for p in self.preop]))]          # under the opercle plate's lower side
+                self.vunder = [[float(min(px, xc - 1e-3)), float(py)], [float(xc), float(yc)]]
+                under = lambda x: np.minimum(np.interp(x, *zip(*self.vunder)), self.sec(np.clip(x, 0, self.XEND))[0])
+                poly = [[float(x), float(self.vedge_z(x))] for x in np.linspace(xa, xc, 16)] + [[xc, 1.0], [xa, 1.0]]
+                out.append(('branchiostegal', poly, CV['step'], (xa, self.vedge_z), 0.05, under,
+                            'interopercle + branchiostegal membrane: cover corner to the isthmus at the interopercle front; angles from branchiostegals th0, dth, n'))
+        return out
+
+    def isthmus_th(self, x, room=0.012):
+        """the angle nearest the ventral midline that still leaves `room` (SL) of skin to it: on a keeled belly a small |z|
+        lies almost on the keel, and the two openings would meet."""
+        mid = self.loft_point(np.array(x), np.array(np.pi)); lo, hi = np.pi / 2, np.pi; room = min(room, 0.5 * float(self.HW(x)))
+        for _ in range(30):
+            m = 0.5 * (lo + hi); lo, hi = (m, hi) if np.linalg.norm(self.loft_point(np.array(x), np.array(m)) - mid) > room else (lo, m)
+        return lo
+
+    def isthmus_z(self, x):
+        return float(self.loft_point(np.array(x), np.array(self.isthmus_th(x)))[2])
+
+    def vedge_z(self, x):
+        """|z| of the gill V's free edge at x, seen from below: a share of the head's half-width that falls evenly from the
+        corner to the isthmus. On an evenly tapering head that is a straight V; a straight line in z left the body where a
+        tube snout necks in (trumpetfish)."""
+        e = self.vedge; s_ = np.clip((np.asarray(x, float) - e['xa']) / (e['xc'] - e['xa']), 0, 1.2)
+        return self.HW(np.clip(x, 0, self.XEND)) * (e['fa'] + (e['fc'] - e['fa']) * s_)
 
     # ---- level 0: the loft
     def TOP(self, x):
@@ -136,6 +192,14 @@ class Form:
             plate = np.maximum(np.maximum(d0 - t, -d0 - 0.004), inside2 + (1 - side) * 0.05)
             nd = smin(d, plate, 0.0006)
             ids = np.where(nd < d - 1e-5, k + 1, ids); d = nd
+        az = np.abs(z)
+        for k, (name, poly, t0, free, fade, under, _) in enumerate(self.VPLATES):
+            t = t0
+            if free is not None:      # full thickness at the free edge, thinning away from it and running out at its front end
+                x0, ez = free; t = t0 * np.clip(1 - np.abs(az - ez(x)) / fade, 0.15, 1) * np.clip((x - x0) / (0.6 * fade), 0, 1)
+            plate = np.maximum(np.maximum(d0 - t, -d0 - 0.004), np.maximum(poly_sd2(x, az, poly), y - under(x)))
+            nd = smin(d, plate, 0.0006)
+            ids = np.where(nd < d - 1e-5, len(self.PLATES) + k + 1, ids); d = nd
         # orbit: circumorbital ring (bone) around the eye opening, a low torus in the side plane
         ex, eyy, er = self.ex, self.eyy, self.er
         ring = np.abs(np.sqrt((x - ex) ** 2 + (y - eyy) ** 2) - max(EY['orbit'], er * 1.08)) - 0.25 * (EY['orbit'] - er * 0.8 + 0.01)
@@ -149,7 +213,7 @@ class Form:
         return (d, ids) if parts else d
 
     def provenance(self):
-        return [dict(region=p[0], source=p[5]) for p in self.PLATES] + [
+        return [dict(region=p[0], source=p[5]) for p in self.PLATES] + [dict(region=p[0], source=p[6]) for p in self.VPLATES] + [
             dict(region='orbit ring', source='circumorbital bone ring: record skeleton.eye.orbitR'),
             dict(region='mouth cleft', source='gape between jaws: record mouth.line'),
             dict(region='body mass', source='record outline top/bot/hw/nUp/nLo loft')]

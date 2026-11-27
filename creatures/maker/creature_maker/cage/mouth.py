@@ -9,7 +9,7 @@ roof, lower lip to the floor, the corner column a hinge line); the pharynx ends 
 """
 import numpy as np
 from ..mesh import relax_rings
-from . import eye as eye_mod
+from . import eye as eye_mod, gill
 
 GAP, TLIP = 0.0025, 0.003          # closed-lip gap and lip thickness (SL)
 LIP_MG = 0.008                     # shared head ring: margin behind the lip (SL); the eye margin is eye.margin
@@ -161,7 +161,7 @@ def build_loops(B):
 
 def build_cavity(B):
     """lip roll, mouth lining in to the first oval, oval rings back to the pharynx, domed end; holes in the side wall where
-    the gill passages join. Writes M.CROWS, M.DOME, M.gut, M.HOLES, M.NF."""
+    the gill passages join. Writes M.CROWS, M.DOME, M.gut, M.HOLES ({side: (cells, loop)}, see gill.holes), M.NF."""
     T, form, mesh, M = B.T, B.form, B.mesh, B.mouth; NT, J = T.NT, T.J; jr, LIP3 = M.jr, M.LIP3
     ex, eyy, er = form.ex, form.eyy, form.er
     x_back = max(B.rec['gill_u'] - 0.03, M.x_r + 0.05)
@@ -239,18 +239,8 @@ def build_cavity(B):
         ph_ = k / (ND + 1) * np.pi / 2
         DOME.append([mesh.add_v(cb + (p - cb) * np.cos(ph_) + np.array([db * np.sin(ph_), 0, 0]), np.nan, np.nan) for p in Rb])
     gut = mesh.add_v(cb + np.array([db, 0, 0]), np.nan, np.nan)
-    HOLES = {}
-    G = B.gill.info
-    if G is not None:
-        nj = G['nj']; w = nj - 1; c_g = NC - 2
-        k0 = int(np.clip(NT // 4 - w // 2, 1, NT // 2 - 1 - w))
-        for sg in (1, -1):
-            cols = [k0 + m for m in range(w + 1)] if sg > 0 else [NT - (k0 + m) for m in range(w + 1)]
-            HOLES[sg] = (c_g, cols)
-    hole_cells = set()
-    for sg, (c_g, cols) in HOLES.items():
-        for m in range(len(cols) - 1):
-            a, b = cols[m], cols[m + 1]; hole_cells.add((c_g, min(a, b) if abs(a - b) == 1 else max(a, b)))
+    HOLES = gill.holes(B, [np.nan] + [float(R_[:, 0].mean()) for R_ in CR], NC - 2)     # {side: (cells, loop)}, planned with the slit
+    hole_cells = set(c for cells, _ in HOLES.values() for c in cells)
     for c_ in range(len(CROWS) - 1):
         for j in range(NT):
             if (c_, j) in hole_cells: continue
