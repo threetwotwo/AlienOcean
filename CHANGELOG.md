@@ -1,7 +1,32 @@
 # Changelog
 
-## 0.6.0-dev (27 Nov 2026)
-- Repository created. Engine decision: prototype a Godot slice before switching (docs/decisions/2026-11-27-godot-slice.md).
+Newest first. Format: version, date, milestone, what changed, what it supersedes. Rules: VERSIONING.md.
+Entries 0.1.0 to 0.5.0 were filed on 27 Nov 2026 from the audit log, memory index and handovers; dates are the
+day the milestone was reached.
 
-## 0.1.0 to 0.5.0 (Oct to Nov 2026), Unreal 5.8 era
-Filed retroactively; the work lives in the project files and is summarised in docs/MILESTONES.md.
+## [Unreleased]
+- Workspace cleanup (Gary tapped "Proceed in stages" 27 Nov 14:26Z): VERSION, VERSIONING.md, MILESTONES.md, this
+  changelog and a one-page README added; old runner README moved to archive/root_2026-11-27/. Old Unreal-era folders
+  move to Firebase bundles next (list: storage/move_out_2026-11-27.md).
+- Friday reset decisions in progress: engine move (Godot evaluation), fresh-start fish modeling, gameplay modules.
+
+## 0.5.0 - 2026-11-21 - Universal head milestone and whole-creature audit (Unreal era, last)
+- Universal head milestone in the shared fish builder (trevally first test fish); eye orbit tissue work.
+- Whole-creature audit (plans/creature_audit/whole_creature_nov21/), builder audit and lever-off merge plan.
+- FUNDAMENTALS.md, STATE.md (generated), flow checks FL1-FL4, Tools review and storage offload (7.9 GiB).
+- All threads parked 21 Nov ~16:10Z for the weekly usage reset; handovers in plans/handover/.
+
+## 0.4.0 - 2026-11-16 - Eyes in the shared builder; text-to-species set as the end goal
+- Eye merge into the shared builder; grown-not-placed and body-area rules; pattern recipe (reaction-diffusion).
+- Long goal written: a universal creature maker that makes new species from text.
+
+## 0.3.0 - 2026-11-13 - Foundation systems: storage, art bible, shared creature builder, snapper slice
+- Firebase offload for assets (9 Nov), standing storage rule; Art bible v1.3 locked (11 Nov); environment palette locked.
+- Shared cage creature builder; first slice narrowed to the hero snapper in L_CalmLagoon (12 to 13 Nov); hands-free plan.
+
+## 0.2.0 - 2026-11-01 - Calm lagoon is the only level
+- Old lagoons and the tuskfish retired (plans/tidy_2026-11-01.md); two-slice plan (lagoon + open-water tank) set 23 Oct.
+
+## 0.1.0 - 2026-10-18 - Unreal foundation
+- Ocean, sun and seabed scripts in UE 5.8 with one versioned file per step (renamed 17 Oct), one-click runner menu
+  (run_next), Gary's to-do list system.

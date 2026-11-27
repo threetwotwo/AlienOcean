@@ -1,0 +1,16 @@
+# Who edits what in the Godot slice (agreed 27 Nov 2026; edit only your own rows, ask the owner for the rest)
+
+| Path | Owner thread |
+|---|---|
+| project.godot [application] [display] [rendering] sections, VERSION look/render notes | Engine (Decide whether to move to Godot) |
+| scenes/probe*, look/ (water, fog, caustics, GI stack, grade) | Engine |
+| tools/turnaround.gd, tools/cloud_render.sh | Engine |
+| core/m12_streaming/, adapters/godot/stream_loader.gd, tests/test_cell_streamer.gd, tests/test_stream_world.gd | Engine |
+| docs/ engine and look evidence | Engine |
+| project.godot [input] [physics] [layer_names] [autoload] sections | Gameplay (Build the core gameplay modules) |
+| core/<every other module>/, adapters/godot/<its modules>, tests/test_<its modules>.gd, harness | Gameplay |
+| VERSION bumps and CHANGELOG release headings (game code owner) | Gameplay |
+| README.md, CHANGELOG.md entries | shared: each owner edits only its own section / appends its own entries |
+
+Rules: re-read a shared file just before editing it (this is a network folder; last write wins). A change that touches the
+other owner's path goes to that thread first as a message.

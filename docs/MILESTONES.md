@@ -1,8 +1,10 @@
-# Milestones
+# Milestones (each one is a MINOR version; see VERSIONING.md)
 
-| Version | Milestone | State |
-|---|---|---|
-| 0.1-0.5 | Unreal 5.8 era: ocean, lagoon slice, world materials, shared creature builder | filed (project files) |
-| 0.6.0 | Godot setup: project skeleton, cloud rendering, turnaround tool, streaming core | in progress |
-| 0.7.0 | Godot slice judged by pass checks P1-P9 (speed, cloud vs Mac, import, look, camera, controls, motion, memory, streaming) | planned |
-| 1.0.0 | First playable slice | planned |
+A milestone is written here, with its pass checks as numbers, before work on it starts. When it passes, the owner
+adds the CHANGELOG entry and bumps VERSION. Gary approves every milestone merge.
+
+| Version | Milestone | Pass checks | Status |
+|---|---|---|---|
+| 0.1.0 - 0.5.0 | Unreal era (see CHANGELOG.md) | as recorded then | done |
+| 0.6.0 | First milestone of the new start | to be written by the coordinator once the engine decision, the fish restart plan and the gameplay module plan land (threads "Decide whether to move to Godot", "Restart fish modeling the professional way", "Build the core gameplay modules", 27 Nov) | not yet written |
+| 1.0.0 | Vertical slice: girl + camera + one hero creature in the calm lagoon, 60 fps on M1 Pro 16 GB | to be written | |
