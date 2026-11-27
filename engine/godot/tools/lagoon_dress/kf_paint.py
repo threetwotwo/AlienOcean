@@ -21,6 +21,7 @@ CRUST_SAT, CORAL_SAT = 2.2, 1.35
 TOP_CHROMA = 0.5    # x the top zone's saturation (sage, not lime)
 WALL_DARK = 0.90    # x the wall values (edge survives the haze; r6 Fable: 0.82 read 10 % too dark against the key frame)
 WALL_CHROMA = 0.80  # x the wall saturation (r6 Fable: walls 20 % too chromatic under the blue light)
+TABLE_SAT = 1.2     # x CORAL_SAT for the table (kf_family 1.7; r6 Fable: still orange with yellow tips under Godot light, key frame reads even salmon-peach)
 TABLE_TIP = '#f2a99c'   # the table coral's rim: paler salmon-pink (r6 Fable: #f3b08c still read yellow at the rim)
 LAGOON = '/mnt/project-files/life/colony_maker/'
 CORAL_KINDS = {
@@ -85,7 +86,7 @@ def coral_colours(kind):
 
 def coral(kind, V, N, E, vc=None):
     K = CORAL_KINDS[kind]; C = coral_colours(kind); Z = zones(V, N, E); k = CORAL_SAT
-    if kind == 'table': k *= 1.7
+    if kind == 'table': k *= TABLE_SAT
     if K['tips'] == 'crown':   # mounds (_build_mound): crown -> side -> under, one gradient
         base = lin(C['base'], 1.25)
         crown = sat(mixl(base, lin('#f6e2b8'), 0.22), k * 1.15)
