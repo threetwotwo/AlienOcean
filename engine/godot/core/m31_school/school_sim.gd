@@ -133,6 +133,18 @@ var _grid := {}
 func _key(q: Vector3, inv: float) -> Vector3i:
 	return Vector3i(floori(q.x * inv), floori(q.y * inv), floori(q.z * inv))
 
+var _rings: Array = []            # cell offsets of each grid ring (the shell at Chebyshev distance r)
+func _ring(r: int) -> Array:
+	while _rings.size() <= r:
+		var rr := _rings.size()
+		var offs := []
+		for gx in range(-rr, rr + 1):
+			for gy in range(-rr, rr + 1):
+				for gz in range(-rr, rr + 1):
+					if maxi(absi(gx), maxi(absi(gy), absi(gz))) == rr: offs.append(Vector3i(gx, gy, gz))
+		_rings.append(offs)
+	return _rings[r]
+
 func _build_grid(cs: float) -> void:
 	_grid.clear()
 	var inv := 1.0 / cs
@@ -187,6 +199,14 @@ func step(env: Dictionary = {}) -> void:
 	_build_grid(cs)
 	by_cascade = 0
 	var idx := PackedInt32Array(); idx.resize(kk)
+	# parameters used per neighbour, read once (a Dictionary lookup per pair costs more than the maths)
+	var searchR: float = p.search_R
+	var ovl2: float = 2.0 * p.overlap
+	var g_att: float = p.g_att
+	var inv_la: float = 1.0 / p.la
+	var inv_lal: float = 1.0 / p.lal
+	var eps: float = p.eps
+	var wk := PackedFloat64Array(); wk.resize(kk)
 	var dk := PackedFloat64Array(); dk.resize(kk)
 	for i in N:
 		var xi := x[i]
@@ -199,39 +219,36 @@ func step(env: Dictionary = {}) -> void:
 		var kc := _key(xi, inv)
 		var r := 0
 		while r <= rmax:
-			for gx in range(-r, r + 1):
-				for gy in range(-r, r + 1):
-					for gz in range(-r, r + 1):
-						if maxi(absi(gx), maxi(absi(gy), absi(gz))) != r: continue
-						var cell = _grid.get(kc + Vector3i(gx, gy, gz))
-						if cell == null: continue
-						for j in cell:
-							if j == i: continue
-							var rv := x[j] - xi
-							var d := rv.length()
-							if d < nd:
-								nd = d; nj = j
-							if pairs_on and d < 2.0 * p.overlap:   # wide: pairs that close up during the move; keep the nearest
-								var b := i * CLOSE_MAX
-								var c := close_n[i]
-								if c < CLOSE_MAX or d < close_d[b + CLOSE_MAX - 1]:
-									var q3 := c if c < CLOSE_MAX else CLOSE_MAX - 1
-									while q3 > 0 and close_d[b + q3 - 1] > d:
-										close_d[b + q3] = close_d[b + q3 - 1]; close_j[b + q3] = close_j[b + q3 - 1]; q3 -= 1
-									close_d[b + q3] = d; close_j[b + q3] = j
-									if c < CLOSE_MAX: close_n[i] = c + 1
-							if d > p.search_R: continue
-							if ei.dot(rv) < cosfov * d: continue      # blind cone behind
-							if cnt < kk:
-								var q := cnt
-								while q > 0 and dk[q - 1] > d:
-									dk[q] = dk[q - 1]; idx[q] = idx[q - 1]; q -= 1
-								dk[q] = d; idx[q] = j; cnt += 1
-							elif d < dk[kk - 1]:
-								var q2 := kk - 1
-								while q2 > 0 and dk[q2 - 1] > d:
-									dk[q2] = dk[q2 - 1]; idx[q2] = idx[q2 - 1]; q2 -= 1
-								dk[q2] = d; idx[q2] = j
+			for off in _ring(r):
+				var cell = _grid.get(kc + off)
+				if cell == null: continue
+				for j in cell:
+					if j == i: continue
+					var rv := x[j] - xi
+					var d := rv.length()
+					if d < nd:
+						nd = d; nj = j
+					if pairs_on and d < ovl2:   # wide: pairs that close up during the move; keep the nearest
+						var b := i * CLOSE_MAX
+						var c := close_n[i]
+						if c < CLOSE_MAX or d < close_d[b + CLOSE_MAX - 1]:
+							var q3 := c if c < CLOSE_MAX else CLOSE_MAX - 1
+							while q3 > 0 and close_d[b + q3 - 1] > d:
+								close_d[b + q3] = close_d[b + q3 - 1]; close_j[b + q3] = close_j[b + q3 - 1]; q3 -= 1
+							close_d[b + q3] = d; close_j[b + q3] = j
+							if c < CLOSE_MAX: close_n[i] = c + 1
+					if d > searchR: continue
+					if ei.dot(rv) < cosfov * d: continue      # blind cone behind
+					if cnt < kk:
+						var q := cnt
+						while q > 0 and dk[q - 1] > d:
+							dk[q] = dk[q - 1]; idx[q] = idx[q - 1]; q -= 1
+						dk[q] = d; idx[q] = j; cnt += 1
+					elif d < dk[kk - 1]:
+						var q2 := kk - 1
+						while q2 > 0 and dk[q2 - 1] > d:
+							dk[q2] = dk[q2 - 1]; idx[q2] = idx[q2 - 1]; q2 -= 1
+						dk[q2] = d; idx[q2] = j
 			# ring r covers every fish nearer than r * cs: stop once the k-th found is inside that
 			if cnt == kk and dk[kk - 1] <= r * cs: break
 			r += 1
@@ -239,9 +256,9 @@ func step(env: Dictionary = {}) -> void:
 		nearest_d[i] = nd
 		# weights ~ size on the eye, (L/d)^2, normalised over the k
 		var wsum := 0.0
-		var wk := PackedFloat64Array(); wk.resize(kk)
 		for q in cnt:
-			wk[q] = pow(L[idx[q]] / maxf(dk[q], 0.3), 2.0)
+			var lr := L[idx[q]] / maxf(dk[q], 0.3)
+			wk[q] = lr * lr
 			wsum += wk[q]
 		wsum = maxf(wsum, 1e-9)
 		var Sv := Vector3.ZERO
@@ -254,9 +271,11 @@ func step(env: Dictionary = {}) -> void:
 			var rh := (x[j] - xi) / maxf(d, 1e-9)
 			var cv := ei.dot(rh)
 			var w := wk[q] / wsum
-			var fa: float = p.g_att * (d - d0i) / (1.0 + pow(d / p.la, 2.0)) * (1.0 + p.eps * cv)
+			var dla := d * inv_la
+			var fa: float = g_att * (d - d0i) / (1.0 + dla * dla) * (1.0 + eps * cv)
 			if d < d0i: fa *= 3.0
-			var fl := ali_gain * (d + 0.3) * exp(-pow(d / p.lal, 2.0)) * 0.5 * (1.0 + cv)
+			var dll := d * inv_lal
+			var fl := ali_gain * (d + 0.3) * exp(-dll * dll) * 0.5 * (1.0 + cv)
 			var ej := e[j]
 			var ali := ej - ei * ej.dot(ei)
 			var g := 1.0 if d < 1.0 else light
