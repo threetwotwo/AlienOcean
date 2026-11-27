@@ -11,6 +11,14 @@ const Body := preload("res://adapters/godot/player_body.gd")
 const Worlds := preload("res://tests/harness/test_worlds.gd")
 const Motor := preload("res://core/m02_motor/player_motor.gd")
 const Rig := preload("res://adapters/godot/camera_rig.gd")
+const BodyRig := preload("res://core/m04_body/body_rig.gd")
+const Mannequin := preload("res://adapters/godot/mannequin.gd")
+const WorldQuery := preload("res://adapters/godot/world_query.gd")
+var brig = BodyRig.new()
+var mq
+var bwq
+var benv := {}
+var capsule := false
 var rig
 var suit_mats := []
 var envr: Environment
@@ -52,16 +60,20 @@ func _initialize() -> void:
 	env = Worlds.build(world, {"steps": "step", "cam_shore": "shore", "cam_wall": "wall"}.get(scene, scene), p)
 	body = Body.new(); body.position = p.start; world.add_child(body)
 	if p.has("mode"): body.motor.mode = p.mode
-	# stand-in girl: 1.38 m capsule (orange suit) + head; lies along her heading when swimming (visual only)
+	# the girl: Thalassa's mannequin posed by the ported body rig (M04); "-- capsule" keeps the old stand-in
+	capsule = a.size() > 2 and a[2] == "capsule"
 	girl = Node3D.new(); body.add_child(girl)
-	var suit := MeshInstance3D.new(); var cm := CapsuleMesh.new(); cm.radius = 0.2; cm.height = 1.15; suit.mesh = cm
-	var sm := StandardMaterial3D.new(); sm.albedo_color = Color(0.95, 0.45, 0.15); suit.material_override = sm
-	sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; suit_mats.append(sm)
-	suit.position = Vector3(0, 0.6, 0); girl.add_child(suit)
-	var head := MeshInstance3D.new(); var hm := SphereMesh.new(); hm.radius = 0.13; hm.height = 0.26; head.mesh = hm
-	var hmat := StandardMaterial3D.new(); hmat.albedo_color = Color(0.98, 0.85, 0.7); head.material_override = hmat
-	hmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; suit_mats.append(hmat)
-	head.position = Vector3(0, 1.28, 0); girl.add_child(head)
+	if capsule:
+		var suit := MeshInstance3D.new(); var cm := CapsuleMesh.new(); cm.radius = 0.2; cm.height = 1.15; suit.mesh = cm
+		var sm := StandardMaterial3D.new(); sm.albedo_color = Color(0.95, 0.45, 0.15); suit.material_override = sm
+		sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; suit_mats.append(sm)
+		suit.position = Vector3(0, 0.6, 0); girl.add_child(suit)
+		var head := MeshInstance3D.new(); var hm := SphereMesh.new(); hm.radius = 0.13; hm.height = 0.26; head.mesh = hm
+		var hmat := StandardMaterial3D.new(); hmat.albedo_color = Color(0.98, 0.85, 0.7); head.material_override = hmat
+		hmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; suit_mats.append(hmat)
+		head.position = Vector3(0, 1.28, 0); girl.add_child(head)
+	else:
+		mq = Mannequin.new(); world.add_child(mq)
 	# water: a translucent sheet at the surface + blue depth fog
 	var has_water: bool = env.level > -999.0
 	if has_water:
@@ -122,6 +134,15 @@ func _physics_process(dt: float) -> bool:
 	girl.rotation = Vector3(-lie * PI * 0.5, body.motor.facing_yaw, 0)
 	girl.position = Vector3(0, 0.42 if swim else 0.0, 0) if lie > 0.5 else Vector3.ZERO
 	var p: Vector3 = body.global_position
+	var head_on := true
+	if mq != null:
+		if bwq == null:
+			bwq = WorldQuery.new(world.get_world_3d(), 1); bwq.exclude.append(body.get_rid()); benv = bwq.as_env()
+		var s = body.motor.swimmer
+		s.config.surface_y = env.water_y(p.x, p.z, t) if env.level > -999.0 else -1000.0
+		bwq.top = s.pos.y + 1.0
+		brig.update_timers(dt)
+		mq.set_meta("pose", brig.update_swim(dt, s, null, t, benv))
 	var shot := ""
 	if rig != null:
 		var c := _cam_for(t, m)
@@ -130,8 +151,11 @@ func _physics_process(dt: float) -> bool:
 		var wy: float = env.water_y(p.x, p.z, t) if env.level > -999.0 else -INF
 		var f: Dictionary = rig.tick(dt, body.eye_point(), c[0], wy)
 		for mt in suit_mats: mt.albedo_color.a = f.body_alpha
+		head_on = shot != "first_person"
+		if mq != null: mq.set_alpha(f.body_alpha)
 		# lens under the surface: blue water fog (the water box can't tint from inside)
 		envr.fog_enabled = rig.global_position.y < wy; envr.fog_light_color = Color(0.05, 0.32, 0.45); envr.fog_density = 0.09
+	if mq != null: mq.apply(mq.get_meta("pose"), head_on)
 	match scene:
 		"cam_shore", "cam_wall": pass
 		"cave": cam.global_position = p + Vector3(5.5, 1.5, 0); cam.look_at(p + Vector3(0, 0.3, 0))
