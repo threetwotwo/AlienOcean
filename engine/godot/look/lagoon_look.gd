@@ -53,7 +53,8 @@ func _setup():
 	var sun := DirectionalLight3D.new(); sun.shadow_enabled = true; sun.directional_shadow_max_distance = 60.0
 	world.add_child(sun)
 	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR; env.background_color = Color(0, 0, 0)
+	var sky := Sky.new(); var skym := ShaderMaterial.new(); skym.shader = load("res://look/sky.gdshader"); sky.sky_material = skym
+	env.background_mode = Environment.BG_SKY; env.sky = sky; env.background_intensity = 1.0   # sky shader outputs nits
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.ssao_enabled = true; env.ssao_radius = 1.2; env.ssao_intensity = 1.6
 	env.ssil_enabled = true; env.ssil_radius = 4.0
@@ -62,6 +63,7 @@ func _setup():
 	var we := WorldEnvironment.new(); we.environment = env; world.add_child(we)
 	clock = SkyClockDriver.new(); clock.light = sun; clock.env = env; clock.water_y = WATER_Y
 	clock.hours = float(OS.get_environment("AO_HOUR")) if OS.get_environment("AO_HOUR") != "" else 12.0
+	clock.sky_mat = skym
 	clock.cam_attr = CameraAttributesPhysical.new(); clock.cam_attr.auto_exposure_enabled = false
 	world.add_child(clock)
 	# water surface overhead
@@ -85,7 +87,16 @@ func _setup():
 		["02_reef_wide", Vector3(-6, 2.2, -2), Vector3(2, 0.6, -12), 60.0],
 		["03_look_up", fp + Vector3(-1.0, -0.4, 1.0), fp + Vector3(0, 4, -2), 70.0],
 		["04_sand_far", Vector3(0, 1.4, 18), Vector3(0, 0.8, -20), 60.0],
+		["05_sky_above", Vector3(0, WATER_Y + 1.5, 10), Vector3(0, WATER_Y + 9.0, -10), 75.0],
 	]
+	# the two moons, wherever the clock puts them
+	var stm := SkyClock.sky_state(clock.hours)
+	var mp := Vector3(0, WATER_Y + 1.5, 10)
+	shots.append(["06_moon_b", mp, mp + SkyClockDriver.to_godot(stm.B.dir) * 10.0, 12.0])
+	shots.append(["07_moon_a", mp, mp + SkyClockDriver.to_godot(stm.A.dir) * 10.0, 12.0])
+	if OS.get_environment("AO_SHOTS") != "":
+		var keep := OS.get_environment("AO_SHOTS").split(",")
+		shots = shots.filter(func(sh): return sh[0].substr(0, 2) in keep)
 	cam = Camera3D.new(); world.add_child(cam); cam.current = true
 	cam.attributes = clock.cam_attr; clock.cam_attr.frustum_near = 0.02; clock.cam_attr.frustum_far = 400.0
 	# the water between the eye and every pixel

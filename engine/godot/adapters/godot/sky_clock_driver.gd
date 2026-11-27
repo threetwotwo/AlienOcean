@@ -17,6 +17,7 @@ extends Node
 var light: DirectionalLight3D
 var env: Environment
 var cam_attr: CameraAttributesPhysical
+var sky_mat: ShaderMaterial          # look/sky.gdshader, optional
 var key := ""
 var last := {}
 
@@ -27,13 +28,12 @@ static func ev100(lux: float) -> float:
 	return log(maxf(0.18 * lux / PI * 100.0 / 12.5, 1e-12)) / log(2.0)
 
 static func air_tint(elev: float) -> Color:
-	## beam colour after the air, per band (Rayleigh ~ lambda^-4 + sea salt), normalised to green.
-	## Stand-in for Unreal's SkyAtmosphere reddening, which the old clock relied on.
+	## beam colour after the air, per band, normalised to green: the Unreal sun disc's extinction (SUN_HLSL,
+	## float3(0.0862, 0.1665, 0.2961) x air mass), which the old SkyAtmosphere also applied to the light.
 	if elev <= 0.0: return Color(1, 1, 1)
 	var m := SkyClock.airmass(elev)
-	var tau := Vector3(0.10 * pow(550.0 / 610.0, 4) + 0.06, 0.16, 0.10 * pow(550.0 / 465.0, 4) + 0.06)
-	var g := exp(-tau.y * m)
-	return Color(exp(-tau.x * m) / g, 1.0, exp(-tau.z * m) / g)
+	var g := exp(-SkyClock.AIR_EXT.y * m)
+	return Color(exp(-SkyClock.AIR_EXT.x * m) / g, 1.0, exp(-SkyClock.AIR_EXT.z * m) / g)
 
 func apply(cam_y: float) -> Dictionary:
 	var st := SkyClock.sky_state(hours, noon_yaw)
@@ -56,6 +56,7 @@ func apply(cam_y: float) -> Dictionary:
 	cam_attr.exposure_multiplier = pow(2.0, bias)
 	var exposure := pow(2.0, bias) / (1.2 * pow(2.0, ev))  # buffer units per nit (Godot's normalisation)
 	WaterOptics.push_globals(water_y, floor_y, up_air, beam_h, st.skylux, exposure)
+	if sky_mat: SkyDriver.apply(sky_mat, st, to_godot, exposure)
 	RenderingServer.global_shader_parameter_set("water_zref", z_ref)
 	if under:
 		var tr := WaterOptics.refract_sun(up_air)
@@ -73,6 +74,10 @@ func apply(cam_y: float) -> Dictionary:
 		env.ambient_light_color = Color(amb.x / mx, amb.y / mx, amb.z / mx) if mx > 0.0 else Color.BLACK
 		env.ambient_light_energy = mx
 	else:
+		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		var dz := SkyDriver.dome(Vector3.UP, to_godot(st.sun.dir)); var dm := maxf(dz.x, maxf(dz.y, dz.z))
+		env.ambient_light_color = Color(dz.x / dm, dz.y / dm, dz.z / dm) if dm > 0.0 else Color.WHITE
+		env.ambient_light_energy = st.skylux / PI * exposure
 		light.look_at_from_position(Vector3.ZERO, -up_air, Vector3.FORWARD if absf(up_air.y) > 0.99 else Vector3.UP)
 		light.light_intensity_lux = beam_h / maxf(up_air.y, 0.02)
 		light.light_color = tint
