@@ -5,7 +5,7 @@
 ## Cdom 0.03, ScatK 0.40, GlowK 2.50) in the seabed, surface and underwater-view shaders. Env: AO_HOUR (default 12).
 ## 0.3.0: the world (light, sky, exposure, water) comes from adapters/godot/world_root.gd, the same node the game uses.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/lagoon_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
-## Env: AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
+## Env: AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_AGX_MODE=1 (raw buffer, for checks), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
 ## Still to port: stars, AgX extras, the surface's waves and tide, caustics, god rays.
 extends SceneTree
 
@@ -64,6 +64,7 @@ func _setup():
 	wr.hours = float(OS.get_environment("AO_HOUR")) if OS.get_environment("AO_HOUR") != "" else 12.0
 	world.add_child(wr)
 	if OS.get_environment("AO_AGX") == "0": wr.set_agx(false)   # Godot's built-in AgX, for before/after
+	if OS.get_environment("AO_AGX_MODE") != "": wr.agx_fx.mode = int(OS.get_environment("AO_AGX_MODE"))
 	world.add_child(wr.make_surface())
 	# hero fish, hovering near the coral heads
 	fish = _load(args[1]) as Node3D
@@ -84,6 +85,8 @@ func _setup():
 		["04_sand_far", Vector3(0, 1.4, 18), Vector3(0, 0.8, -20), 60.0],
 		["05_sky_above", Vector3(0, WATER_Y + 1.5, 10), Vector3(0, WATER_Y + 9.0, -10), 75.0],
 	]
+	# reference: the level ray 2 m deep, looking along open sand (tools/level_ray_check.py computes it offline)
+	shots.append(["08_level_ray", Vector3(0, 2.0, 20), Vector3(0, 2.0, 60), 40.0])
 	# the two moons, wherever the clock puts them
 	var stm := SkyClock.sky_state(wr.hours)
 	var mp := Vector3(0, WATER_Y + 1.5, 10)
