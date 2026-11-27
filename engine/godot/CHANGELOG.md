@@ -18,11 +18,18 @@
   sum against it, hour 12 and 17: rms 0.0016 m on a sum of std 0.51 / 0.62 m, correlation 1.0000.
 - Open: Unreal moved the jitter each frame and let TSR average it. This project has no TAA, so the start point is
   held (WorldRoot sets `god_frame` only when the viewport uses TAA) and one frame keeps the dither: the sum's noise
-  is std 0.47-0.57 m against 0.19-0.23 m for an 8-frame mean. On screen the shafts are faint, as the maths gives:
+  is std 0.47-0.57 m against 0.19-0.23 m for an 8-frame mean. The shot tool's AO_TAA=1 turns Godot's TAA on, which
+  averages it (checked on shot 03, hour 17); whether the game runs TAA is still open. On screen the shafts are faint, as the maths gives:
   noon shots 02 / 03 / 04 change by at most 4-5 of 255 (the sun is outside the frame); shot 03 at hour 17, with the
   sun in view, p1-p99 -4..+4 and up to 16 of 255, a fan of shafts round the sun.
 - Measured (llvmpipe, 960 x 540, ms a frame, without / with): shot 02 543 / 638, 03 254 / 377, 04 739 / 846, 03 at
   hour 17 287 / 317.
+
+## 0.6.0-dev (28 Nov 2026): the stars turn with the sun
+- Engine: the star sphere now turns about north by -2 pi (days - 0.5), so the stars rise and set on the same side as
+  the sun and the moons. Unreal's Stars actor turned the other way (sun_v184 apply_fast, though its comment said "with
+  the sun"); Gary picked "Turn with the sun (fix)" 27 Nov 17:44Z. The midnight sky is unchanged; only the sense of the
+  motion changes.
 
 ## 0.6.0-dev (28 Nov 2026): the camera's field of view
 - Engine: WorldRoot.set_fov used an 18 mm half sensor, but Godot's CameraAttributesPhysical takes the vertical FOV from

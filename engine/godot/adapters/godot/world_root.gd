@@ -388,7 +388,9 @@ func _push_sky(st: Dictionary) -> void:
 	if mat.get_shader_parameter("star_cat") == null:
 		mat.set_shader_parameter("star_cat", StarCatalogue.texture())
 	var north: Vector3 = st.frame[1]                       # the sky turns about the planet's axis once a day (z-up, as the clock)
-	var turn: float = deg_to_rad(fmod(rad_to_deg(TAU * (float(st.days) - 0.5)), 360.0))
+	# Gary 27 Nov 17:44Z: the stars turn WITH the sun (Unreal turned the actor by +2 pi (days - 0.5), against the sun,
+	# though its comment said "with the sun"); the midnight sky is the same either way, only the motion's sense changes
+	var turn: float = -deg_to_rad(fmod(rad_to_deg(TAU * (float(st.days) - 0.5)), 360.0))
 	mat.set_shader_parameter("star_spin", Vector4(north.x, north.y, north.z, turn))
 	var glow: float = st.eclipse.glow
 	mat.set_shader_parameter("stars_on", 1.0 if (float(st.total) < 50.0 or glow > 0.0) else 0.0)   # STARS_BELOW_LUX
