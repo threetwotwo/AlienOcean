@@ -12,7 +12,10 @@
 ## each place has its compensation (calm lagoon +1.2). Under water the key light points along the refracted sun and
 ## is pre-attenuated to z_ref; water-aware shaders correct for their own depth.
 ## God rays (look/god_rays.gdshaderinc, lagoonwater v98's, drawn by the underwater view): .god_rays false = off.
-## Godot axes: SkyClock is z-up (x, y, z); Godot is y-up: (x, z, -y).
+## Godot axes: SkyClock works in Unreal's world axes (z up, left-handed); Godot is y up, right-handed. Unreal (x, y, z)
+## is Godot (x, z, y): a swap, so a mirror, as Unreal's own glTF import does. The world pieces fix it: the lagoon GLBs
+## (island/tools/slice_common.py write_glb) sit in Unreal at (g.x, g.z, g.y) x 100 cm (lagoon slice check P4, bounding
+## boxes). The island frame (x east, y north, z up, right-handed) is a different one: island (x, y, z) = Godot (x, z, -y).
 class_name WorldRoot
 extends Node3D
 
@@ -103,7 +106,9 @@ static func _dawn_dim(total: float, noon_total: float, nw: float) -> float:
 	return minf(minf(O, maxf(K, fl)) - O, 0.0)
 
 static func to_godot(v: Vector3) -> Vector3:
-	return Vector3(v.x, v.z, -v.y)
+	## an Unreal world direction (the clock's) in Godot's axes. Not (x, z, -y): that is the island frame's map, and it
+	## showed the sky mirrored along Unreal's Y against the reefs (at noon_yaw 0 the sun set on the rising side).
+	return Vector3(v.x, v.z, v.y)
 
 static func ev100(lux: float) -> float:
 	return log(maxf(0.18 * lux / PI * 100.0 / 12.5, 1e-12)) / log(2.0)
