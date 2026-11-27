@@ -286,10 +286,18 @@ glb = os.path.join(OUT, 'fish.glb'); LOD0 = [body, rig] + list(fin_obs.values())
 _exp(glb, LOD0); finish(glb, 0)
 # LOD chain: meshoptimizer on seam-split copies (blender/lods.py); eyes dropped at LOD2, collision only on LOD0
 lods = {}; lod_obs = {}; CREASES = set(v for r in C['rolls'] for v in r)
-for lod, ratio in ((1, 0.4), (2, 0.14)):
-    obs = []
-    for o in [body] + list(fin_obs.values()):
-        lo, nt = LODS.simplify(o, ratio if o is body else max(ratio * 1.6, 0.3), f'{o.name}_LOD{lod}', lock=CREASES if (o is body and lod == 1) else ()); lo.hide_render = True; obs.append(lo)
+# targets are budgets (P1: LOD1 <= 60 % of LOD0, LOD2 <= 1,000 tris), not fixed ratios: a fish with bigger traced fins or more cage
+# rows gets a lower ratio. Start from the usual ratio, then scale it down until the LOD is inside its budget with a 5 % margin.
+T0 = tris_of(LOD0)
+for lod, ratio, budget in ((1, 0.4, 0.57 * T0), (2, 0.14, 950)):
+    for attempt in range(4):
+        obs = []
+        for o in [body] + list(fin_obs.values()):
+            lo, nt = LODS.simplify(o, ratio if o is body else max(ratio * 1.6, 0.3 * min(1.0, ratio / 0.14)), f'{o.name}_LOD{lod}', lock=CREASES if (o is body and lod == 1) else ()); lo.hide_render = True; obs.append(lo)
+        got = tris_of(obs + (eye_obs if lod == 1 else []))
+        if got <= budget or attempt == 3: break
+        for lo in obs: bpy.data.objects.remove(lo, do_unlink=True)
+        ratio *= 0.97 * budget / got
     keep = obs + [rig] + (eye_obs if lod == 1 else [])
     pth = os.path.join(OUT, f'fish_LOD{lod}.glb'); _exp(pth, keep); finish(pth, lod)
     lint = sum(1 for p in obs[0].data.polygons if p.material_index == INT_IDX)
