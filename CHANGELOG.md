@@ -5,6 +5,10 @@ Entries 0.1.0 to 0.5.0 were filed on 27 Nov 2026 from the audit log, memory inde
 day the milestone was reached.
 
 ## [Unreleased]
+- Creature maker moves into the repo as stage modules (creatures/maker/, tool version 0.3.0-dev): record, form, chart,
+  cage features (template, eye, mouth, gill, finish), UV, maps, fins, Blender export, checks, board. Output is
+  byte-identical to the last fish-restart proof script. Real openings: mouth, throat and both gill passages are topology
+  (check OP1), stay inside the body (OP2), and folds outside designed creases are counted (OP3).
 - Workspace cleanup (Gary tapped "Proceed in stages" 27 Nov 14:26Z): VERSION, VERSIONING.md, MILESTONES.md, this
   changelog and a one-page README added; old runner README moved to archive/root_2026-11-27/. Old Unreal-era folders
   move to Firebase bundles next (list: storage/move_out_2026-11-27.md).

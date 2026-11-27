@@ -10,3 +10,9 @@ export_presets.cfg
 builds/
 renders/
 .DS_Store
+
+# python
+__pycache__/
+*.pyc
+# creature maker build folders
+creatures/maker/out/
