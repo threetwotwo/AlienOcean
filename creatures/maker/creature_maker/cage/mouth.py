@@ -54,6 +54,7 @@ class Mouth:
     pass
 
 
+TUBE_MG = 0.005    # the cavity tube stays this far inside (SL): the cage skin is faceted and cuts inside the form
 IN_MG = 0.0015     # interior surfaces stay at least this far inside the body (SL); thin snouts and puffer cheeks broke it
 
 
@@ -193,17 +194,23 @@ def build_cavity(B):
         lo = list(range(NT // 2, jr - 1, -1) if sg > 0 else range(NT // 2, NT - jr + 1))
         ps[up] = sg * ps_r * frac(up); ps[lo] = sg * (np.pi - (np.pi - ps_r) * frac(lo))
     ps[NT // 2] = np.pi; TR = cav_ring(x_t, ps)
-    inward = lambda P: P - np.array([form.radial(p) * 0.0005 for p in P])
-    # the roll leaves the lip half-way between straight in and its line to T, so the lining is a lip thickness under the skin
-    D = TR - LIP3; D = D / np.linalg.norm(D, axis=1, keepdims=True) - np.array([form.radial(p) if p[0] > 1e-4 else np.zeros(3) for p in LIP3])
-    lip_in = keep_inside(form, LIP3 + TLIP * D / np.linalg.norm(D, axis=1, keepdims=True), inward)
 
-    def unit(P):             # section coordinates: a line that is straight in these stays inside the body, beak or not
-        c, a_, b_ = form.sec(np.clip(P[:, 0], 0, form.XEND)); return np.stack([P[:, 0], (P[:, 1] - c) / a_, P[:, 2] / b_], -1)
-    CR = [lip_in]
-    for k in range(1, NF - 1):
-        U = unit(lip_in) + (unit(TR) - unit(lip_in)) * k / (NF - 1); c, a_, b_ = form.sec(np.clip(U[:, 0], 0, form.XEND))
-        CR.append(keep_inside(form, np.stack([U[:, 0], c + U[:, 1] * a_, U[:, 2] * b_], -1), inward))
+    def toward_t(P):         # bring lining points inside along their own line to T: the columns keep their order
+        P = P.copy()
+        for _ in range(40):
+            bad = form.sd_body(P) > -IN_MG
+            if not bad.any(): break
+            P[bad] += 0.1 * (TR[bad] - P[bad])
+        return P
+    # the roll leaves the lip half-way between straight in and its line to T, so the lining is a lip thickness under the
+    # skin. Near the lip tips, where the lip is closer to the axis than a lip is thick, it turns toward T instead (straight
+    # in would cross to the other side), and on a very small mouth it is never longer than 0.4 of the way to T.
+    D = TR - LIP3; ld = np.linalg.norm(D, axis=1, keepdims=True); cy = form.sec(np.clip(LIP3[:, 0], 0, form.XEND))[0]
+    r0 = np.hypot(LIP3[:, 1] - cy, LIP3[:, 2])[:, None]
+    D = D / ld - np.array([form.radial(p) for p in LIP3]) * np.clip(r0 / (2 * TLIP), 0, 1)
+    lip_in = toward_t(LIP3 + np.minimum(TLIP, 0.4 * ld) * D / np.linalg.norm(D, axis=1, keepdims=True))
+
+    CR = [lip_in] + [toward_t(lip_in + (TR - lip_in) * k / (NF - 1)) for k in range(1, NF - 1)]
     # Behind T the tube runs evenly back to the pharynx; its first ring takes up half the turn from T's columns to even
     # ones. Where the orbit squeezes the tube (a slender head: less than the tube's own height left under the eye), that
     # ring stands far enough back for the gill holes, two rings on, to open behind the orbit: the passage ran through
@@ -214,6 +221,15 @@ def build_cavity(B):
     TUBE = [TR, cav_ring(x_4, 0.5 * (ps + ps_even))] + [cav_ring(x_4 + (x_back - x_4) * k / n_) for k in range(1, n_ + 1)]
     if squeezed: BACK = TUBE[1:]; relax_rings(BACK, 20); TUBE = [TR] + BACK      # the first tube ring holds its place
     else: relax_rings(TUBE, 20)
+    # relaxing can carry a ring out through a hollow in the profile, and so can the straight wall between two rings
+    # (small mouth, deep throat: rabbitfish). Rings shrink until they and the middle of each wall are inside.
+    for _ in range(40):
+        ok = True
+        for k in range(1, len(TUBE)):
+            for Q in (TUBE[k], 0.5 * (TUBE[k - 1] + TUBE[k])):
+                bad = form.sd_body(Q) > -TUBE_MG
+                if bad.any() and k < len(TUBE) - 1: c = TUBE[k].mean(0); TUBE[k][bad] = c + (TUBE[k][bad] - c) * 0.95; ok = False
+        if ok: break
     CR += TUBE
     CROWS = [M.LIPV] + [[mesh.add_v(p, np.nan, np.nan) for p in R_] for R_ in CR]
     # the pharynx ends in a dome (quarter-circle rings), not a flat fan: a flat end is a 90 degree crease
