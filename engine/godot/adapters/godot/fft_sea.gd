@@ -33,6 +33,13 @@ var _disp: RID; var _deriv: RID
 var _ubo: RID
 var _set_spec: RID; var _set_fft := []; var _set_asm: RID; var _set_mip := []
 var _dirty := true
+# the height read back to the CPU (height_at): cascades 0 and 1 (250 m, 21.4 m: all but a few mm of the lagoon's
+# height), mip 0, fetched without a stall every readback_frames frames; a few frames behind the drawn sea
+var readback_frames := 4
+var _hb := [PackedByteArray(), PackedByteArray()]   # RGBA16F texels, row major (written on the render thread)
+var _hb_t := -1.0                                   # the wave clock the bytes were drawn at
+var _hb_mutex := Mutex.new()
+var _frame := 0
 
 func _init() -> void:
 	name = "FftSea"
@@ -137,11 +144,61 @@ func _publish() -> void:
 
 func _process(dt: float) -> void:
 	if not hold: time_s = fmod(time_s + dt * time_scale, SeaSpectrum.T_REPEAT)
-	if ready_ok: RenderingServer.call_on_render_thread(_run.bind(time_s))
+	_frame += 1
+	if ready_ok:
+		RenderingServer.call_on_render_thread(_run.bind(time_s))
+		if _frame % maxi(readback_frames, 1) == 0 or _hb_t < 0.0:
+			RenderingServer.call_on_render_thread(_readback.bind(time_s))
 
 func step_now() -> void:
 	## run the passes for the current time (for scripts that set time_s and render one frame)
-	if ready_ok: RenderingServer.call_on_render_thread(_run.bind(time_s))
+	if ready_ok:
+		RenderingServer.call_on_render_thread(_run.bind(time_s))
+		RenderingServer.call_on_render_thread(_readback.bind(time_s))
+
+func _readback(t: float) -> void:
+	for c in 2:
+		rd.texture_get_data_async(_disp, c, _got.bind(c, t))
+
+func _got(data: PackedByteArray, c: int, t: float) -> void:
+	_hb_mutex.lock()
+	_hb[c] = data
+	if c == 1: _hb_t = t
+	_hb_mutex.unlock()
+
+func has_height() -> bool:
+	return _hb_t >= 0.0
+
+func _disp_tap(c: int, X: Vector2) -> Vector3:
+	## cascade c's (Dx, Dy, Dz) at island point X, bilinear with wrap (the GPU's own sampling of mip 0)
+	var L: float = [250.0, 21.4][c]
+	var u := X / L * NS - Vector2(0.5, 0.5)
+	var i0 := Vector2i(floori(u.x), floori(u.y)); var f := u - Vector2(i0)
+	var b: PackedByteArray = _hb[c]
+	var out := Vector3.ZERO
+	for k in 4:
+		var ix := posmod(i0.x + (k & 1), NS); var iy := posmod(i0.y + (k >> 1), NS)
+		var w := (f.x if k & 1 else 1.0 - f.x) * (f.y if k >> 1 else 1.0 - f.y)
+		var o := (iy * NS + ix) * 8
+		out += w * Vector3(b.decode_half(o), b.decode_half(o + 2), b.decode_half(o + 4))
+	return out
+
+func height_at(gx: float, gz: float) -> float:
+	## the sea's height (m, about the still level) at Godot (x, z): the crest or trough that is drawn there, found by
+	## undoing the sideways push (three fixed-point steps: X = x - D(X)), as the vertex shader places it. Cascades 2
+	## and 3 (2.56 m, 0.32 m: millimetres in the lagoon) are left out. 0 until the first readback lands.
+	_hb_mutex.lock()
+	if _hb_t < 0.0 or _hb[0].size() < NS * NS * 8 or _hb[1].size() < NS * NS * 8:
+		_hb_mutex.unlock(); return 0.0
+	var x := Vector2(gx, -gz)              # island xy
+	var X := x
+	var D := Vector3.ZERO
+	for it in 3:
+		D = _disp_tap(0, X) + _disp_tap(1, X)
+		X = x - Vector2(D.x, D.y)
+	D = _disp_tap(0, X) + _disp_tap(1, X)
+	_hb_mutex.unlock()
+	return D.z
 
 func _run(t: float) -> void:
 	var v := PackedFloat32Array()

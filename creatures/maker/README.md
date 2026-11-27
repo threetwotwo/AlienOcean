@@ -17,6 +17,8 @@ python -m creature_maker build RECORD.json OUT [--res 2048]    # numpy only, a f
 python -m creature_maker glb OUT                                # Blender's Python (bpy) bakes and exports OUT/fish.glb + LODs
 python -m creature_maker check OUT RECORD.json --planted        # every check, and each planted fault must be caught
 python -m creature_maker board OUTROOT RECORD_DIR...            # all records: proves a rule is universal, not hero-only
+python -m creature_maker silboard OUTROOT RECORD_DIR...         # SIL1 only, fast: built vs traced outline per species + sheet.png
+python -m creature_maker sheet OUT RECORD.json                  # turnarounds: 8 angles x rest / real size / stylized, faults magenta
 python -m creature_maker deviate OUTROOT RECORD_DIR...          # stylized proportions (eye, mouth, girth) on all records
 ```
 
@@ -54,6 +56,24 @@ Designed creases are registered where they are made (`rolls`, `junctions`, `comm
 check can tell a designed crease from a fault.
 
 ## Checks
+
+**Silhouette first (SIL1, Gary 27 Nov).** The built fish seen from the side (skin plus dorsal, anal and caudal fin cards,
+holes filled) must overlap its traced reference outline by IoU 0.90 or more, for the whole fish and for the head alone
+(in front of the gill cover's rear edge), before finer anatomy counts. The reference is
+`silhouettes/<record name>.json` beside the record (or its parent folder, or `CREATURE_SIL_DIR`):
+`{"source": "<photo>", "traced_by": "...", "side": [[x, y], ...], "side_body": [[x, y], ...]}` in the record's SL units
+(snout at x 0, standard-length end at x 1, y as in the record outline; `side_body` is optional, without fins). A record
+with no traced reference fails SIL1 with the note "no traced reference silhouette yet". `silhouette.overlay` draws built
+(red) over reference (blue).
+
+**Traced fins.** A median fin (or the caudal) may carry `edge`: its free outline from the photo, in record units, from
+where the leading edge leaves the body to where the rear margin meets it (dorsal and anal front to back, caudal top to
+bottom). The fin card then spans its root and that outline, with the rows between relaxed so swept lobes and filaments
+follow the photo instead of being cut by straight rays. Without `edge` the card is guessed from `h` and `lean`.
+`silhouette.fin_edges(ref, rec)` reads these outlines off a traced reference for the tracer to write into the record (the
+record stays the only build input, the reference stays the test) and lists fins whose outline meets the body far from
+the record's root ends. On the 28 traced drafts (27 Nov): SIL1 passes 3 with guessed fins, 24 with traced outlines; the
+other 4 have record fin roots that disagree with their photo.
 
 Cage (no Blender): P2 quad share and corners, P3 manifold, P4 skin on the form, P5 skin UV stretch and folds, IC1 parts
 from the record, EY1 eye size, OP1 openings are topology (genus 2, the lips reach both gill slits through interior faces),

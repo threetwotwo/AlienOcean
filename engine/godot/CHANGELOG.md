@@ -1,5 +1,49 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): dressed-place cameras stand on the sand
+- World: DressCell.seat() now also finds the sand under each manifest camera (at and look) and cam() returns their heights over it;
+  `on_sand(v)` does the same for any key-frame point (the shot tool's hero fish). The key frame's heights (camera 1.05 m, look
+  0.58 m) were over ITS sand (z 0); on the drawn floor, 0.17 m under the place's anchor, the camera stood 1.22 m up and the near
+  corals sat ~7 % low in frame (Fable silhouette review r7c). Now table/brain tops within 2-3 % of the key frame. Test D5.
+
+## 0.6.0-dev (28 Nov 2026): lagoon dressing round 7, silhouettes first
+- Gary 27 Nov 18:42Z: silhouettes of all assets before detail. Measured against the key frame at its camera: the arch massif ran
+  18-86 % of the frame width with its top cut off (key frame 5-63 %, top 11 % down) and the second head merged into it. The arch
+  head is now turned 13 deg left about the camera and set back to 16 m, its yaw turned with it so the gate still faces the camera
+  (gate camera, key_arch look and the lanes moved with it); the second head is 14 m out at x1.3. Now massif 1-58 %, second head
+  72-87 % (key frame 73-88 %) with a clear gap. Manifest 0.6.0; dress_cell `with` takes a list.
+- The v18c head gets a sand skirt (`SB_Skirt_0_v18c`): the key frame rig's habitat.bank (0.12 m against the foot, arch_set.sh),
+  concave collision. Table coral saturation x1.2 (kf_family x1.7 read orange under the Godot light).
+- Fable silhouette review r7c: second head and finger coral MATCH; massif extents fit but it reads as one flat slab (form);
+  foreground corals sit ~7 % lower in frame than the key frame; hero fish form is the creature thread's.
+
+## 0.6.0-dev (28 Nov 2026): the water's fill light can be occluded
+- Engine: seabed_surface and ground_surface no longer add the water's fill (sky from above, sand bounce from below, through
+  the depth) as unoccluded emission. It now goes through Godot's ambient path, so SSAO, SSIL, the material AO and any GI
+  occlude and bounce it. Godot's ambient is one colour, so each pixel's fill colour and depth ride in ALBEDO as a ratio
+  (`w_fill_ratio`, water_physics.gdshaderinc) and light() divides it back out. The sun and the light net are unchanged.
+  Calibrated with SSAO and SSIL off: the same picture as before (mean 0.65 of 255). Key frame camera, SSAO + SSIL: coral
+  shadow L* 52.9 -> 50.2, rock face 50.4 -> 48.5 (key frame 43.8 / 42.9). Switch: WorldRoot.fill_occluded (AO_FILL_AO=0).
+- Art levers (real water conditions, defaults unchanged): WorldRoot.cdom (yellow substance, 0.03) and scat_k (particles,
+  0.40); shot tool AO_CDOM / AO_SCAT. Far water hue at Cdom 0.03 / 0.01 / 0: -141 / -125 / -117 (key frame -132).
+- Shot tool checks: AO_SSAO=0, AO_SSIL=0, AO_SSAO_R + AO_SSAO_I, AO_SDFGI=1. SDFGI on (not default yet) gives coral
+  shadow 45.4 and rock face 42.7 (key frame 43.8 / 42.9), but the hero fish goes black and the coral's shadow stripes;
+  both to fix before it becomes the default.
+
+## 0.6.0-dev (28 Nov 2026, later): the light net from the FFT sea's own slopes
+- Engine: caustics map 0.2.0 (`look/caustics_slope.gdshader`, `adapters/godot/caustics_map.gd`). While the FFT sea
+  runs (global sea_on) the map's slope pass reads the sea's slope atlas (sea_deriv.rg), as v98's CAUS_SLOPE_HLSL read
+  RT_LW_Deriv, so the net on the sand is drawn from the waves drawn overhead. Cascade 2 (sea_patch.z 2.56 m) is the
+  map's tile one to one (same island xy / patch); cascade 3 (sea_patch.w 0.32 m) repeats 8 times over it (v98 Fine 1).
+  Each depth takes the wrap-averaged mip whose texel is its own (2 / 4 / 8 cm: cascade 2 mips 1 / 2 / 3, cascade 3
+  mips 4 / 5 / 6), read at texel centres: v98's 16-tap mean and halvings, exactly. Focus, sun's disc, reader and tile
+  break unchanged. Without the sea, or with `WorldRoot.caustics.from_sea = false` (shot tool AO_CAUS=waves), the 32
+  waves as before. The per-pixel check path stays on the 32 waves, so it no longer matches the map while the sea runs.
+- Measured on the engine's map (two sea times), std at 0.8 / 2 / 5 m: 0.15 / 0.31 / 0.35-0.37 (v98 emulated
+  0.14-0.15 / 0.29-0.31 / 0.34; the 32 waves 0.14 / 0.30 / 0.30); cell 12-14 / 13-14 / 16 cm (v98 12 / 12-14 / 15-16).
+  Frame (llvmpipe, 960 x 540, shots 01 / 04): 761 / 1019 ms from the sea, 807 / 1002 ms from the 32 waves: no
+  difference beyond the noise. Shot tool: AO_CAUS_T now holds the sea at that second too. test_world_clock 42 / 42.
+
 ## 0.6.0-dev (28 Nov 2026): the arch's foot and round 6 of the lagoon dressing
 - World: the focal arch head (heads_v18c) now stands on its own fallen rock: `SB_Bommie_0_v18c_apron` = Terrain's gate fall
   (`seabed/tools/gate_fall.py` v3, grown from the head's own `handoff_terrain.json` fall record: 14 slab blocks 0.2-0.75 m at both

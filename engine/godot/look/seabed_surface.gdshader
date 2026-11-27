@@ -5,17 +5,10 @@
 // The light net (look/caustics.gdshaderinc, ported from Unreal lagoonwater v98) modulates the sun's beam only, as the
 // Unreal light function did: mean ~1, strength by depth, slid by the refracted sun.
 shader_type spatial;
-render_mode blend_mix, cull_back, diffuse_lambert, specular_disabled, ambient_light_disabled;
+render_mode blend_mix, cull_back, diffuse_lambert, specular_disabled;
 
-global uniform float water_y;
-global uniform float water_floor_y;
-global uniform vec3 water_kd;
-global uniform vec3 water_ku;
-global uniform vec3 water_sun_w;
-global uniform float water_es0;
-global uniform float water_ek0;
+#include "res://look/water_physics.gdshaderinc"
 global uniform float water_zref;
-global uniform vec4 water_sand;
 #include "res://look/caustics.gdshaderinc"
 
 // Better sand colour lock (SD2, Gary-approved design 14 Nov; passed in Unreal: #cbc8c2 vs lock #cdcac4): bare sand takes the
@@ -40,12 +33,13 @@ void fragment() {
 	}
 	ROUGHNESS = roughness_base;
 	float z = max(water_y - wpos.y, 0.0);
-	float H = max(water_y - water_floor_y, 0.05);
-	vec3 ek = water_ek0 * exp(-water_ku * z);
-	vec3 eh = water_es0 * exp(-water_kd * H) + water_ek0 * exp(-water_ku * H);
-	vec3 eu = eh * water_sand.rgb * exp(-water_ku * max(H - z, 0.0));
 	float up = 0.5 + 0.5 * wnorm.y;
-	EMISSION = ALBEDO * (ek * up + eu * (1.0 - up)) / PI;   // nits; Godot applies the exposure
+	if (water_fill_ao > 0.5) {   // the fill through Godot's ambient (occluded by SSAO / SSIL / AO); light() divides the ratio back out
+		ALBEDO *= w_fill_ratio(z, up);
+	} else {
+		EMISSION = ALBEDO * w_fill(z, up);   // nits; Godot applies the exposure
+		AO = 0.0;                  // no Godot ambient on top
+	}
 }
 void light() {
 	float z = max(water_y - wpos.y, 0.0);
@@ -53,5 +47,7 @@ void light() {
 	// the light net (look/caustics.gdshaderinc, Unreal lagoonwater v98): on the sun's beam only, by depth and the refracted sun
 	float px = length(wpos - INV_VIEW_MATRIX[3].xyz) * 2.0 / (abs(PROJECTION_MATRIX[1][1]) * VIEWPORT_SIZE.y);
 	float caus = caustic_sun(wpos, water_y - wpos.y, water_sun_w, px, TIME, caustic_strength);
-	DIFFUSE_LIGHT += clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * ATTENUATION * LIGHT_COLOR / PI * corr * caus;
+	vec3 fr = vec3(1.0);
+	if (water_fill_ao > 0.5) fr = w_fill_ratio(z, 0.5 + 0.5 * normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz).y);   // ALBEDO carries the fill ratio: take it back out
+	DIFFUSE_LIGHT += clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * ATTENUATION * LIGHT_COLOR / PI * corr * caus / fr;
 }

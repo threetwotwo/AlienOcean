@@ -193,6 +193,27 @@ for kit_f, HF in json.load(open(HEADS_FIT)).items():
     tri = bpy.data.objects.new(piece + '_apron_TRI', tm); bpy.context.scene.collection.objects.link(tri)
     finish(piece + '_apron', ao, cols + [tri], 'rubble', P + 'seabed/tools/gate_fall.py + rubble_rule.py')
     print('FOOT', len(blk), 'blocks,', len(parts) - len(blk), 'chips, rf', round(rf, 2))
+    # its sand skirt: the kit heads carry SB_Skirt_<n>; v18c has none (no_skirt) and Terrain's arch_seat_v18c is gone. So the key frame
+    # rig's own rule for the hard contact line: habitat.bank (sand banked against the foot, Style 15 Nov), h 0.12 as arch_set.sh ran it,
+    # on a 5 cm grid out to 0.6 m past the outline, inner edge kept 0.3 m under the rock. Concave collision (as the kit skirts).
+    import habitat
+    cell = 0.05; ext = float(R.max()) + 0.7
+    xs = np.arange(c[0] - ext, c[0] + ext + 1e-9, cell); ys = np.arange(c[1] - ext, c[1] + ext + 1e-9, cell)
+    GX, GY = np.meshgrid(xs, ys); Hb = habitat.bank(GX.ravel(), GY.ravel(), [((c[0], c[1]), hr, rf)], h=0.12).reshape(GX.shape)
+    d = np.hypot(GX - c[0], GY - c[1]) - np.array([hr(a) for a in np.arctan2(GY - c[1], GX - c[0]).ravel()]).reshape(GX.shape)
+    live = (d > -0.3) & (d < 0.6)
+    idx = -np.ones(GX.shape, int); idx[live] = np.arange(live.sum())
+    Vk = np.stack([GX[live], GY[live], Hb[live] - 0.005], 1); Fk = []
+    for r_ in range(GX.shape[0] - 1):
+        for c2 in range(GX.shape[1] - 1):
+            a, b, e, f = idx[r_, c2], idx[r_, c2 + 1], idx[r_ + 1, c2], idx[r_ + 1, c2 + 1]
+            if min(a, b, e, f) >= 0: Fk += [[a, b, f], [a, f, e]]
+    clear(); sm = bpy.data.meshes.new(piece + '_skirt'); sm.from_pydata(Vk.tolist(), [], Fk); sm.update()
+    so = bpy.data.objects.new(piece.replace('Bommie', 'Skirt'), sm); bpy.context.scene.collection.objects.link(so)
+    so.data.polygons.foreach_set('use_smooth', [True] * len(so.data.polygons)); so.data.update()
+    tri = so.copy(); tri.data = sm.copy(); bpy.context.scene.collection.objects.link(tri); tri.name = piece.replace('Bommie', 'Skirt') + '_TRI'
+    finish(piece.replace('Bommie', 'Skirt'), so, [tri], 'skirt', P + 'papers/process/art_bible/style_level/keyframe/src/habitat.py bank')
+    print('SKIRT', len(Vk), 'verts, bank max', round(float(Hb[live].max()), 3))
 
 # ---------- corals: kinds_v27, CoACD hulls ----------
 for c in sorted({c['f'] for c in LAYOUT['corals']}):

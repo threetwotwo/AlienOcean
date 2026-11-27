@@ -1,8 +1,11 @@
-## Caustics map 0.1.0 (engine thread): the light net drawn once a frame into a small tile, as the Unreal lagoon did
+## Caustics map 0.2.0 (engine thread): the light net drawn once a frame into a small tile, as the Unreal lagoon did
 ## (lagoonwater v98: RT_LW_CausS1..3 -> RT_LW_CausRaw -> RT_LW_Caus, 512 px over the 2.56 m tile, r g b = 0.8, 2, 5 m).
 ## Three passes, each a SubViewport with one full-size ColorRect: the waves' slope in the mip each depth reads
 ## (look/caustics_slope.gdshader, 128 / 64 / 32 px), the focus (look/caustics_focus.gdshader) and the sun's disc
 ## (look/caustics_blur.gdshader). The result is the global sampler water_caus_map, read by look/caustics.gdshaderinc.
+## The slopes are the FFT sea's own while it runs (global sea_on, adapters/godot/fft_sea.gd: cascade 2 is this tile,
+## cascade 3 repeats 8 times over it), as in v98; otherwise the 32 waves of look/caustic_waves.gdshaderinc. from_sea =
+## false keeps the 32 waves even with the sea (checks); the net then no longer matches the drawn surface.
 ## Owned by WorldRoot (.caustics). per_pixel = true switches every reader back to the per-pixel maths (checks);
 ## frozen_time >= 0 holds the net at that second (stills, comparisons), -1 = the engine's TIME.
 class_name CausticsMap
@@ -16,6 +19,10 @@ var map_vp: SubViewport
 var per_pixel := false:
 	set(v):
 		per_pixel = v; _push()
+var from_sea := true:
+	set(v):
+		from_sea = v
+		for vp: SubViewport in slope_vps: _mat(vp).set_shader_parameter("from_sea", 1.0 if v else 0.0)
 var frozen_time := -1.0:
 	set(v):
 		frozen_time = v; _push()
@@ -35,6 +42,7 @@ static func _mat(vp: SubViewport) -> ShaderMaterial:
 
 func _init() -> void:
 	name = "CausticsMap"
+	FftSea.declare_globals()   # the slope pass reads sea_deriv / sea_patch / sea_on; they must exist before it compiles
 	# in the order they feed each other, so one frame's waves reach the map in that frame
 	for i in SLOPE_PX.size():
 		var vp := _pass(SLOPE_PX[i], "res://look/caustics_slope.gdshader")
