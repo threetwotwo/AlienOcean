@@ -1,5 +1,5 @@
 {
- "version": "0.5.0",
+ "version": "0.6.0",
  "name": "lagoon_keyframe",
  "intent": "The approved key frame (15 Nov, Blender) as a place in the open-world lagoon: a weathered head with a gate (focal point, upper left third), warm coral heads leading in from the near sand (table coral as the colour accent), the grown meadow framing the right edge, open sand and a clear blue lane for the fish school. Restrained, Japanese garden: three rock masses (focal arch, one behind, one far), five coral heads, one meadow bed, the rest is sand and water.",
  "frame": "key frame layout metres (Blender: x right, y forward, z up). godot = anchor_yaw * (x, z, -y) + anchor",
@@ -20,26 +20,30 @@
   {
    "p": "SB_Bommie_0_v18c",
    "at": [
-    -3.55,
-    13.0,
+    -7.58,
+    14.1,
     0.0
    ],
-   "rot": 5.18,
+   "rot": 5.407,
    "role": "focal head: Rock's heads_v18c (Gary's pick 21 Nov), gate turned to face the key camera",
-   "why": "upgrade: v18c replaces kit v18 b0 (layout_arch_g.json, Style 21 Nov); set back along the key camera's ray from 10.6 to 13.0 m (Fable r2 + measured r3: 10.6 m cut the top, 16.5 m lost it in the haze); r6 (Fable r5 \"hard base line\"): its foot, the gate fall Terrain grows from this head's own fall record (14 blocks at both mouths, roof and wear chips, seabed/tools/gate_fall.py v3) plus the rubble_rule v11 apron round its real outline",
-   "with": "SB_Bommie_0_v18c_apron"
+   "why": "upgrade: v18c replaces kit v18 b0 (layout_arch_g.json, Style 21 Nov); set back along the key camera's ray from 10.6 to 13.0 m (Fable r2 + measured r3: 10.6 m cut the top, 16.5 m lost it in the haze); r6 (Fable r5 \"hard base line\"): its foot, the gate fall Terrain grows from this head's own fall record (14 blocks at both mouths, roof and wear chips, seabed/tools/gate_fall.py v3) plus the rubble_rule v11 apron round its real outline; r7: its sand skirt from the key frame rig's habitat.bank (0.12 m bank against the foot, arch_set.sh), since v18c has no kit skirt; r7 SILHOUETTE (Gary 27 Nov 18:42Z silhouette before detail): the key frame's massif spans 5-63 % of the frame width with its top 13 % down; r6 ran 18-93 % with the top cut off. So the head turned 13 deg left about the camera and set back to 16 m (r7b at 17 deg / 17.5 m measured 1-50 %, r7c tuned to the key frame's 5-63 %), its yaw turned with it so the gate still faces the camera",
+   "with": [
+    "SB_Bommie_0_v18c_apron",
+    "SB_Skirt_0_v18c"
+   ]
   },
   {
    "p": "SB_Bommie_2",
    "at": [
-    9.5,
-    18.0,
+    4.33,
+    13.3,
     0.0
    ],
    "rot": 0.6,
    "role": "second mass, behind and right of the focal head",
    "with": "SB_Skirt_2",
-   "why": "Fable r2: three masses only, the right of frame left to open blue; r6 (Fable r5): moved from (7.5, 20) to open a water gap between it and the focal head"
+   "why": "Fable r2: three masses only, the right of frame left to open blue; r6 (Fable r5): moved from (7.5, 20) to open a water gap between it and the focal head; r7 SILHOUETTE: the key frame's second head sits at 73-87 % of the width, its top 25 % down, with water between it and the massif; here 14 m out, x1.3 (r7b sat at 65-78 %: 6 deg right)",
+   "s": 1.3
   },
   {
    "p": "SB_Bommie_4",
@@ -184,20 +188,20 @@
     0.5
    ],
    "to": [
-    -5.2,
-    7.4
+    -7.93,
+    8.27
    ],
    "w": 1.6
   },
   {
    "what": "swim lane through the gate side",
    "from": [
-    -5.3,
-    7.6
+    -8.07,
+    8.44
    ],
    "to": [
-    -5.5,
-    12.5
+    -9.37,
+    13.17
    ],
    "w": 1.4
   }
@@ -232,8 +236,8 @@
     1.05
    ],
    "look": [
-    -0.1,
-    6.5,
+    -2.76,
+    8.54,
     0.85
    ],
    "vfov": 44,
@@ -241,13 +245,13 @@
   },
   "gate": {
    "at": [
-    0.54,
-    5.72,
+    -1.96,
+    7.92,
     0.95
    ],
    "look": [
-    2.32,
-    13.41,
+    -1.96,
+    15.82,
     1.05
    ],
    "vfov": 50,

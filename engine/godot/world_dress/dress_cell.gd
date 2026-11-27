@@ -63,7 +63,9 @@ func _material_for(kind: String) -> Material:
 func build() -> void:
 	for it in manifest.get("items", []):
 		_add(it, String(it.p))
-		if it.has("with"): _add(it, String(it["with"]))
+		if it.has("with"):   # companion pieces sharing the item's transform (sand skirt, rubble foot): one name or a list
+			var w = it["with"]
+			for q in (w if w is Array else [w]): _add(it, String(q))
 	print("DRESS ", name, " ", stats)
 
 func _kind(p: String) -> String:
