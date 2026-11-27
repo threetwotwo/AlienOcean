@@ -169,6 +169,10 @@
   M02 motor FIXes (config thalassa_exact): walking off a drop > 0.36 m falls under gravity; the mid-air jump offset is
   re-based when the floor under her changes (eye dropped 32 cm in one tick off a step); no 60% crouch cut and no loss
   of the eye's trail at take-off (18 cm camera pop jumping from a crouch). WorldQuery rays ignore back faces.
+  Round 2: a planted foot turned past the hip's rotation range asks for a step (the leg solver twisted it about the
+  ankle, sliding heel and ball in fast turns); a foot 3 cm out of reach steps even with the other foot in the air
+  (FORCED_HARD/HARD_MISS 0.03, was 7 cm); the air floor clamp no longer pops a crouched take-off up 14 cm. Now 60 Hz
+  42/45 + 3 known (slope across x2, stairs), 30 Hz 41/45, 120 Hz 38/45, monkeys 2/4 (3.1 and 3.8 cm slides left).
 - M04 body 0.1.0 = Thalassa core/ik-rig.js DiverBodyRig (swim pose, shore walk/wade pose, swim-walk blend, head
   look, no-clip arms and legs) + ik-solvers.js (two-bone IK, leg with fin), procedural-locomotion.js
   (BalanceFootPlacer incl. jumps), physics-control.js (PhysicsControlRig profiles, hit reactions), crit springs and

@@ -22,7 +22,7 @@ var ground_follow := NAN
 var noclip_off := {}
 var _step_dt := 1.0 / 60.0
 const NOCLIP_RATE := 3.0
-const HARD_MISS := 0.07     # m: a planted foot this far out of reach steps at once, even just landed (foot_placer.FORCED_HARD)
+const HARD_MISS := 0.03     # m: a planted foot this far out of reach steps at once, even just landed (foot_placer.FORCED_HARD)
 const MAX_STEP := 1.0 / 55.0     # longest rig step; a longer frame is caught up in sub-steps (30 Hz runs as two 60 Hz steps)
 const SWIM_ANKLE_RATE := 6.0
 var swim_ankle_rel := {}
@@ -1088,6 +1088,13 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			var wgt := 0.33 if (land_age[fkey] < 0.12 and excess <= HARD_MISS) else 1.0     # far out of reach can't wait
 			world_foot_placer.forced[fkey] = excess * wgt if (excess > 0.025 and not fst.stepping) else 0.0
 		var rel_yaw := BM.wrap_pi(fst.yaw - pelv_yaw)
+		if not thalassa_exact and not fst.stepping:
+			# FIX (stress monkey runs): a planted foot turned past the hip's rotation range (int 0.20 / ext 0.48 rad) is
+			# twisted about the ankle by the leg solver, sliding heel and ball; ask for a step before it gets there
+			var trn := -side * rel_yaw
+			if trn > 0.48 * 0.8 or trn < -0.20 * 0.8:
+				var fk3 := "L" if side < 0 else "R"
+				world_foot_placer.forced[fk3] = maxf(world_foot_placer.forced[fk3], 0.026)
 		var fwf := Vector3(-sin(fst.yaw), 0, -cos(fst.yaw))
 		var spj := fwf - fn * fwf.dot(fn)
 		var sfw := BM.nrm(spj) if spj.length() > 1e-4 else fwf

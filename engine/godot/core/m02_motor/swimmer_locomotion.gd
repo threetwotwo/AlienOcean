@@ -317,7 +317,9 @@ func _update_shore(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, 
 		if c.thalassa_exact: shore_air_lag = 0.0
 		elif not was_air: shore_air_lag = maxf(0.0, target_eye_y - pos.y)
 		else: shore_air_lag *= 1.0 - exp_k(18.0, sdt)
-		pos.y = maxf(eff_floor + c.eye_height - 0.1, target_eye_y - shore_air_lag)
+		var air_min: float = eff_floor + c.eye_height - 0.1
+		if not c.thalassa_exact: air_min -= shore_crouch_blend * c.crouch_eye_drop + shore_air_lag   # the floor clamp popped a crouched take-off up 14 cm
+		pos.y = maxf(air_min, target_eye_y - shore_air_lag)
 	else:
 		shore_air_lag = 0.0
 		pos.y = lerpf(pos.y, target_eye_y, exp_k(18.0, sdt))

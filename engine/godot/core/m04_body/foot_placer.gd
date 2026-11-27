@@ -33,7 +33,7 @@ var last_vessel_id = null
 var feet := {"L": Foot.new(), "R": Foot.new()}
 ## Set by the body rig when a planted foot is held back by its reach limits (it would be dragged): step it now.
 const FORCED_MIN := 0.0
-const FORCED_HARD := 0.07     # any request counts; the rig discounts a just-landed foot so the other goes first
+const FORCED_HARD := 0.03     # any request counts; the rig discounts a just-landed foot so the other goes first
 var forced := {"L": 0.0, "R": 0.0}     # set by the rig: how far (m) a planted foot is from where the leg can hold it
 ## Optional world check set by the body rig: filter(body_ground: Vector3, to: Vector3, yaw: float) -> Vector3 returns
 ## a landing spot the foot can really stand on (Thalassa's placer only knew a flat deck).
