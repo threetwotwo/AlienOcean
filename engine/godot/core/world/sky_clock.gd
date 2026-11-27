@@ -1,4 +1,4 @@
-## M30 world clock 0.1.0: the sun, the two moons and the light they give, at any clock hour.
+## M30 world clock 0.1.0 (core/world, the Clock contract): the sun, the two moons and the light they give, at any clock hour.
 ## A straight port of the Unreal-era sky clock's "sky maths" (sun_v184.py, Lighting + Sky threads, Oct-Nov 2026),
 ## which was plain Python tested offline. Same constants, same formulas, same names; checked against that Python
 ## by tests/test_world_clock.gd. World lore lives here: change a constant only with Gary's word.

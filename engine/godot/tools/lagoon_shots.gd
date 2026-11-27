@@ -1,10 +1,12 @@
-## Lagoon look 0.2.0 (engine thread): builds the calm lagoon from world pieces (GLB, world coordinates) plus one hero fish,
+## Lagoon shots 0.3.0 (engine thread, was look/lagoon_look.gd): builds the calm lagoon from world pieces (GLB, world coordinates) plus one hero fish,
 ## lights it with the ported Unreal systems, and renders a shot set. Assets are outside git: pass their folder.
-## 0.2.0: light, exposure and water are no longer picked by eye. The world clock (core/m30_world_clock, the Unreal
-## sky clock's maths) drives the sun/moon light and EV100; the water is the Unreal lagoon's physics (look/water_optics.gd,
+## 0.2.0: light, exposure and water are no longer picked by eye. The world clock (core/world/sky_clock.gd, the Unreal
+## sky clock's maths) drives the sun/moon light and EV100; the water is the Unreal lagoon's physics (core/world/water_optics.gd,
 ## Cdom 0.03, ScatK 0.40, GlowK 2.50) in the seabed, surface and underwater-view shaders. Env: AO_HOUR (default 12).
-## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://look/lagoon_look.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
-## Still to port: the sky (drawn sun, moons, stars), the surface's waves and mirror detail, the sand maps, god rays.
+## 0.3.0: the world (light, sky, exposure, water) comes from adapters/godot/world_root.gd, the same node the game uses.
+## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/lagoon_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
+## Env: AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
+## Still to port: stars, AgX extras, the surface's waves and tide, caustics, god rays.
 extends SceneTree
 
 const WATER_Y := LagoonWaterField.SURFACE_Y   # the Unreal lagoon's saved surface: SurfaceZ 400 cm (tide 0)
@@ -15,7 +17,8 @@ var i := -1
 var wait := 0
 var fish: Node3D
 var ap: AnimationPlayer
-var clock: SkyClockDriver
+var wr: WorldRoot
+var ground: ShaderMaterial
 
 func _init():
 	args = OS.get_cmdline_user_args()
@@ -32,7 +35,7 @@ func _load(path: String) -> Node:
 	return doc.generate_scene(st)
 
 func _setup():
-	WaterOptics.declare_globals()
+	WorldRoot.declare_globals()   # before any water shader compiles
 	var world := Node3D.new(); world.name = "Lagoon"; root.add_child(world)
 	var seabed := ShaderMaterial.new(); seabed.shader = load("res://look/seabed_surface.gdshader")
 	var n := 0
@@ -43,7 +46,11 @@ func _setup():
 		world.add_child(sc); n += 1
 		var mat := seabed
 		if "floor" in f.to_lower():
-			mat = seabed.duplicate(); mat.set_shader_parameter("sand_lock", 1.0)
+			if ground == null and OS.get_environment("AO_WORLDTEX") != "":
+				ground = WorldTextures.make_material(OS.get_environment("AO_WORLDTEX"))   # the shared world material (sand ripples, grains)
+			if ground: mat = ground
+			else:
+				mat = seabed.duplicate(); mat.set_shader_parameter("sand_lock", 1.0)
 		for mi in sc.find_children("*", "MeshInstance3D", true, false):
 			for s in mi.mesh.get_surface_count(): mi.set_surface_override_material(s, mat)
 	print("PIECES ", n)
@@ -52,27 +59,11 @@ func _setup():
 		if "floor" in String(mi.get_parent().name).to_lower() or "floor" in String(mi.name).to_lower():
 			var bb: AABB = mi.global_transform * mi.get_aabb(); lo = minf(lo, bb.position.y); hi = maxf(hi, bb.end.y)
 	print("FLOOR y ", lo, " .. ", hi)
-	# key light, environment and exposure: driven by the world clock
-	var sun := DirectionalLight3D.new(); sun.shadow_enabled = true; sun.directional_shadow_max_distance = 60.0
-	world.add_child(sun)
-	var env := Environment.new()
-	var sky := Sky.new(); var skym := ShaderMaterial.new(); skym.shader = load("res://look/sky.gdshader"); sky.sky_material = skym
-	env.background_mode = Environment.BG_SKY; env.sky = sky; env.background_intensity = 1.0   # sky shader outputs nits
-	env.tonemap_mode = Environment.TONE_MAPPER_AGX
-	env.ssao_enabled = true; env.ssao_radius = 1.2; env.ssao_intensity = 1.6
-	env.ssil_enabled = true; env.ssil_radius = 4.0
-	env.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
-	env.glow_enabled = true; env.glow_intensity = 0.3
-	var we := WorldEnvironment.new(); we.environment = env; world.add_child(we)
-	clock = SkyClockDriver.new(); clock.light = sun; clock.env = env; clock.water_y = WATER_Y
-	clock.hours = float(OS.get_environment("AO_HOUR")) if OS.get_environment("AO_HOUR") != "" else 12.0
-	clock.sky_mat = skym
-	clock.cam_attr = CameraAttributesPhysical.new(); clock.cam_attr.auto_exposure_enabled = false
-	world.add_child(clock)
-	# water surface overhead
-	var surf := MeshInstance3D.new(); var pm := PlaneMesh.new(); pm.size = Vector2(160, 160); surf.mesh = pm
-	surf.position.y = WATER_Y; var wm := ShaderMaterial.new(); wm.shader = load("res://look/water_surface.gdshader"); surf.material_override = wm
-	surf.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; world.add_child(surf)
+	# light, sky, exposure and water uniforms: one WorldRoot driven by the world clock
+	wr = WorldRoot.new()
+	wr.hours = float(OS.get_environment("AO_HOUR")) if OS.get_environment("AO_HOUR") != "" else 12.0
+	world.add_child(wr)
+	world.add_child(wr.make_surface())
 	# hero fish, hovering near the coral heads
 	fish = _load(args[1]) as Node3D
 	if fish:
@@ -93,27 +84,23 @@ func _setup():
 		["05_sky_above", Vector3(0, WATER_Y + 1.5, 10), Vector3(0, WATER_Y + 9.0, -10), 75.0],
 	]
 	# the two moons, wherever the clock puts them
-	var stm := SkyClock.sky_state(clock.hours)
+	var stm := SkyClock.sky_state(wr.hours)
 	var mp := Vector3(0, WATER_Y + 1.5, 10)
-	shots.append(["06_moon_b", mp, mp + SkyClockDriver.to_godot(stm.B.dir) * 10.0, 12.0])
-	shots.append(["07_moon_a", mp, mp + SkyClockDriver.to_godot(stm.A.dir) * 10.0, 12.0])
+	shots.append(["06_moon_b", mp, mp + WorldRoot.to_godot(stm.B.dir) * 10.0, 12.0])
+	shots.append(["07_moon_a", mp, mp + WorldRoot.to_godot(stm.A.dir) * 10.0, 12.0])
 	if OS.get_environment("AO_SHOTS") != "":
 		var keep := OS.get_environment("AO_SHOTS").split(",")
 		shots = shots.filter(func(sh): return sh[0].substr(0, 2) in keep)
 	cam = Camera3D.new(); world.add_child(cam); cam.current = true
-	cam.attributes = clock.cam_attr; clock.cam_attr.frustum_near = 0.02; clock.cam_attr.frustum_far = 400.0
-	# the water between the eye and every pixel
-	var q := MeshInstance3D.new(); var qm := QuadMesh.new(); qm.size = Vector2(2, 2); q.mesh = qm
-	var qmat := ShaderMaterial.new(); qmat.shader = load("res://look/underwater_view.gdshader"); q.material_override = qmat
-	q.extra_cull_margin = 16384.0; q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; cam.add_child(q)
+	wr.attach_camera(cam)
 	_next()
 
 func _next():
 	i += 1
 	if i >= shots.size(): quit(0); return
-	clock.cam_attr.frustum_focal_length = 18.0 / tan(deg_to_rad(shots[i][3]) * 0.5)
+	wr.set_fov(shots[i][3])
 	cam.look_at_from_position(shots[i][1], shots[i][2], Vector3.UP); wait = 0
-	print("LIGHT ", shots[i][0], " ", clock.apply(shots[i][1].y))
+	print("LIGHT ", shots[i][0], " ", wr.apply(shots[i][1].y))
 
 func _process(_d):
 	if cam == null or i < 0 or i >= shots.size(): return false

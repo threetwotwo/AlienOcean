@@ -1,5 +1,5 @@
 // Seabed surface 0.3.0 (engine thread). Static world pieces whose COLOR_0 is paint (floor, rocks, corals, grass).
-// Lit by the ported lagoon water physics (look/water_optics.gd globals): the sun's beam loses exp(-Kd z) on its
+// Lit by the ported lagoon water physics (water_* globals from adapters/godot/world_root.gd): the sun's beam loses exp(-Kd z) on its
 // way down (the key light arrives pre-attenuated to water_zref; this corrects to the pixel's own depth), the
 // sky's diffuse light exp(-Ku z) from above, and the sand's upwelling from below, as in under_model.py.
 // Caustics modulate the sun's beam only (as the Unreal light function did), mean ~1.
