@@ -35,6 +35,12 @@ uniform float moon_edge = 1.5;
 uniform vec3 dome_sun = vec3(0.0, 1.0, 0.0);   // the sun for the dome's shape: lifted to >= 1 deg (twilight stand-in)
 uniform float sky_norm = 1.0;           // set by the driver: dome scale so its ground light = clock sky_lux
 uniform float sea_nits = 0.0;           // below the horizon: the sea, seen from above
+// Under water, the sky Godot's lighting reads (the radiance cubemap: SDFGI's escaping rays) is the water's own light field at
+// water_zref, not the air above: two uniform hemispheres whose irradiance on a normal is exactly w_fill(z_ref, up)
+// (look/water_physics.gdshaderinc): the sky's light through the water from above, the sand's bounce from below. Set by WorldRoot.
+uniform float under_k = 0.0;            // 1 = the eye is under water
+uniform vec3 under_down = vec3(0.0);    // nits, the upper hemisphere (Ek(z_ref) / pi)
+uniform vec3 under_up = vec3(0.0);      // nits, the lower hemisphere (Eu(z_ref) / pi)
 
 const vec3 EXT = vec3(0.0862, 0.1665, 0.2961);
 #include "sky_stars.gdshaderinc"
@@ -97,7 +103,8 @@ vec4 moon(vec3 v, vec3 c, float deg, float real_deg, float albedo, float kelvin,
 }
 void sky() {
 	vec3 v = EYEDIR;
-	if (v.y < -0.02) { COLOR = vec3(sea_nits); }
+	if (AT_CUBEMAP_PASS && under_k > 0.5) { COLOR = v.y >= 0.0 ? under_down : under_up; }
+	else if (v.y < -0.02) { COLOR = vec3(sea_nits); }
 	else {
 		vec3 s = normalize(sun_dir);
 		vec3 air = dome(v, normalize(dome_sun)) * sky_norm;

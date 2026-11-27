@@ -1,5 +1,23 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, look thread): GI on by default, lit by the water's own light
+- Root cause of the black fish under SDFGI: Godot's SDFGI ignores the environment's ambient colour; its escaping rays read the
+  sky's radiance cubemap, which was the air above the water. Fix: under water, the sky shader's cubemap passes
+  (look/sky.gdshader under_*, AT_CUBEMAP_PASS) draw the water's light field at z_ref: upper hemisphere Ek/pi (the sky's light
+  through the water), lower hemisphere Eu/pi (the sand's bounce). Its irradiance on any normal is exactly w_fill(z_ref, up).
+  Check (sun off, key frame camera): open sand L* 49.6 with SDFGI against 48.2 from the analytic fill. The fish is lit and shaded.
+- SDFGI on by default (WorldRoot); AO_SDFGI=0 turns it off. The sea mesh, the underwater screen quad and the floor height pass
+  are kept out of the GI (gi_mode disabled): they are light boundaries and screen passes, not solids.
+- With SDFGI on, the seabed's albedo ratio is only the depth's own change (w_fill(z)/w_fill(z_ref), near 1): Godot's sky light
+  is one field for the scene, with no water between it and a point off z_ref (stand-in for per-probe water depth; owner look thread).
+- Art lever WorldRoot.gi_k (SDFGI energy, AO_GI_K): 1 = physical. Key frame camera, coral shadow / rock face / sunlit sand L*:
+  GI off 50.2 / 48.5 / 74.8; gi_k 1.0 54.1 / 51.2 / 75.7 (the sand's real bounce lifts the shadows); 0.5 47.1 / 47.2 / 74.0;
+  0.35 44.3 / 45.8 / 73.4 (key frame 43.8 / 41-43 / 78). Gary picks.
+- Godot's sky-sourced ambient (no GI) read black in the same check, so without GI the ambient stays one colour as before.
+- Test: tests/test_gi_light_field.gd (in run_all.sh) with a planted fault. Shot tool checks: AO_SDFGI_SKY, AO_SDFGI_OCC,
+  AO_SDFGI_CELL, AO_SDFGI_BOUNCE, AO_SUN=0, AO_SKY_MODE, AO_GI_DEBUG. Occlusion and 0.1 m cells changed the shadow by <3 L*.
+- Mac M1 cost of SDFGI not measured yet (Mac runs paused).
+
 ## 0.6.0-dev (28 Nov 2026): the water's fill light can be occluded
 - Engine: seabed_surface and ground_surface no longer add the water's fill (sky from above, sand bounce from below, through
   the depth) as unoccluded emission. It now goes through Godot's ambient path, so SSAO, SSIL, the material AO and any GI

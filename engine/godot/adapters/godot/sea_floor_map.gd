@@ -55,6 +55,7 @@ func _init() -> void:
 	var mat := ShaderMaterial.new(); mat.shader = load("res://look/sea_floor_height.gdshader"); q.material_override = mat
 	q.layers = 1 << (PASS_LAYER - 1); q.extra_cull_margin = 16384.0
 	q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	q.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 	_cams[1].add_child(q)
 
 static func declare_globals() -> void:
