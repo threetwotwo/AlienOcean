@@ -21,6 +21,10 @@
   (sprung, 3-tick crossings). 11/11 incl. 4 x 300 s camera monkeys; probe-off fault caught. Replaces the 0.1.0 director.
 
 ## 0.6.0-dev (27 Nov 2026), slice setup, not yet in a git repo
+- Engine: sand step 1: Better sand colour lock (SD2: #cdcac4 bare, #c8c4bb sorted) on the floor pieces, and the sand's
+  bounce light in the fish's ambient (Lighting's sand bounce). Near sand L* 70.8 -> 72.4 (Unreal key 74-76), far water
+  unchanged at 59. Still to port: the ripple rule, grains and glints (WorldSurface.ush: needs a Godot converter, since
+  Godot shaders have no mutable globals) and our AgX extras.
 - Engine: sky port 0.1.0 (`look/sky.gdshader`, `look/sky_driver.gd`): the Unreal sun disc and corona (SUN_HLSL) and both
   moons (MOON_HLSL: Lommel-Seeliger face, maria, planetshine, soft edge, phases from the clock) drawn as is, sun x5.29;
   air extinction per band (0.0862, 0.1665, 0.2961) now also colours the key light. Dome: Godot's PhysicalSkyMaterial shape

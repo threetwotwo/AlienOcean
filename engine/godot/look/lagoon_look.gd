@@ -41,8 +41,11 @@ func _setup():
 		var sc := _load(args[0].path_join(f))
 		if sc == null: continue
 		world.add_child(sc); n += 1
+		var mat := seabed
+		if "floor" in f.to_lower():
+			mat = seabed.duplicate(); mat.set_shader_parameter("sand_lock", 1.0)
 		for mi in sc.find_children("*", "MeshInstance3D", true, false):
-			for s in mi.mesh.get_surface_count(): mi.set_surface_override_material(s, seabed)
+			for s in mi.mesh.get_surface_count(): mi.set_surface_override_material(s, mat)
 	print("PIECES ", n)
 	var lo := INF; var hi := -INF
 	for mi in world.find_children("*", "MeshInstance3D", true, false):
