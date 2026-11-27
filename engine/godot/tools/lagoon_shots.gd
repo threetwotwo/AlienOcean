@@ -7,8 +7,9 @@
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/lagoon_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
 ## Env: AO_DRESS=<world_dress/x.json> + AO_DRESS_PIECES=<dir> (an authored place built by world_dress/dress_cell.gd; its cameras become shots 09+), AO_UNDER_EV (art stops under water), AO_GLOW_K (haze strength, 2.5), AO_LIGHT_NEUTRAL=0..1 (art direction: sunlight keeps its colour on the way down), AO_DEPTH_COLOUR=1 (Unreal's depth colour give-back; AO_DEPTH_SHARE its share, default 0.25), AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_AGX_MODE=1 (raw buffer, for checks), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
 ## Light net: AO_CAUS=pixel (per pixel instead of the map), AO_CAUS_T=<s> (hold the net at that second), AO_CAUS_DUMP=<file> (the map as raw float32 RGBA).
+## God rays: AO_GOD=0 turns them off (WorldRoot.god_rays), for before/after. AO_TAA=1: Godot TAA on (Unreal ran TSR; the rays' jitter is averaged).
 ## Night: the Unreal night eye (WorldRoot.apply) and the Unreal stars (look/sky_stars.gdshaderinc). Try AO_HOUR=22 (moonless), 94 (moonlit).
-## Still to port: the surface's waves and tide, god rays (the light net is in: look/caustics.gdshaderinc, adapters/godot/caustics_map.gd).
+## Still to port: the surface's waves and tide (the light net and the god rays are in: look/caustics.gdshaderinc, adapters/godot/caustics_map.gd).
 extends SceneTree
 
 const WATER_Y := LagoonWaterField.SURFACE_Y   # the Unreal lagoon's saved surface: SurfaceZ 400 cm (tide 0)
@@ -76,6 +77,8 @@ func _setup():
 	if OS.get_environment("AO_AGX_MODE") != "": wr.agx_fx.mode = int(OS.get_environment("AO_AGX_MODE"))
 	if OS.get_environment("AO_CAUS") == "pixel": wr.caustics.per_pixel = true   # the light net per pixel instead of from its map (checks)
 	if OS.get_environment("AO_CAUS_T") != "": wr.caustics.frozen_time = float(OS.get_environment("AO_CAUS_T"))   # hold the net at this second
+	if OS.get_environment("AO_GOD") == "0": wr.god_rays = false   # the god rays off (before/after)
+	if OS.get_environment("AO_TAA") == "1": root.use_taa = true
 	if OS.get_environment("AO_CAUS_DUMP") != "": _caus_dump = OS.get_environment("AO_CAUS_DUMP")
 	world.add_child(wr.make_surface())
 	var dress: DressCell = null
