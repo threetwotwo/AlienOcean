@@ -1,0 +1,19 @@
+{
+  "_doc": "M31 school behaviour records, keyed by the creature maker's species id (cage.json 'species'). Anatomy stays in the maker's record; body length comes from the fish glb. Values in BL, BL/s, s unless the key ends in _m (metres) or _deg. 'base' names a preset from the Nov 1 schooling paper (papers/systems/schooling/, Table 1 + presets). bl_m_standin is used only until the glb lands. Every number cites its source in 'src'.",
+  "presets": {
+    "open":   {"v0": 2.0, "d0": 1.1, "la": 5.0, "lal": 3.0, "g_att": 1.2, "g_ali": 2.6, "eps": 0.5, "k": 7, "tau_v": 0.8, "k_speed": 1.0, "k_turn": 2.2, "wmax_deg": 220, "noise": 0.25, "vspread": 0.04, "vmin": 0.15, "fov_deg": 300, "depth_lo": 3.0, "depth_hi": 40.0, "spread": 7.0, "breathe": 0.0, "g_far": 0.5, "n_far": 4, "alert_T": 15.0, "alert_far": 1.0, "alert_ali": 0.0,
+               "src": "schoollab_v87 PRESETS open (paper open preset + alarm v1); REF P 0.965, NND 0.80 BL, speed 1.91 BL/s"},
+    "lagoon": {"v0": 0.45, "d0": 1.6, "la": 5.0, "lal": 2.0, "g_att": 0.8, "g_ali": 0.8, "eps": 0.3, "k": 6, "tau_v": 1.2, "k_speed": 0.6, "k_turn": 1.6, "wmax_deg": 150, "noise": 0.48, "vspread": 0.06, "vmin": 0.05, "fov_deg": 300, "depth_lo": 2.0, "depth_hi": 30.0, "spread": 8.0, "breathe": 0.25, "breathe_T": 6.0, "g_far": 1.0, "n_far": 4, "alert_T": 15.0, "alert_far": 1.0, "alert_ali": 0.0, "R_home": 8.0, "init_spread": 1.2,
+               "src": "schoollab_v87 PRESETS lagoon; REF P 0.59, NND 1.02 BL, speed 0.39 BL/s; No. 22 film P 0.5-0.6, 0.3-0.5 BL/s"},
+    "mill":   {"v0": 1.5, "d0": 1.0, "la": 8.0, "lal": 1.2, "g_att": 1.6, "g_ali": 0.9, "eps": 0.2, "k": 7, "tau_v": 1.0, "k_speed": 0.5, "k_turn": 2.0, "wmax_deg": 180, "noise": 0.20, "vspread": 0.06, "vmin": 0.15, "fov_deg": 300, "depth_lo": 2.0, "depth_hi": 24.0, "spread": 6.0, "R_home": 3.0, "g_far": 1.0, "n_far": 4, "alert_T": 15.0, "alert_far": 1.0, "alert_ali": 0.0,
+               "src": "research/schooling/school.py PRESETS mill (bigeye trevally daytime mill, Holland et al. 1996); M 0.88"}
+  },
+  "species": {
+    "trevally": {"base": "open", "bl_m_standin": 0.45, "school_size": 160, "d0": 1.45, "v0": 1.4, "fid_m": 2.5, "rush_speed_m": 1.2,
+                 "src": "jack mackerel / mackerel NND 1.43-1.51 BL (Pitcher & Partridge 1979, paper Table 1); cruise ~1.1-1.5 BL/s (anthias / jacks, No. 22); FID stand-in 2.5 m (reef fish FID 1-4 m to divers, Gotanda et al. 2009)"},
+    "lagoon_baitfish": {"base": "lagoon", "bl_m_standin": 0.12, "school_size": 120, "fid_m": 1.6, "rush_speed_m": 0.9, "R_home": 6.0,
+                 "src": "key frame v4 (120 fish at 12 cm over the rock); lagoon wall preset. STAND-IN species id until the maker names one"},
+    "open_scad": {"base": "open", "bl_m_standin": 0.2, "school_size": 600, "fid_m": 2.0, "rush_speed_m": 1.0,
+                 "src": "paper open preset (scad / sardine / herring), NND 0.82 BL herring"}
+  }
+}
