@@ -197,6 +197,7 @@ def stress(C, V, rec, gape_steps=None, flare_steps=(0, 10, 20), jaw_w=None):
 # skin triangle squeezed under CRUSH of its rest area: it pinches on screen). Ladders stop at twice the target.
 HEADROOM, STRAIN, FLARE_REAL, GAPE_MAX, DROP, CRUSH = 1.3, 0.3, 23.0, 65.0, 10.0, 0.1      # DEFAULTS of the test
 STEP = dict(gape=5, flare=5, bend=15, wave=5, arch=5, combo=10)
+CAP = dict(bend=180, wave=60, arch=60)      # past these no fish body goes, however slender (a C-start tops out near 180)
 UNIT = dict(gape='deg', flare='deg', bend='deg tail heading', wave='deg peak heading', arch='deg tail heading',
             combo='% of every target at once')
 
@@ -218,8 +219,9 @@ def targets(C, rec):
     T = dict(gape=min(GAPE_MAX, HEADROOM * rec.get('gape_deg', 30.0)), flare=HEADROOM * FLARE_REAL,
              bend=HEADROOM * deg(STRAIN * Lb / w), wave=HEADROOM * deg(STRAIN * Lb / (2 * np.pi * w)),
              arch=HEADROOM * deg(STRAIN * Lb / d))
-    T = {k: (round(float(v), 1) if v >= DROP else None) for k, v in T.items()}
-    T['combo'] = round(100 / HEADROOM, 1)
+    T = {k: min(v, CAP.get(k, 1e9)) for k, v in T.items()}
+    T = {k: (float(max(STEP[k], round(v / STEP[k]) * STEP[k])) if v >= DROP else None) for k, v in T.items()}   # on the ladder
+    T['combo'] = 80.0                         # about 1 / HEADROOM: every pose at its real size, all at once
     return T
 
 
