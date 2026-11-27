@@ -7,7 +7,8 @@
 // Two readers of the same waves (look/caustic_waves.gdshaderinc), picked by the global water_caus_k.x:
 //   1 = the map, as v98: adapters/godot/caustics_map.gd draws the net once a frame into water_caus_map (512 px over
 //       the 2.56 m tile, r g b = 0.8, 2, 5 m deep); a lit point reads it at its sunlight's entry point.
-//   0 = per pixel, for checks and wherever no map is drawn: the same maths on the waves' sum at every lit point
+//       Its slopes are the FFT sea's while that runs (look/caustics_slope.gdshader), else the 32 waves.
+//   0 = per pixel, for checks and wherever no map is drawn: the same maths on the 32 waves' sum at every lit point
 //       (about 1000 sin/cos a copy).
 // Both lay v98's three turned copies of the tile over each other (tile break), so the 2.56 m repeat does not show.
 // Frame: the island's (x east, y north), metres. Godot (x, y, z) -> island (x, -z).

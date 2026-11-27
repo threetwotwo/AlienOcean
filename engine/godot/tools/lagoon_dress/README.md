@@ -27,5 +27,6 @@ Built pieces live outside git in the project files: `assets/world/lagoon_keyfram
 
 ## Not done here (owners)
 Light, fog, water and the material shader: engine thread (`look/`). The school: fish school thread (keep-clear volume in the
-manifest). The fish: creature maker. Terrain's fallen gate blocks and sand seat for v18c (`seabed/arch_seat_v18c_*`) are not in the
-project files any more; the head stands on the floor without its banked seat (logged).
+manifest). The fish: creature maker. Terrain's sand seat for v18c (`seabed/arch_seat_v18c_*`) is not in the project files any more; the
+head's foot is regrown here instead (env GATE_FALL = gate_fall.obj from `seabed/tools/gate_fall.py` on a flat seat; inputs kept in
+`assets/world/lagoon_keyframe/gate_fall/`). Export env: DRESS_MANIFEST (layout for the meadow cull), GATE_FALL.
