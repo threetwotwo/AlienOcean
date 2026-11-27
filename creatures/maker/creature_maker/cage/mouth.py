@@ -52,6 +52,19 @@ class Mouth:
     pass
 
 
+IN_MG = 0.0015     # interior surfaces stay at least this far inside the body (SL); thin snouts and puffer cheeks broke it
+
+
+def keep_inside(form, P, step, it=40):
+    """move only the points closer than IN_MG to the skin, by repeated small steps inward, until they clear it."""
+    P = P.copy()
+    for _ in range(it):
+        bad = form.sd_body(P) > -IN_MG
+        if not bad.any(): break
+        P[bad] = step(P[bad])
+    return P
+
+
 def plan(B):
     """lip loop and the shared head ring, before the template grid is built. Clamps the eye blocks to ring iK.
     Writes B.mouth (ML, x_r, iK, jr, snout chart, lip loop LIP3/LIPX/LIPT/LIPF, XK, XK_EYE_SHORT)."""
@@ -135,6 +148,7 @@ def build_cavity(B):
     cw = np.array([max(0.0, 1 - min(abs(j - jr), abs(j - (NT - jr))) / 2.5) for j in range(NT)])
     lip_in = np.array([p + np.array([TLIP * (1 - 2 * c), 0, 0]) - (form.radial(p) * TLIP * (0.6 + 0.4 * c) if p[0] > 1e-4 else 0)
                        for p, c in zip(LIP3, cw)])
+    lip_in = keep_inside(form, lip_in, lambda P: P + np.array([0.0005, 0, 0]) - np.array([form.radial(p) * 0.0005 for p in P]))
     x_c0 = float(lip_in[:, 0].mean()) + 0.004; y_l = float(LIP3[:, 1].mean())
 
     def cav_ring(x):
@@ -143,7 +157,9 @@ def build_cavity(B):
         hc = 0.32 * a_; top = min(form.TOP(x) - 0.012, eyy - er - 0.008 if abs(x - ex) < er * 1.2 else 9); bot = form.BOT(x) + 0.012
         hc = max(min(hc, top - ym, ym - bot), 0.003); wc = max(0.48 * b_, 0.004)
         ps = 2 * np.pi * np.arange(NT) / NT
-        return np.stack([np.full(NT, x), ym + hc * np.cos(ps), wc * np.sin(ps)], -1)
+        R = np.stack([np.full(NT, x), ym + hc * np.cos(ps), wc * np.sin(ps)], -1)
+        cen = np.array([x, ym, 0.0])
+        return keep_inside(form, R, lambda P: cen + (P - cen) * 0.97)
     CROWS = [M.LIPV, [mesh.add_v(p, np.nan, np.nan) for p in lip_in]]
     CR = [lip_in]
     for c_ in range(2, NC + 1):

@@ -12,7 +12,9 @@ def unwrap(B):
     T, chart, mesh, M = B.T, B.chart, B.mesh, B.mouth; NT = T.NT; V = B.V; faces, ftag = mesh.faces, mesh.ftag
     rho0 = M.snout.rho0
     RHS = float(rho0(np.linspace(0, 2 * np.pi, 73)).max())          # the front disc unrolls in front of u = 0
-    S_UV = 0.94 / (chart.LEN.max() + RHS + 0.02)                    # texels per SL, the same along and round the body
+    # texels per SL, the same along and round the body: as large as fits both the length and the half girth (deep bodies:
+    # angelfish, batfish are taller than long per island, so the girth decides)
+    S_UV = min(0.94 / (chart.LEN.max() + RHS + 0.02), 0.46 / chart.ARC[:, -1].max())
     GIRTH = chart.ARC[:, -1].max()
 
     def body_uv(x, th, side):

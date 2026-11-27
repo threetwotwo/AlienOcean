@@ -36,6 +36,7 @@ def build_fins(form, rec, out):
     ol = np.array(c['outline']); lens = c['len'] * np.interp(ty, ol[:, 0], ol[:, 1]) + 0.012
     card(base, dirs, lens, 6, 'caudal', c['rays'])
     for name in ('pectoral', 'pelvic'):
+        if name not in F: continue          # fins the record does not have are not made
         f = F[name]
         for sg in (1, -1):
             Mb = 9; tt = np.linspace(0, 1, Mb)
@@ -53,7 +54,7 @@ def build_fins(form, rec, out):
             dirs = dirs / np.linalg.norm(dirs, axis=1, keepdims=True)
             card(base, dirs, f['len'] * prof, 4, f'{name}_{"L" if sg > 0 else "R"}', f['rays'])
     # fin atlas: one rectangle per fin, shared between left/right paired fins
-    keys = ['caudal'] + [m['name'] for m in F['median']] + ['pectoral', 'pelvic']
+    keys = ['caudal'] + [m['name'] for m in F['median']] + [n for n in ('pectoral', 'pelvic') if n in F]
     RECTS = {}
     for i, k in enumerate(keys):                             # simple shelf grid, 3 columns
         cu, rv = i % 3, i // 3; nrows = (len(keys) + 2) // 3

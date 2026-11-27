@@ -32,7 +32,9 @@ def poly_sd2(px, py, poly):
 
 
 def smooth_curve(pts, n=24):
-    a = np.array(pts, float); t = np.r_[0, np.cumsum(np.linalg.norm(np.diff(a, axis=0), axis=1))]
+    a = np.array(pts, float)
+    a = a[np.r_[True, np.linalg.norm(np.diff(a, axis=0), axis=1) > 1e-9]]     # repeated record points would stall the spline
+    t = np.r_[0, np.cumsum(np.linalg.norm(np.diff(a, axis=0), axis=1))]
     tt = np.linspace(0, t[-1], n)
     return [[float(PchipInterpolator(t, a[:, 0])(v)), float(PchipInterpolator(t, a[:, 1])(v))] for v in tt]
 
