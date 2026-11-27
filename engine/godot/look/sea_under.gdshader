@@ -17,6 +17,7 @@ render_mode unshaded, cull_front, world_vertex_coords, fog_disabled, shadows_dis
 #include "res://look/sea_waves.gdshaderinc"
 global uniform vec3 water_sun_air;      // toward the key body in air (Godot y-up)
 global uniform float water_sun_lux;     // its beam, lux on a surface facing it
+#include "res://look/sea_foam_shade.gdshaderinc"   // the whitecaps' look (after the lines above: it uses them)
 uniform float nq = 32.0;                // quads per ring (the mesh's)
 uniform float fine3 = 1.0;              // v89: the finest cascade, underside only
 uniform float sun_size = 1.0;           // x the real sun's disc (0.533 deg)
@@ -100,6 +101,9 @@ void fragment() {
 		float up = step(0.0, water_sun_air.y);
 		acc += up * tok * tr * vec3(1.0, 0.97, 0.9) * (1.7689 * water_sun_lux / (6.2831853 * s2_i)) * exp(-0.5 * ang_i * ang_i / s2_i);
 	}
+	// the whitecaps from below (tank v374): foam lets dull daylight through in place of the window's sky and sun
+	SeaFoam fo = sea_foam_read(still, wi, cam, nq, TIME);
+	acc = sea_foam_under_window(fo, acc);
 	// the mirror (v67 UnderPhys): the water's glow along the reflected ray + the floor where it lands. v73 (S-B): where the
 	// ray really lands, marched over the floor map (6 steps, then the crossing interpolated), within 30 m and where the
 	// mirror counts (R > 0.06); its colour from the map. Outside the map: the still floor (v67's site depth).
@@ -134,5 +138,6 @@ void fragment() {
 	vec3 glow = w_glow(rg, 0.0, uL);
 	vec3 u_mir = glow + f_lit * exp(-c * uL);
 	acc += (1.0 - tr) * mirror_k * u_mir;
+	acc = sea_foam_under_haze(fo, acc);                     // the bubble cloud under breaking water: a bright haze
 	ALBEDO = min(acc * water_exposure, vec3(30000.0));
 }
