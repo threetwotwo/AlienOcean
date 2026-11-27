@@ -26,6 +26,7 @@ const MAX_STEP := 1.0 / 30.0     # longest rig step; a longer frame is caught up
 const SWIM_ANKLE_RATE := 6.0
 var swim_ankle_rel := {}
 var swing_floor := {"L": NAN, "R": NAN}
+var pelvis_yield := 0.0     # how far the pelvis is lowered so a planted foot stays reachable
 var land_age := {"L": 0.0, "R": 0.0}     # seconds each foot has been planted
 const FOOT_R := 0.035       # foot half-width used for wall clearance
 ## The sole plate's heel, ball-centre and toe ends plus its four corners in the foot frame (the mannequin's sole box:
@@ -894,6 +895,29 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 				var gn: Vector3 = get_normal.call(spot.x, spot.z) if get_normal != null else Vector3.UP
 				if is_finite(gy) and (absf(gy - lp.y) > 0.36 or gn.y < 0.56):
 					bad = maxf(bad, 0.06)
+				elif bad <= 0.0:
+					# FIX (stress B37): a foot straddling a step edge (heel and toe grounds differ by a step) moves onto one
+					# tread: forward onto the far one if 12 cm is enough, else back onto the near one
+					var heel_p := spot - ff * 0.03
+					var toe_p := spot + ff * 0.15
+					var gh: float = get_floor.call(heel_p.x, heel_p.z)
+					var gt2: float = get_floor.call(toe_p.x, toe_p.z)
+					# what the heel's slope predicts at the toe; a step is a jump beyond that (a 15-30 deg ramp is not)
+					var nh2: Vector3 = get_normal.call(heel_p.x, heel_p.z) if get_normal != null else Vector3.UP
+					var slope_k := -(nh2.x * ff.x + nh2.z * ff.z) / maxf(0.3, nh2.y)
+					if is_finite(gh) and is_finite(gt2) and absf(gt2 - (gh + slope_k * 0.18)) > 0.04 and absf(gt2 - gh) < 0.36:
+						var a := 0.0
+						var b := 0.18
+						for _k in 6:     # find the edge along the foot
+							var m := (a + b) * 0.5
+							var pm := heel_p + ff * m
+							if absf(get_floor.call(pm.x, pm.z) - (gh + slope_k * m)) < 0.02: a = m
+							else: b = m
+						var fwd_shift := b + 0.02           # heel just past the edge
+						var back_shift := 0.18 - a + 0.02   # toe just short of it
+						if fwd_shift <= 0.12: spot += ff * fwd_shift
+						else: spot -= ff * back_shift
+						break
 				if bad <= 0.0: break
 				var back := Vector3(lp.x - spot.x, 0, lp.z - spot.z)
 				if back.length() < 0.02: break
@@ -943,6 +967,29 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 	if b_amp == 0.0: b_amp = 1.0
 	var hip_h: float = 0.726 + loco.pelvisOffset.y + b_cen * 0.0045 * b_amp
 	var hip_lat: float = loco.pelvisOffset.x + bo.idleHipShift
+	if not thalassa_exact and get_floor != null:
+		# FIX (stress B37 stairs): the pelvis yields to a planted foot it would otherwise lift off the ground. The eye
+		# climbs a stair as soon as her centre crosses the riser, and the trailing leg, still on the step below, was
+		# stretched past its length: the foot floated up and dragged. A foot behind her gets up to 7 cm for its heel
+		# rising (the toe pivot), so ordinary walking is unchanged.
+		var need := 0.0
+		if not s.shore_is_airborne:
+			var reach := (thigh_len + shin_len) * 0.985
+			for side in [-1.0, 1.0]:
+				var fst2: Dictionary = loco.footL if side < 0 else loco.footR
+				if fst2.stepping: continue
+				var g2: float = get_floor.call(fst2.pos.x, fst2.pos.z)
+				if not is_finite(g2) or absf(g2 - floor_here) > 0.36: continue
+				var hip2: Vector3 = ground + up * hip_h + w_right * (side * hip_half_w + hip_lat)
+				var dxz := Vector2(hip2.x - fst2.pos.x, hip2.z - fst2.pos.z)
+				var horiz := dxz.length()
+				if horiz >= reach: continue
+				var behind := clampf(-(Vector2(w_fwd.x, w_fwd.z).dot(-dxz)) / 0.2, 0.0, 1.0)
+				var max_y := g2 + 0.052 + 0.07 * behind + sqrt(reach * reach - horiz * horiz)
+				need = maxf(need, hip2.y - max_y)
+		need = clampf(need, 0.0, 0.18)
+		pelvis_yield = lerpf(pelvis_yield, need, BM.expk(25.0 if need > pelvis_yield else 8.0, sdt))
+		hip_h -= pelvis_yield
 	var slf: float = loco.spineLeanFwd
 	var sll: float = loco.spineLeanLat
 	var pelvis_pos := ground + (up * hip_h + (w_right * hip_lat + w_fwd * (slf * 0.05)))
@@ -1048,7 +1095,9 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 						# a lip or riser she can stand on top of (within a step, walkable) is ground, not a wall
 						var gt: float = get_floor.call(tip.x, tip.z) if get_floor != null else -INF
 						var nt: Vector3 = get_normal.call(tip.x, tip.z) if get_normal != null else Vector3.UP
-						if is_finite(gt) and absf(gt - fgy) < 0.36 and nt.y >= 0.56 and tip.y > gt - 0.02 and not (_solid != null and _solid.call(tip + Vector3(0, 0.03, 0))): continue
+						# (up to 6 cm under that top counts, as the sole lift raises those; a pitched toe tip on a stair tread sits
+						# there, and pushing it out of the riser below shoved the planted foot 20 cm back off the step)
+						if is_finite(gt) and absf(gt - fgy) < 0.36 and nt.y >= 0.56 and tip.y > gt - 0.06 and not (_solid != null and _solid.call(Vector3(tip.x, gt + 0.01, tip.z))): continue
 						var nh: Vector3 = hit.normal; nh.y = 0.0
 						if nh.length() < 1e-3: continue
 						nh = nh.normalized()
@@ -1068,7 +1117,12 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 				shift = (shift + push).limit_length(0.40)
 				solved = BM.leg(hip, ft + shift, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
 			ft += shift
-			if not fst.stepping and Vector2(shift.x, shift.z).length() > 0.002:
+			var same_ground := true
+			if get_floor != null:
+				var g_a: float = get_floor.call(fst.pos.x, fst.pos.z)
+				var g_b: float = get_floor.call(fst.pos.x + shift.x, fst.pos.z + shift.z)
+				same_ground = is_finite(g_a) and is_finite(g_b) and absf(g_a - g_b) < 0.03
+			if not fst.stepping and same_ground and Vector2(shift.x, shift.z).length() > 0.002:
 				# the pushed spot becomes where the foot is planted (the review's root fix): the placer then knows where
 				# it stands, so the push is not redone every tick and the foot is not judged out of reach and re-stepped
 				var pf_: Variant = world_foot_placer.feet["L" if side < 0 else "R"]
