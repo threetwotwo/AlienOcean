@@ -21,7 +21,7 @@ func _init():
 	var a := WaterOptics.absorb(wr.cdom); var b := WaterOptics.scatter(wr.scat_k)
 	var ku: Vector3 = wr._art_k((a + WaterOptics.BB * b) / 0.75)
 	var st := SkyClock.sky_state(12.0)
-	var ek: Vector3 = Vector3(exp(-ku.x * wr.z_ref), exp(-ku.y * wr.z_ref), exp(-ku.z * wr.z_ref)) * st.skylux * WaterOptics.FRESNEL_SKY
+	var ek: Vector3 = Vector3(exp(-ku.x * wr.z_ref), exp(-ku.y * wr.z_ref), exp(-ku.z * wr.z_ref)) * st.skylux * WaterOptics.FRESNEL_SKY * wr.sky_fill_k
 	var err: float = (down * PI - ek).length() / ek.length()
 	print("GI1 under_k ", m.get_shader_parameter("under_k"), "  Ek rel err ", snappedf(err, 1e-5), "  Eu/Ek ", snappedf((up * PI).length() / ek.length(), 1e-3))
 	if float(m.get_shader_parameter("under_k")) != 1.0 or err > 1e-4: ok = false; print("FAIL GI1 the under-water sky is not the water's light field")
