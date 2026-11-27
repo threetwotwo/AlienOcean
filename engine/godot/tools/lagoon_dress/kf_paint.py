@@ -19,8 +19,9 @@ CRUST_SAT, CORAL_SAT = 2.2, 1.35
 # Art direction for the Godot water (Fable critique r2, 27 Nov): under Godot's blue water light the kf_family top (olive-gold, sat 1.1)
 # reads lime and the wall sits at the fog's value. Gary 27 Nov: art direction trumps realism. One family, value from light:
 TOP_CHROMA = 0.5    # x the top zone's saturation (sage, not lime)
-WALL_DARK = 0.82    # x the wall values (edge survives the haze)
-TABLE_TIP = '#f3b08c'   # the table coral's rim: paler salmon, not yellow-green
+WALL_DARK = 0.90    # x the wall values (edge survives the haze; r6 Fable: 0.82 read 10 % too dark against the key frame)
+WALL_CHROMA = 0.80  # x the wall saturation (r6 Fable: walls 20 % too chromatic under the blue light)
+TABLE_TIP = '#f2a99c'   # the table coral's rim: paler salmon-pink (r6 Fable: #f3b08c still read yellow at the rim)
 LAGOON = '/mnt/project-files/life/colony_maker/'
 CORAL_KINDS = {
     'table':    dict(under=0.38, tips='rim', groove=0.30, colours='coral_table_crown'),
@@ -59,8 +60,8 @@ def zones(V, N, E):
 def rock(V, N, E, z0=0.0):
     Z = zones(V, N, E); h = V[:, 2] - z0
     top_hi = sat(mixl(lin(PAL['turf']), lin('#c99a50'), 0.90), 1.10 * TOP_CHROMA); top_lo = sat(mixl(lin(PAL['turf']), lin('#c99a50'), 0.75), 1.05 * TOP_CHROMA)
-    wall_hi = sat(mixl(lin(PAL['rock'], 1.5), lin('#a39a8c', 1.5), 0.4), 0.85) * 0.75 * WALL_DARK
-    wall_lo = sat(mixl(lin(PAL['rock'], 1.4), lin('#8d9ba2', 1.4), 0.5), 0.45) * 0.75 * WALL_DARK
+    wall_hi = sat(mixl(lin(PAL['rock'], 1.5), lin('#a39a8c', 1.5), 0.4), 0.85 * WALL_CHROMA) * 0.75 * WALL_DARK
+    wall_lo = sat(mixl(lin(PAL['rock'], 1.4), lin('#8d9ba2', 1.4), 0.5), 0.45 * WALL_CHROMA) * 0.75 * WALL_DARK
     topm = smooth(Z['Up'], 0.35, 0.80)
     top = mix(smooth(Z['Up'], 0.70, 0.98), top_lo, top_hi)
     wall = mix(smooth(h, 0.0, 1.4), wall_lo, wall_hi)
