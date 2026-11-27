@@ -1,0 +1,12 @@
+# Godot
+.godot/
+*.import
+export_presets.cfg
+/android/
+# builds and big binaries (listed in assets.lock.json instead)
+*.glb
+*.fbx
+*.zip
+builds/
+renders/
+.DS_Store
