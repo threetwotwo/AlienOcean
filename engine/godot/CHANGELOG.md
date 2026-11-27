@@ -1,5 +1,17 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): the arch's foot and round 6 of the lagoon dressing
+- World: the focal arch head (heads_v18c) now stands on its own fallen rock: `SB_Bommie_0_v18c_apron` = Terrain's gate fall
+  (`seabed/tools/gate_fall.py` v3, grown from the head's own `handoff_terrain.json` fall record: 14 slab blocks 0.2-0.75 m at both
+  mouths, roof and wear chips; flat seat, local wave bearing 40 as the key frame rig's arch_seat_v18c_r5_w40) plus the
+  `rubble_rule.py` v11 apron round its real outline. Blocks carry one convex hull each, chips one concave mesh. Painted with the
+  kit's own age ramp (reef_rock_rgb): the rig's KF_Rock put the sand film over whole low blocks.
+- World: meadow tiles culled at export by the key frame rig's `habitat.cull_meadow` for this layout (grazing halo round heads and
+  corals, upstream scour, open lanes; whole blades). Second head to (9.5, 18) (water gap), staghorn to (0.45, 5.6). Paint: rock
+  walls x0.90 value and x0.80 chroma, table rim #f2a99c. Manifest 0.5.0.
+- Fable critique r6: FAIL overall, foreground group now matches; next: rounded buttress boulders at the camera-facing foot,
+  second head nearer and larger in frame, school + hero fish material (other threads), uniform salmon table.
+
 ## 0.6.0-dev (28 Nov 2026): one sky dome
 - Engine: look/sky.gdshader takes its dome from look/sky_dome.gdshaderinc (the water surface's copy), so the sky overhead
   and the sky in the water can't drift apart. The old look/water_surface.gdshader is removed (SeaSurface replaced it,

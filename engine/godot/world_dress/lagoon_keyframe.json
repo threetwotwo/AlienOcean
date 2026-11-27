@@ -1,5 +1,5 @@
 {
- "version": "0.4.0",
+ "version": "0.5.0",
  "name": "lagoon_keyframe",
  "intent": "The approved key frame (15 Nov, Blender) as a place in the open-world lagoon: a weathered head with a gate (focal point, upper left third), warm coral heads leading in from the near sand (table coral as the colour accent), the grown meadow framing the right edge, open sand and a clear blue lane for the fish school. Restrained, Japanese garden: three rock masses (focal arch, one behind, one far), five coral heads, one meadow bed, the rest is sand and water.",
  "frame": "key frame layout metres (Blender: x right, y forward, z up). godot = anchor_yaw * (x, z, -y) + anchor",
@@ -26,19 +26,20 @@
    ],
    "rot": 5.18,
    "role": "focal head: Rock's heads_v18c (Gary's pick 21 Nov), gate turned to face the key camera",
-   "why": "upgrade: v18c replaces kit v18 b0 (layout_arch_g.json, Style 21 Nov); set back along the key camera's ray from 10.6 to 13.0 m (Fable r2 + measured r3: 10.6 m cut the top, 16.5 m lost it in the haze)"
+   "why": "upgrade: v18c replaces kit v18 b0 (layout_arch_g.json, Style 21 Nov); set back along the key camera's ray from 10.6 to 13.0 m (Fable r2 + measured r3: 10.6 m cut the top, 16.5 m lost it in the haze); r6 (Fable r5 \"hard base line\"): its foot, the gate fall Terrain grows from this head's own fall record (14 blocks at both mouths, roof and wear chips, seabed/tools/gate_fall.py v3) plus the rubble_rule v11 apron round its real outline",
+   "with": "SB_Bommie_0_v18c_apron"
   },
   {
    "p": "SB_Bommie_2",
    "at": [
-    7.5,
-    20.0,
+    9.5,
+    18.0,
     0.0
    ],
    "rot": 0.6,
    "role": "second mass, behind and right of the focal head",
    "with": "SB_Skirt_2",
-   "why": "Fable r2: three masses only, the right of frame left to open blue"
+   "why": "Fable r2: three masses only, the right of frame left to open blue; r6 (Fable r5): moved from (7.5, 20) to open a water gap between it and the focal head"
   },
   {
    "p": "SB_Bommie_4",
@@ -85,12 +86,13 @@
   {
    "p": "kf_staghorn_3",
    "at": [
-    -0.15,
+    0.45,
     5.6,
     0.0
    ],
    "rot": 0.0,
-   "role": "branching coral, mid"
+   "role": "branching coral, mid",
+   "why": "; r6 (Fable r5): 0.6 m right, out of the boulder's silhouette"
   },
   {
    "p": "kf_finger_4",
@@ -111,7 +113,8 @@
    ],
    "rot": 0.0,
    "keep": 1,
-   "role": "meadow bed (colony maker's grown tiles moved as one)"
+   "role": "meadow bed (colony maker's grown tiles moved as one)",
+   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
   },
   {
    "p": "kf_LG_seagrass_m2_1_1",
@@ -121,7 +124,8 @@
     0.0
    ],
    "rot": 0.0,
-   "keep": 1
+   "keep": 1,
+   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
   },
   {
    "p": "kf_LG_seagrass_m2_1_2",
@@ -131,7 +135,8 @@
     0.0
    ],
    "rot": 0.0,
-   "keep": 1
+   "keep": 1,
+   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
   },
   {
    "p": "kf_LG_seagrass_m2_2_0",
@@ -141,7 +146,8 @@
     0.0
    ],
    "rot": 0.0,
-   "keep": 1
+   "keep": 1,
+   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
   },
   {
    "p": "kf_LG_seagrass_m2_2_1",
@@ -151,7 +157,8 @@
     0.0
    ],
    "rot": 0.0,
-   "keep": 1
+   "keep": 1,
+   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
   }
  ],
  "keep_clear": [
