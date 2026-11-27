@@ -124,9 +124,14 @@ def build_loops(B):
     QM += [(1 - k / KM) * QM[0] + (k / KM) * RK for k in range(1, KM)] + [RK]
     # corner fan (HP-LIPS lesson): at each rictus the loops step straight back from the corner along a pinned spoke, so
     # the first loops go round the corner instead of sliding across the slit towards the sparse lower lip
+    # the spoke leaves the corner along the slit's outward bisector (a quadratic curve to ring iK), so the first loops
+    # wrap round the corner instead of lying over the lip strip (alfonsino: loops crossed the upper lip at the rictus)
     jc_ = [jr, NT - jr]
-    for k in range(1, KM):
-        for jc in jc_: QM[k][jc] = (1 - k / KM) * QM[0][jc] + (k / KM) * RK[jc]
+    for jc in jc_:
+        Q0, R_ = QM[0][jc], RK[jc]; d0 = Q0 - 0.5 * (QM[0][(jc - 1) % NT] + QM[0][(jc + 1) % NT])
+        d0 = d0 / (np.linalg.norm(d0) + 1e-12); Cc = Q0 + d0 * 0.5 * np.linalg.norm(R_ - Q0)
+        for k in range(1, KM):
+            t = k / KM; QM[k][jc] = (1 - t) ** 2 * Q0 + 2 * t * (1 - t) * Cc + t * t * R_
     relax_rings(QM, 60, pin=jc_)
     B.debug('mouth', QM=np.array(QM))
     MROWS = [LIPV]

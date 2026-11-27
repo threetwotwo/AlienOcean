@@ -74,6 +74,18 @@ def adapt(path):
     out['cover'] = dict(rear=rear, preop=preop, step=float(get(R, 'skeleton.gills.step', 0.006 * SL, need=False)) * f)
     P('opercle plate', 'record.skeleton.gills.opercle.margin + subopercle'); P('preopercle plate', 'record.skeleton.gills.preopercle')
     out['gill_u'] = float(get(R, 'gill.u')) * f
+    # jaw joint (quadrate-articular) and opercle hinge: the pivots for the gape and gill-flare poses
+    xr, yr = seam[-1]; ml_ = seam[-1, 0] - seam[0, 0]
+    jj = get(R, 'skeleton.jawJoint', None, need=False)
+    if jj is not None: out['jaw_joint'] = [jj[0] * f, jj[1] * f]; P('jaw joint', 'record.skeleton.jawJoint')
+    else:
+        out['jaw_joint'] = [float(xr + 0.3 * ml_), float(yr - 0.15 * ml_)]
+        DEFAULTS.append(dict(input='skeleton.jawJoint', source='DEFAULT', value='behind and below the rictus (0.3, -0.15 mouth lengths)'))
+    hg = get(G, 'opercle.hinge', None, need=False)
+    if hg is not None: out['opercle_hinge'] = [hg[0] * f, hg[1] * f]; P('opercle hinge', 'record.skeleton.gills.opercle.hinge')
+    else:
+        top_ = max(preop, key=lambda p: p[1]); out['opercle_hinge'] = [float(top_[0]), float(top_[1])]
+        DEFAULTS.append(dict(input='skeleton.gills.opercle.hinge', source='DEFAULT', value='top of the preopercle margin'))
     M = R['skeleton']['median']; fins = {}
     med = []
     for key, top in (('d1', True), ('d2', True), ('an', False)):
