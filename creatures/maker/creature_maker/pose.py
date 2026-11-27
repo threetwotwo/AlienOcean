@@ -55,7 +55,10 @@ def jaw_weights(C, V, rec):
     eye = set(v for f, t in zip(C['faces'], C['ftag']) if t == 'eye' for v in f)
     gill = set(v for f, t in zip(C['faces'], C['ftag']) if t == 'gill' for v in f)
     w[list(eye | gill)] = 0.0
-    pins = set(O['mouth_rows'][0]) | set(O['cavity_rows'][1]) | eye | gill         # lip loop, lip roll, eye and gill stay put
+    # the skull does not move in a gape: everything above the jaw line that the rules leave at 0 stays at 0, so softening
+    # spreads weight down the chin and back toward the joint, never up into the snout loops beside the eye
+    skull = set(np.where((w == 0) & ~below(V[:, 0], V[:, 1]))[0].tolist())
+    pins = set(O['mouth_rows'][0]) | set(O['cavity_rows'][1]) | eye | gill | skull   # lip loop, lip roll, eye, gill, skull
     return soften(C, w, pins)
 
 
