@@ -15,6 +15,26 @@ const PhysicsControl := preload("res://core/m04_body/physics_control.gd")
 const FootPlacer := preload("res://core/m04_body/foot_placer.gd")
 const QuietBrain := preload("res://core/m04_body/quiet_brain.gd")
 
+## true = reproduce Thalassa v20.19 exactly, bugs included (the golden test sets it). false = with the fixes the body
+## stress test (tests/test_body_stress.gd) forced; each one is marked FIX and listed in CHANGELOG.md.
+var thalassa_exact := false
+var ground_follow := NAN
+var noclip_off := {}
+var _step_dt := 1.0 / 60.0
+const NOCLIP_RATE := 3.0
+const HARD_MISS := 0.07     # m: a planted foot this far out of reach steps at once, even just landed (foot_placer.FORCED_HARD)
+const MAX_STEP := 1.0 / 55.0     # longest rig step; a longer frame is caught up in sub-steps (30 Hz runs as two 60 Hz steps)
+const SWIM_ANKLE_RATE := 6.0
+var swim_ankle_rel := {}
+var swing_floor := {"L": NAN, "R": NAN}
+var pelvis_yield := 0.0     # how far the pelvis is lowered so a planted foot stays reachable
+var land_age := {"L": 0.0, "R": 0.0}     # seconds each foot has been planted
+const FOOT_R := 0.035       # foot half-width used for wall clearance
+## The sole plate's heel, ball-centre and toe ends plus its four corners in the foot frame (the mannequin's sole box:
+## centre (0, 0.058, -0.046), 0.056 x 0.168), 4 mm above its underside: what the toe lift keeps out of the ground.
+const SOLE_PTS := [Vector3(0, -0.026, -0.048), Vector3(0, 0.058, -0.048), Vector3(0, 0.142, -0.048),
+	Vector3(0.028, -0.026, -0.048), Vector3(-0.028, -0.026, -0.048), Vector3(0.028, 0.142, -0.048), Vector3(-0.028, 0.142, -0.048)]
+const NECK_LEN := 0.118      # chest to skull base, Thalassa's standing value
 var stature_m := 1.38
 var upper_arm_len := 0.245
 var forearm_len := 0.228
@@ -24,6 +44,7 @@ var shoulder_half_w := 0.132
 var hip_half_w := 0.088
 
 var body_yaw := 0.12
+var _spawned := false
 var body_pitch := 1.32
 var body_roll := 0.0
 var swim_blend := 0.0
@@ -128,12 +149,22 @@ func push_clear(pt: Vector3, radius: float, surf, max_push := 0.55) -> Vector3:
 		var moved := false
 		if q_world != null:
 			var hit: Dictionary = q_world.call(o, radius + 0.03, null)
-			if not hit.is_empty() and hit.dist < radius and hit.has("normal"):
+			var q_solid = surf.get("point_solid")
+			if not hit.is_empty() and hit.has("normal") and q_solid != null and q_solid.call(o):
+				# FIX (stress B42 at 30 Hz): a point buried deeper than its radius (one long tick sweeping a trailing
+				# foot into a wall) was left inside: out along the contact normal past the surface instead
+				o += hit.normal * (radius + hit.dist)
+				moved = true
+			elif not hit.is_empty() and hit.dist < radius and hit.has("normal"):
 				o += hit.normal * (radius - hit.dist)
 				moved = true
 		if q_floor != null:
 			var fy: float = q_floor.call(o.x, o.z)
-			if is_finite(fy) and o.y < fy + radius:
+			# FIX (stress B42): with ledges and overhangs a point well below the floor straight above it is under a
+			# slab or beside a wall, not sunk into a height-field: lifting it onto the top (0.5 m+) threw the leg round.
+			# The ray and the surface push above handle it.
+			var under: bool = surf.has("ray") and o.y < fy - 0.12
+			if is_finite(fy) and o.y < fy + radius and not under:
 				o.y = fy + radius
 				moved = true
 		if not moved: break
@@ -171,7 +202,15 @@ func solve_noclip_arm(sh: Vector3, target: Vector3, pole: Vector3, surf, o := {}
 	return ik
 
 func solve_noclip_leg(hip: Vector3, raw_ankle: Vector3, side: float, pd: Vector3, pf: Vector3, surf, lo := {}) -> Dictionary:
-	var at := push_clear(raw_ankle, 0.056, surf, 0.65)
+	var at := raw_ankle
+	if surf != null and not thalassa_exact and surf.has("ray"):
+		# FIX (stress B42): a leg trailing past a rock edge was pushed out of the nearest face, which can be the far
+		# side (under a slab she is rising beside): the foot stays on the hip's side of any surface between them
+		var dir := (raw_ankle - hip).normalized()
+		var h: Dictionary = surf.ray.call(hip, raw_ankle + dir * 0.06)
+		if not h.is_empty():
+			at = h.position + h.normal * 0.06
+	at = push_clear(at, 0.056, surf, 0.65)
 	var solved := BM.leg(hip, at, side, pd, pf, thigh_len, shin_len, lo)
 	if surf != null:
 		for _pass in 3:
@@ -192,6 +231,18 @@ func solve_noclip_leg(hip: Vector3, raw_ankle: Vector3, side: float, pd: Vector3
 			if pm > lim and pm > 1e-5: tp *= lim / pm
 			at += tp
 			solved = BM.leg(hip, at, side, pd, pf, thigh_len, shin_len, lo)
+		if not thalassa_exact:
+			# FIX (stress J5): the clearance push is recomputed from scratch every tick, so a leg meeting rock could
+			# jump 25 cm in one tick. Let the push change by at most NOCLIP_RATE m/s.
+			var want := at - raw_ankle
+			var prev: Vector3 = noclip_off.get(side, Vector3.ZERO)
+			# out of rock at up to 3x the rate (a buried foot is the worse fault; rising past a slab edge the push grows
+			# ~9 m/s), back towards the raw pose at the slow rate
+			var rate := NOCLIP_RATE * (3.0 if want.length() > prev.length() + 1e-4 else 1.0)
+			var off := prev + (want - prev).limit_length(rate * _step_dt)
+			noclip_off[side] = off
+			if off.distance_to(want) > 0.002:
+				solved = BM.leg(hip, raw_ankle + off, side, pd, pf, thigh_len, shin_len, lo)
 	return solved
 
 func solve_head(dt: float, chest_pos: Vector3, neck_anchor: Vector3, c_right: Vector3, c_up: Vector3, c_fwd: Vector3, look_dir: Vector3, lim: Dictionary) -> Dictionary:
@@ -238,6 +289,8 @@ func solve_head(dt: float, chest_pos: Vector3, neck_anchor: Vector3, c_right: Ve
 	var np_ := sp * nps
 	var ny := sy * 0.38
 	var neck_len := maxf(0.085, neck_anchor.distance_to(chest_pos))
+	if not thalassa_exact:
+		neck_len = NECK_LEN    # FIX (stress J2): the swim anchor sat 2.4 cm further out, stretching the neck 20 %
 	var neck_axis := BM.nrm(c_up * cos(np_) + (c_fwd * (-sin(np_) * 0.65) + c_right * (sin(ny) * 0.28)))
 	var curved := chest_pos + neck_axis * neck_len
 	var head_pos := curved + (hy * -0.008 + head_fwd * (-maxf(0.0, -sp) * 0.012))
@@ -248,6 +301,23 @@ static func _ff(fh, x: float, z: float) -> float:
 
 ## updateSwim. s = the ported SwimmerLocomotion (core/m02_motor/swimmer_locomotion.gd). Returns the pose dictionary.
 func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense = null, on_stroke_pull = null, on_shore_footstep = null) -> Dictionary:
+	if not thalassa_exact and dt > MAX_STEP:
+		# FIX (stress B40): a long frame (the rig drawn per frame and the game hitched) was cut to 0.05 s by the step
+		# clamps, so the feet's step clocks lost time the body did not: planted feet dragged 9 cm. Catch up in
+		# sub-steps instead; the earlier ones see the end state, which is what was drawn anyway.
+		var n := ceili(dt / MAX_STEP)
+		for i in n - 1:
+			_update_swim_step(dt / n, s, _input, total_time - dt * float(n - 1 - i) / n, env, sense, on_stroke_pull, on_shore_footstep)
+		dt /= n
+	return _update_swim_step(dt, s, _input, total_time, env, sense, on_stroke_pull, on_shore_footstep)
+
+func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary, sense = null, on_stroke_pull = null, on_shore_footstep = null) -> Dictionary:
+	_step_dt = clampf(dt, 0.0001, 0.05)
+	if not _spawned and not thalassa_exact:
+		# FIX (stress B38): the body yaw started at Thalassa's spawn yaw 0.12 whatever way she faced, so spawning
+		# facing elsewhere swung the first second's pose round through her (crossed legs, an arm in the torso)
+		body_yaw = s.yaw
+	_spawned = true
 	var get_floor = env.get("floor_height")
 	var get_normal = env.get("floor_normal")
 	var query = env.get("nearest_surface")
@@ -405,6 +475,13 @@ func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense
 	var chest_pos := (neck_pos + spine_dir * 0.140) + (body_back * w_chest + body_right * (carve_lat * 0.32 - hip_sway * 0.25))
 	var waist_pos := (chest_pos + spine_dir * 0.175) + (body_back * w_waist + body_right * (carve_lat * 0.75 + hip_sway * 0.45))
 	var pelvis_pos := (waist_pos + spine_dir * 0.155) + (body_back * w_pelvis + body_right * (carve_lat * 1.15 + hip_sway))
+	if not thalassa_exact:
+		# FIX (stress J2): Thalassa's swim spine used other segment lengths than her standing body (0.140 / 0.175 /
+		# 0.155 against 0.118 / 0.195 / 0.160) and added the sway offsets on top, so the torso stretched up to 21 %.
+		# Keep the swim bends, but as a chain of the standing lengths.
+		chest_pos = neck_pos + BM.nrm(chest_pos - neck_pos) * NECK_LEN
+		waist_pos = chest_pos + BM.nrm(waist_pos - chest_pos) * 0.195
+		pelvis_pos = waist_pos + BM.nrm(pelvis_pos - waist_pos) * 0.160
 	var sh_l_off := sin(arm_phase * 0.85 + 0.3) * 0.010 + swim_blend * 0.014
 	var sh_r_off := sin(arm_phase * 0.85 + 1.1) * 0.010 + swim_blend * 0.014
 	var nbp_roll := lerpf(0.036, 0.020, clampf(effort, 0.0, 1.0))
@@ -416,6 +493,11 @@ func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense
 	var hip_yaw := cos(kick_phase) * lerpf(0.012, 0.026, swim_fluid) * (1.0 - glide_blend * 0.15)
 	var hip_l := pelvis_pos + (body_right * -hip_half_w + (body_back * hip_roll + body_axis_y * hip_yaw))
 	var hip_r := pelvis_pos + (body_right * hip_half_w + (body_back * -hip_roll + body_axis_y * -hip_yaw))
+	if not thalassa_exact:
+		# FIX (stress J2): Thalassa slid the hip joints sideways for the kick roll, widening the pelvis up to 30 %;
+		# turn the offset into a tilt of a rigid pelvis instead (same direction, fixed width)
+		hip_l = pelvis_pos + BM.nrm(hip_l - pelvis_pos) * hip_half_w
+		hip_r = pelvis_pos + BM.nrm(hip_r - pelvis_pos) * hip_half_w
 
 	var breath_scale := 1.0 + sin(breath_phase) * 0.025
 	var chest_axis_y := BM.nrm(neck_pos - waist_pos)
@@ -448,6 +530,7 @@ func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense
 		on_stroke_pull.call(clampf(swim_blend * (0.7 + sprint_blend * 0.35), 0.25, 1.0))
 	prev_ubr = ubr_base
 	var surf_env = {"floor_height": get_floor, "nearest_surface": query} if s.ground_walk_blend < 0.15 else null
+	if surf_env != null and not thalassa_exact and env.has("point_solid"): surf_env["point_solid"] = env.point_solid; surf_env["ray"] = env.get("ray")
 	if surf_env != null and get_floor == null and query == null: surf_env = null
 
 	var solve_arm := func(side: float, override_target = null) -> Dictionary:
@@ -666,7 +749,10 @@ func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense
 			var dz := ankle.z - hip.z
 			var hd := Vector2(dx, dz).length()
 			var aft_mix := smoothstep(0.02, 0.22, sm_lift)
-			if hd < 0.34:
+			if not thalassa_exact:
+				# FIX (stress J5): Thalassa switched this pull-aft on and off at hd = 0.34 m, a 20 cm knee jump
+				aft_mix *= 1.0 - smoothstep(0.26, 0.42, hd)
+			if hd < (0.42 if not thalassa_exact else 0.34):
 				dx = lerpf(dx, -fwd_horiz.x * need_h + body_right.x * (side * 0.08), aft_mix)
 				dz = lerpf(dz, -fwd_horiz.z * need_h + body_right.z * (side * 0.08), aft_mix)
 			var nh := Vector2(dx, dz).length()
@@ -682,6 +768,19 @@ func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense
 		var sm_fp: Vector3 = fp_spr.step(want_fp, 0.10, dt)
 		if sm_fp.length() > 0.002:
 			ankle += sm_fp
+			if is_finite(floor_y) and ankle.y < floor_y + sole:
+				ankle.y = floor_y + sole
+		if not thalassa_exact:
+			# FIX (stress J5): support and seabed pushes switch on abruptly (a ledge found under her) and swept the
+			# foot 30 cm in a tick; the ankle may move at most SWIM_ANKLE_RATE m/s relative to the hip
+			# measured in the body frame, so a fast turn or pitch of the whole body is not read as ankle motion;
+			# the seabed clamp is re-applied after, so the limiter can never hold the foot inside rock (Fable review)
+			var w := ankle - hip
+			var rel := Vector3(w.dot(body_right), w.dot(body_belly), w.dot(spine_dir))
+			var prev_rel: Vector3 = swim_ankle_rel.get(side, rel)
+			rel = prev_rel + (rel - prev_rel).limit_length(SWIM_ANKLE_RATE * dt)
+			swim_ankle_rel[side] = rel
+			ankle = hip + body_right * rel.x + body_belly * rel.y + spine_dir * rel.z
 			if is_finite(floor_y) and ankle.y < floor_y + sole:
 				ankle.y = floor_y + sole
 		var active_ph := lerpf(ph, rev_ph, rev_mix)
@@ -748,7 +847,7 @@ func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense
 	}
 	var gwb := clampf(s.ground_walk_blend, 0.0, 1.0)
 	if gwb > 0.005:
-		var walk := solve_walk_wade(dt, s, total_time, get_floor, get_normal, query, sense, on_shore_footstep)
+		var walk := solve_walk_wade(dt, s, total_time, get_floor, get_normal, query, sense, on_shore_footstep, env.get("ray"), env.get("point_solid"))
 		if gwb >= 0.992:
 			swim_pose = walk
 		else:
@@ -756,15 +855,33 @@ func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense
 	return swim_pose
 
 ## ikSolveWorldWalkWadePose
-func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _query, sense = null, on_footstep = null) -> Dictionary:
+func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _query, sense = null, on_footstep = null, _ray = null, _solid = null) -> Dictionary:
 	var sdt := clampf(dt, 0.0001, 0.05)
 	var yaw: float = s.yaw
 	var look_pitch := clampf(s.pitch, -1.12, 1.12)
 	var wade_b := clampf(s.wade_blend, 0.0, 1.0)
 	var floor_here: float
+	var air_offset: float = s.shore_jump_offset
 	if is_finite(s.shore_floor_y): floor_here = s.shore_floor_y
 	elif get_floor != null: floor_here = get_floor.call(s.pos.x, s.pos.z)
 	else: floor_here = s.pos.y - 1.24
+	if not thalassa_exact and not is_finite(floor_here):
+		floor_here = s.pos.y - 1.24     # FIX (stress BM): no ground under her at all (walked off the world's edge) made the whole pose NaN
+	if not thalassa_exact:
+		# FIX (stress J5): follow the floor the way the motor's eye does (18/s, trailing by at most its step_lag), so
+		# the pelvis climbs a ledge with the eye instead of snapping 30 cm in one tick
+		var lag: float = s.config.get("step_lag", 0.04)
+		if is_nan(ground_follow) or absf(floor_here - ground_follow) > 1.0:
+			ground_follow = floor_here
+		else:
+			ground_follow = lerpf(ground_follow, floor_here, BM.expk(18.0, sdt))
+			if not s.shore_is_airborne:
+				ground_follow = clampf(ground_follow, floor_here - lag, floor_here + lag)
+		# airborne, the motor's jump offset is measured from the floor under her right now, which jumps at a ledge
+		# edge; re-base it on the smoothed ground so ground + offset stays her continuous height
+		if s.shore_is_airborne:
+			air_offset = s.shore_jump_offset + (floor_here - ground_follow)
+		floor_here = ground_follow
 	var ground := Vector3(s.pos.x, floor_here, s.pos.z)
 	var fs_cb = null
 	if on_footstep != null:
@@ -775,10 +892,66 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			e2.waterDepth = wd
 			e2.material = "wade" if wd > 0.05 else "sand"
 			on_footstep.call(e2)
+	# FIX (stress J7): landing spots stay inside the leg's sideways reach (the clamp below is -0.048..0.22 from the hip)
+	world_foot_placer.lat_reach = null if thalassa_exact else Vector3(hip_half_w, 0.03, 0.19)
+	world_foot_placer.target_filter = null
+	if thalassa_exact:
+		world_foot_placer.forced = {"L": 0.0, "R": 0.0}
+	if not thalassa_exact and _ray != null and get_floor != null:
+		# FIX (stress J6/J7): give the foot placer eyes. A landing spot whose foot (heel to toe, plus FOOT_R) would
+		# cross a steep surface, or whose ground is more than a step above or below her, is pulled back towards her.
+		world_foot_placer.target_filter = func(lp: Vector3, to: Vector3, fyaw: float) -> Vector3:
+			var ff := Vector3(-sin(fyaw), 0, -cos(fyaw))
+			var spot := to
+			for _i in 4:
+				var y0: float = lp.y + 0.07
+				var o := Vector3(lp.x, y0, lp.z)
+				var bad := 0.0
+				for tip in [spot + ff * (0.168 + FOOT_R), spot - ff * FOOT_R]:
+					var t3 := Vector3(tip.x, y0, tip.z)
+					var hit: Dictionary = _ray.call(o, t3)
+					if not hit.is_empty() and absf(hit.normal.y) < 0.7:
+						# a riser she can step up (ground beyond it within a step, walkable) is not a wall
+						var gt: float = get_floor.call(tip.x, tip.z)
+						var nt: Vector3 = get_normal.call(tip.x, tip.z) if get_normal != null else Vector3.UP
+						if not (is_finite(gt) and gt - lp.y < 0.36 and nt.y >= 0.56):
+							bad = maxf(bad, hit.position.distance_to(t3) + 0.01)
+				var gy: float = get_floor.call(spot.x, spot.z)
+				var gn: Vector3 = get_normal.call(spot.x, spot.z) if get_normal != null else Vector3.UP
+				if is_finite(gy) and (absf(gy - lp.y) > 0.36 or gn.y < 0.56):
+					bad = maxf(bad, 0.06)
+				elif bad <= 0.0:
+					# FIX (stress B37): a foot straddling a step edge (heel and toe grounds differ by a step) moves onto one
+					# tread: forward onto the far one if 12 cm is enough, else back onto the near one
+					var heel_p := spot - ff * 0.03
+					var toe_p := spot + ff * 0.15
+					var gh: float = get_floor.call(heel_p.x, heel_p.z)
+					var gt2: float = get_floor.call(toe_p.x, toe_p.z)
+					# what the heel's slope predicts at the toe; a step is a jump beyond that (a 15-30 deg ramp is not)
+					var nh2: Vector3 = get_normal.call(heel_p.x, heel_p.z) if get_normal != null else Vector3.UP
+					var slope_k := -(nh2.x * ff.x + nh2.z * ff.z) / maxf(0.3, nh2.y)
+					if is_finite(gh) and is_finite(gt2) and absf(gt2 - (gh + slope_k * 0.18)) > 0.04 and absf(gt2 - gh) < 0.36:
+						var a := 0.0
+						var b := 0.18
+						for _k in 6:     # find the edge along the foot
+							var m := (a + b) * 0.5
+							var pm := heel_p + ff * m
+							if absf(get_floor.call(pm.x, pm.z) - (gh + slope_k * m)) < 0.02: a = m
+							else: b = m
+						var fwd_shift := b + 0.02           # heel just past the edge
+						var back_shift := 0.18 - a + 0.02   # toe just short of it
+						if fwd_shift <= 0.12: spot += ff * fwd_shift
+						else: spot -= ff * back_shift
+						break
+				if bad <= 0.0: break
+				var back := Vector3(lp.x - spot.x, 0, lp.z - spot.z)
+				if back.length() < 0.02: break
+				spot += back.normalized() * minf(bad, back.length())
+			return spot
 	var loco: Dictionary = world_foot_placer.update(sdt, {
 		"localPos": ground, "velLocal": s.shore_vel_xz, "accelLocal": s.shore_accel_xz, "desiredVelLocal": s.shore_desired_vel_xz,
 		"localYaw": yaw, "yawRate": s.shore_yaw_rate, "vesselId": "world_shore", "shipRoll": 0.0, "shipPitch": 0.0, "impactShake": 0.0,
-		"isAirborne": s.shore_is_airborne, "jumpOffset": s.shore_jump_offset, "jumpVelY": s.shore_jump_vel_y,
+		"isAirborne": s.shore_is_airborne, "jumpOffset": air_offset, "jumpVelY": s.shore_jump_vel_y,
 		"jumpAnticipDip": s.shore_jump_anticip * 0.052, "jumpAnticip": s.shore_jump_anticip, "isDiveJump": s.shore_dive_arc_timer > 0.0,
 		"justLanded": s.shore_just_landed, "landingImpact": s.shore_landing_impact, "crouchBlend": s.shore_crouch_blend,
 		"brakingImpulse": s.shore_braking_impulse, "onFootstep": fs_cb})
@@ -819,6 +992,29 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 	if b_amp == 0.0: b_amp = 1.0
 	var hip_h: float = 0.726 + loco.pelvisOffset.y + b_cen * 0.0045 * b_amp
 	var hip_lat: float = loco.pelvisOffset.x + bo.idleHipShift
+	if not thalassa_exact and get_floor != null:
+		# FIX (stress B37 stairs): the pelvis yields to a planted foot it would otherwise lift off the ground. The eye
+		# climbs a stair as soon as her centre crosses the riser, and the trailing leg, still on the step below, was
+		# stretched past its length: the foot floated up and dragged. A foot behind her gets up to 7 cm for its heel
+		# rising (the toe pivot), so ordinary walking is unchanged.
+		var need := 0.0
+		if not s.shore_is_airborne:
+			var reach := (thigh_len + shin_len) * 0.985
+			for side in [-1.0, 1.0]:
+				var fst2: Dictionary = loco.footL if side < 0 else loco.footR
+				if fst2.stepping: continue
+				var g2: float = get_floor.call(fst2.pos.x, fst2.pos.z)
+				if not is_finite(g2) or absf(g2 - floor_here) > 0.36: continue
+				var hip2: Vector3 = ground + up * hip_h + w_right * (side * hip_half_w + hip_lat)
+				var dxz := Vector2(hip2.x - fst2.pos.x, hip2.z - fst2.pos.z)
+				var horiz := dxz.length()
+				if horiz >= reach: continue
+				var behind := clampf(-(Vector2(w_fwd.x, w_fwd.z).dot(-dxz)) / 0.2, 0.0, 1.0)
+				var max_y := g2 + 0.052 + 0.07 * behind + sqrt(reach * reach - horiz * horiz)
+				need = maxf(need, hip2.y - max_y)
+		need = clampf(need, 0.0, 0.18)
+		pelvis_yield = lerpf(pelvis_yield, need, BM.expk(25.0 if need > pelvis_yield else 8.0, sdt))
+		hip_h -= pelvis_yield
 	var slf: float = loco.spineLeanFwd
 	var sll: float = loco.spineLeanLat
 	var pelvis_pos := ground + (up * hip_h + (w_right * hip_lat + w_fwd * (slf * 0.05)))
@@ -841,6 +1037,33 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		var fz: float = fst.pos.z
 		var fgy: float = get_floor.call(fx, fz) if get_floor != null else floor_here
 		var fn: Vector3 = get_normal.call(fx, fz) if get_normal != null else s.shore_floor_normal
+		if not thalassa_exact and (not is_finite(fgy) or absf(fgy - floor_here) > 0.36 or fn.y < 0.56):
+			fn = s.shore_floor_normal
+			fgy = floor_here     # FIX (stress J7): ground more than a step above or below her, or too steep to walk (Thalassa's 0.56), is a wall or a drop, not a foothold
+		var plane_g := fgy     # the real ground under the foot (the swing floor below may sit higher), for the sole plane test
+		if not thalassa_exact and get_floor != null:
+			# FIX (stress J5/J7): the swing foot took the floor height at its own position only, so crossing a step
+			# edge snapped it 30 cm up or down in one tick. Swing from the start floor towards the landing floor
+			# (raised early, never below the ground under the foot), and let it fall smoothly, never jump.
+			var key := "L" if side < 0 else "R"
+			plane_g = fgy
+			if s.shore_is_airborne:
+				# in the air the placer's foot height is relative to the floor under her body; the floor under the foot
+				# made a foot crossing a ledge edge in the air jump by the ledge height
+				fgy = floor_here
+			var tgt_floor := fgy
+			if fst.stepping:
+				var f0: float = get_floor.call(fst.from.x, fst.from.z)
+				var f1: float = get_floor.call(fst.to.x, fst.to.z)
+				if is_finite(f0) and is_finite(f1) and f1 - f0 < 0.36:     # taller than a step is a wall: don't lift onto it
+					var rise := smoothstep(0.05, 0.45, fst.t) if f1 > f0 else smoothstep(0.30, 0.90, fst.t)
+					tgt_floor = maxf(fgy, lerpf(f0, f1, rise))
+			var prev_f: float = swing_floor[key]
+			if not fst.stepping or is_nan(prev_f) or tgt_floor >= prev_f or not is_finite(tgt_floor):
+				swing_floor[key] = tgt_floor
+			else:
+				swing_floor[key] = maxf(tgt_floor, prev_f - 1.8 * dt)     # falls at most 1.8 m/s
+			fgy = swing_floor[key]
 		var swing_lift := maxf(0.0, fst.pos.y - floor_here)
 		var wade_extra: float = sin(PI * fst.t) * wade_b * 0.036 if fst.stepping else 0.0
 		var ankle_y := (fgy if is_finite(fgy) else floor_here) + 0.052 + swing_lift + wade_extra
@@ -852,19 +1075,138 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		var cl_lat := clampf(lat_d, -0.048, 0.22) * side
 		var mra := maxf(rb, air_b)
 		var cl_fwd := clampf(fwd_d, lerpf(-0.34, -0.45, mra), lerpf(0.36, 0.45, mra))
+		var ft_raw := ft
 		ft = hip + (pelv_right_base * cl_lat + (pelv_fwd * cl_fwd + up * up_d))
+		if not thalassa_exact:
+			# FIX (stress J7): a planted foot outside these reach limits was dragged along the ground (skating up to
+			# 1.6 m/s in turns) until the foot placer's own, wider emergency distance fired. Ask it to step now.
+			var excess := Vector2(ft.x - ft_raw.x, ft.z - ft_raw.z).length()
+			var fkey := "L" if side < 0 else "R"
+			land_age[fkey] = 0.0 if fst.stepping else land_age[fkey] + dt
+			# a foot that has just landed yields to the other foot (its request counts a third): stepping it again at
+			# once stole the other foot's turn and left that one dragging
+			var wgt := 0.33 if (land_age[fkey] < 0.12 and excess <= HARD_MISS) else 1.0     # far out of reach can't wait
+			world_foot_placer.forced[fkey] = excess * wgt if (excess > 0.025 and not fst.stepping) else 0.0
 		var rel_yaw := BM.wrap_pi(fst.yaw - pelv_yaw)
 		var fwf := Vector3(-sin(fst.yaw), 0, -cos(fst.yaw))
 		var spj := fwf - fn * fwf.dot(fn)
 		var sfw := BM.nrm(spj) if spj.length() > 1e-4 else fwf
 		var boot_fwd := BM.nrm(sfw + fn * clampf(fst.toePitch, -0.62, 0.32))
-		var solved := BM.leg(hip, ft, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, {
+		var leg_opts := {
 			"preserveDown": true, "desiredYawOffsetRad": rel_yaw, "maxHipExtDeg": lerpf(lerpf(24.0, 30.0, rb), 46.0, air_b),
 			"maxHipFlexDeg": lerpf(110.0, 124.0, air_b), "maxAdductionDeg": 6.0, "maxAbductionDeg": lerpf(32.0, 38.0, air_b),
 			"maxIntRotRad": 0.20, "maxExtRotRad": 0.48, "minFlexDeg": 5.0, "maxFlexDeg": 132.0, "softReach": 0.996, "softMargin": 0.012,
 			"kneeOutBias": lerpf(0.07, 0.11, air_b), "kneeLiftBias": fst.heelKick * 0.24 + wade_b * 0.06,
 			"minAnklePitchRad": -0.82, "maxAnklePitchRad": 0.48, "maxAnkleYawRad": 0.16, "maxAnkleRollRad": 0.20,
-			"groundBlend": jmp.groundFootBlend, "groundFwd": boot_fwd, "groundUp": fn})
+			"groundBlend": jmp.groundFootBlend, "groundFwd": boot_fwd, "groundUp": fn}
+		var solved := BM.leg(hip, ft, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
+		if not thalassa_exact and _ray != null:
+			# FIX (stress J6): Thalassa's height field had no walls, so a foot could be planted through a wall or a
+			# step face. Cast from under the hip to the foot's toe, heel and both edges (plus FOOT_R); a steep surface in
+			# the way pushes the foot back out by the overshoot.
+			var shift := Vector3.ZERO
+			for _pass in 3:
+				var push := Vector3.ZERO
+				var fo: Vector3 = solved.finMat * Vector3(0, 0.07, -0.016)
+				# three origins: under the hip, 22 cm behind it, and the foot's own centre; a ray that starts inside
+				# rock sees nothing (standing at the foot of a slope the first is under the slope), so whichever is clear finds it
+				var hb := hip - pelv_fwd * 0.22
+				var origins := [Vector3(hip.x, fo.y, hip.z), Vector3(hb.x, fo.y, hb.z), fo]
+				for e in [Vector3(0, 0.168 + FOOT_R, -0.016), Vector3(0, -FOOT_R, -0.016), Vector3(FOOT_R + 0.02, 0.07, -0.016), Vector3(-FOOT_R - 0.02, 0.07, -0.016)]:
+					for o in origins:
+						var tip: Vector3 = solved.finMat * e
+						var hit: Dictionary = _ray.call(o, tip)
+						if hit.is_empty() or absf(hit.normal.y) >= 0.7 or hit.position.y < fgy - 0.02: continue
+						# a lip or riser she can stand on top of (within a step, walkable) is ground, not a wall
+						var gt: float = get_floor.call(tip.x, tip.z) if get_floor != null else -INF
+						var nt: Vector3 = get_normal.call(tip.x, tip.z) if get_normal != null else Vector3.UP
+						# (up to 6 cm under that top counts, as the sole lift raises those; a pitched toe tip on a stair tread sits
+						# there, and pushing it out of the riser below shoved the planted foot 20 cm back off the step)
+						if is_finite(gt) and absf(gt - fgy) < 0.36 and nt.y >= 0.56 and tip.y > gt - 0.06 and not (_solid != null and _solid.call(Vector3(tip.x, gt + 0.01, tip.z))): continue
+						var nh: Vector3 = hit.normal; nh.y = 0.0
+						if nh.length() < 1e-3: continue
+						nh = nh.normalized()
+						var pv: Vector3 = nh * maxf(0.0, (hit.position - tip).dot(nh))
+						if pv.length() > push.length(): push = pv
+				# the knee too: walking into a steep rock face the shin leans into it (knee radius 0.04)
+				var kd: Vector3 = (solved.ik.mid - hip).normalized()
+				for ktip in [solved.ik.mid + kd * 0.05, solved.ik.mid + pelv_fwd * 0.05]:
+					var kh: Dictionary = _ray.call(hip, ktip)
+					if not kh.is_empty() and absf(kh.normal.y) < 0.7:     # same wall test as the foot: a walkable slope is not a wall
+						var knh: Vector3 = kh.normal; knh.y = 0.0
+						if knh.length() > 1e-3:
+							knh = knh.normalized()
+							var kpv: Vector3 = knh * maxf(0.0, (kh.position - ktip).dot(knh)) / maxf(0.3, knh.dot(kh.normal))
+							if kpv.length() > push.length(): push = kpv
+				if push.length() < 0.002: break
+				shift = (shift + push).limit_length(0.40)
+				solved = BM.leg(hip, ft + shift, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
+			ft += shift
+			var same_ground := true
+			if get_floor != null:
+				var g_a: float = get_floor.call(fst.pos.x, fst.pos.z)
+				var g_b: float = get_floor.call(fst.pos.x + shift.x, fst.pos.z + shift.z)
+				same_ground = is_finite(g_a) and is_finite(g_b) and absf(g_a - g_b) < 0.03
+			if not fst.stepping and same_ground and Vector2(shift.x, shift.z).length() > 0.002:
+				# the pushed spot becomes where the foot is planted (the review's root fix): the placer then knows where
+				# it stands, so the push is not redone every tick and the foot is not judged out of reach and re-stepped
+				var pf_: Variant = world_foot_placer.feet["L" if side < 0 else "R"]
+				pf_.planted += Vector3(shift.x, 0, shift.z)
+				pf_.cur += Vector3(shift.x, 0, shift.z)
+			if shift.length() > 0.002 and get_floor != null:
+				# the pushed foot stands on the ground where it now is, not where it was (on a slope the two differ)
+				var nfx := fx + shift.x
+				var nfz := fz + shift.z
+				var g_old: float = get_floor.call(fx, fz)
+				var g_new: float = get_floor.call(nfx, nfz)
+				var n_new: Vector3 = get_normal.call(nfx, nfz) if get_normal != null else fn
+				if is_finite(g_old) and is_finite(g_new) and absf(g_new - floor_here) <= 0.36 and n_new.y >= 0.56:
+					var dy := g_new - g_old
+					fx = nfx; fz = nfz; fn = n_new; fgy += dy; plane_g += dy
+					if absf(dy) > 0.002:
+						ft.y += dy
+						solved = BM.leg(hip, ft, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
+		if not thalassa_exact and get_floor != null:
+			# FIX (stress J7): Thalassa pitches the foot about the ankle, so at push-off the toe sinks ~2 cm into the
+			# ground. Lift the ankle until the lowest sole point is on the floor (the foot pivots on its toe, heel up).
+			# Sole points over ground more than 6 cm off the ankle's ground plane are over a step edge: the wall push handles those.
+			# Raising the ankle tilts the shin and with it the foot, so settle in up to four passes.
+			# FIX (stress J7 slide): a planted foot also pivots on its contact, not its ankle. Pitching about the ankle
+			# swung the ball 5 cm backwards at every push-off; the ball (heel up) or the heel (toe up) is held where it
+			# would be with the foot flat, and the ankle moves instead.
+			var adj := Vector3.ZERO
+			var heel_l := Vector3(0, -0.026, -0.048)
+			var ball_l := Vector3(0, 0.11, -0.048)
+			var flat_ball := Vector2(fx + sfw.x * ball_l.y, fz + sfw.z * ball_l.y)
+			var flat_heel := Vector2(fx + sfw.x * heel_l.y, fz + sfw.z * heel_l.y)
+			for _pass in 4:
+				var lift := 0.0
+				for sp_ in SOLE_PTS:
+					var q: Vector3 = solved.finMat * sp_
+					var gq: float = get_floor.call(q.x, q.z)
+					# lifted if its ground continues the ankle's ground plane (the toe pitched into the same floor), or if it
+					# is at most 6 cm under the ground there (in the air, or with the foothold rejected, the plane is the
+					# body's ground, not the foot's). Anything else is a toe in a riser or wall face: the wall push moves it
+					# out sideways (lifting would stand her on the step).
+					var plane_y := plane_g - (fn.x * (q.x - fx) + fn.z * (q.z - fz)) / maxf(0.3, fn.y)
+					if is_finite(gq) and (not is_finite(plane_g) or absf(gq - plane_y) < 0.06 or gq - q.y < 0.06): lift = maxf(lift, gq - q.y)
+				lift = minf(lift, 0.14 - adj.y)
+				var hv := Vector2.ZERO
+				if not fst.stepping and not s.shore_is_airborne:
+					var hb_: Vector3 = solved.finMat * heel_l
+					var bb_: Vector3 = solved.finMat * ball_l
+					var anchor := flat_ball if bb_.y <= hb_.y else flat_heel
+					var cur_c := Vector2(bb_.x, bb_.z) if bb_.y <= hb_.y else Vector2(hb_.x, hb_.z)
+					hv = (anchor - cur_c).limit_length(0.08 - Vector2(adj.x, adj.z).length())
+				if lift <= 0.001 and hv.length() < 0.001: break
+				adj += Vector3(hv.x, maxf(0.0, lift), hv.y)
+				solved = BM.leg(hip, ft + adj, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
+			# FIX (stress J6/J7): a planted foot the leg can no longer reach (the body climbed away from it) was
+			# dragged; step it like a clamped one
+			var miss: float = solved.ik.eff.distance_to(ft + adj)
+			var fk2 := "L" if side < 0 else "R"
+			if not fst.stepping and miss > 0.03:
+				world_foot_placer.forced[fk2] = maxf(world_foot_placer.forced[fk2], miss * (0.33 if (land_age[fk2] < 0.12 and miss <= HARD_MISS) else 1.0))
 		return {"ik": solved.ik, "finMat": solved.finMat, "finDir": solved.finDir}
 	var leg_l: Dictionary = shore_leg.call(-1.0)
 	var leg_r: Dictionary = shore_leg.call(1.0)
@@ -944,6 +1286,8 @@ func blend_swim_walk(sp: Dictionary, wp: Dictionary, t_raw: float) -> Dictionary
 	var back := BM.nrm(sp.bodyBack.lerp(wp.bodyBack, t))
 	var right := BM.nrm(axis_y.cross(back))
 	var fwd := BM.nrm(right.cross(axis_y))
+	if not thalassa_exact:
+		fwd = -fwd    # FIX (stress J4/J3): Thalassa's right x axisY is the back, so its blend chest, pelvis and knees faced backwards
 	var ortho_back := -fwd
 	var cay := BM.nrm(neck_pos - waist_pos)
 	var cx := BM.nrm(cay.cross(ortho_back))
@@ -961,10 +1305,25 @@ func blend_swim_walk(sp: Dictionary, wp: Dictionary, t_raw: float) -> Dictionary
 	var pf := -pz
 	var leg := func(hip: Vector3, l_s: Dictionary, l_w: Dictionary, side: float) -> Dictionary:
 		var tgt: Vector3 = l_s.ik.eff.lerp(l_w.ik.eff, t)
+		if not thalassa_exact and wp.has("footCenter"):
+			# FIX (stress J6): the swim legs hang ~1.1 m below the eye, below the ground when she crouches or wades
+			# out; the blend never puts an ankle under the ground the walk pose stands on
+			tgt.y = maxf(tgt.y, wp.footCenter.y + 0.052)
 		var dfs: Vector3 = l_s.get("finDir", pf)
 		var dfw: Vector3 = l_w.get("finDir", pf)
-		var solved := BM.leg(hip, tgt, side, pd, pf, thigh_len, shin_len, {"softReach": 0.992, "softMargin": 0.04, "minFlexDeg": 6.0,
-			"maxFlexDeg": 128.0, "kneeOutBias": 0.08, "groundBlend": t, "groundFwd": BM.nrm(dfs.lerp(dfw, t)), "groundUp": Vector3.UP})
+		var bopts := {"softReach": 0.992, "softMargin": 0.04, "minFlexDeg": 6.0,
+			"maxFlexDeg": 128.0, "kneeOutBias": 0.08, "groundBlend": t, "groundFwd": BM.nrm(dfs.lerp(dfw, t)), "groundUp": Vector3.UP}
+		var solved := BM.leg(hip, tgt, side, pd, pf, thigh_len, shin_len, bopts)
+		if not thalassa_exact and wp.has("footCenter"):
+			# FIX (stress J6): the swim foot is pointed, so while blending to standing its toe dug into the ground
+			for _pass in 3:
+				var lowest := INF
+				for sp_ in SOLE_PTS:
+					lowest = minf(lowest, (solved.finMat * sp_).y)
+				var lift: float = wp.footCenter.y - lowest
+				if lift <= 0.001: break
+				tgt.y += lift
+				solved = BM.leg(hip, tgt, side, pd, pf, thigh_len, shin_len, bopts)
 		return {"ik": solved.ik, "finMat": solved.finMat, "finDir": solved.finDir}
 	var leg_l: Dictionary = leg.call(hip_l, sp.legL, wp.legL, -1.0)
 	var leg_r: Dictionary = leg.call(hip_r, sp.legR, wp.legR, 1.0)

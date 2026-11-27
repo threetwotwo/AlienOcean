@@ -1,5 +1,52 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): the Unreal god rays
+- Engine: god rays 0.1.0 (`look/god_rays.gdshaderinc`, drawn by underwater view 0.2.0): the lagoon's light shafts as
+  they ran at lagoonwater v98 (GodPhys 1, GodUnits 1, GodPick 1). Source: the god-ray node as built
+  (lw/lagoonwater/logs/god_code_v53.txt) plus v98's GOD_FFT (3328-3353), tb_weights_cached (2592-2612), GOD_NEW_ADD
+  (3374), GOD_RET_NEW (2013) and PHYS_CODE's shaft lines (2539-2547). Along each view ray: 20 jittered steps over
+  min(path, 25 m) (a = 3 / Visibility 15 m); each step reads `water_caus_map` where its sunlight came through the
+  surface, in one of the three tile-break copies picked by its weight, mixes the map's three depths by the step's
+  depth and adds exp(-a s) x step x (c - 1). The shafts are the sun's in-scatter per metre (b x the sun at the eye's
+  depth x the g 0.9 phase) x that sum, gaps never below -0.9 of the sun's haze. Same map, same entry point and same
+  copy weights as the sand's net, so a shaft ends on its line on the sand. GlowK does not scale them (as Unreal).
+  Switch: `WorldRoot.god_rays`, shot tool AO_GOD=0. Off with the net's per-pixel check path (no map).
+- Not ported (dead at v98): the old painted path (GodPhys 0: WaterColour, ShaftStrength, shadow mask), GodLod, the
+  three-read path, sub-bands. Not known for sure: ShaftSteps (v98's note says a 20-step ray, v30's says 12; 20 used)
+  and Visibility (15 m in the 6 Nov colour check).
+- Check (`tools/god_rays_check.gd` + `.py`, a numpy emulation of the Unreal node on the engine's map): the shader's
+  sum against it, hour 12 and 17: rms 0.0016 m on a sum of std 0.51 / 0.62 m, correlation 1.0000.
+- Open: Unreal moved the jitter each frame and let TSR average it. This project has no TAA, so the start point is
+  held (WorldRoot sets `god_frame` only when the viewport uses TAA) and one frame keeps the dither: the sum's noise
+  is std 0.47-0.57 m against 0.19-0.23 m for an 8-frame mean. The shot tool's AO_TAA=1 turns Godot's TAA on, which
+  averages it (checked on shot 03, hour 17); whether the game runs TAA is still open. On screen the shafts are faint, as the maths gives:
+  noon shots 02 / 03 / 04 change by at most 4-5 of 255 (the sun is outside the frame); shot 03 at hour 17, with the
+  sun in view, p1-p99 -4..+4 and up to 16 of 255, a fan of shafts round the sun.
+- Measured (llvmpipe, 960 x 540, ms a frame, without / with): shot 02 543 / 638, 03 254 / 377, 04 739 / 846, 03 at
+  hour 17 287 / 317.
+
+## 0.6.0-dev (28 Nov 2026): the stars turn with the sun
+- Engine: the star sphere now turns about north by -2 pi (days - 0.5), so the stars rise and set on the same side as
+  the sun and the moons. Unreal's Stars actor turned the other way (sun_v184 apply_fast, though its comment said "with
+  the sun"); Gary picked "Turn with the sun (fix)" 27 Nov 17:44Z. The midnight sky is unchanged; only the sense of the
+  motion changes.
+## 0.6.0-dev (28 Nov 2026): the lagoon dressed like the key frame (world_dress)
+- World: an authored place, `world_dress/lagoon_keyframe.json`, built by `world_dress/dress_cell.gd` (DressCell): the approved
+  key frame's content ported, not rebuilt. Rock's heads_v18c arch (Gary's pick) as the focal head at 13 m with its gate facing the
+  key camera, reef kit v18 heads b2 and b4 with their sand skirts, the five colony corals (table, brain, boulder, staghorn, finger),
+  and the colony maker's grown meadow bed. Every piece carries collision from its maker (kit UCX hulls, CoACD hulls for v18c and
+  the corals, concave sand skirts, grass as soft Area3D); every item is ray-seated on the floor; a keep-clear volume holds the fish
+  school's space and is checked against the real hulls. Pieces: `tools/lagoon_dress/export_pieces.py` with the key frame's
+  material family baked per vertex (`kf_paint.py`; rock top chroma x0.5 and walls x0.82 for the Godot water, art direction).
+- Tools: `tools/lagoon_shots.gd` takes AO_DRESS / AO_DRESS_PIECES (the place's cameras become shots 09+). Test:
+  `tests/test_dress_cell.gd` (collision, seating, school space, axis map; planted fault caught).
+
+## 0.6.0-dev (28 Nov 2026): the camera's field of view
+- Engine: WorldRoot.set_fov used an 18 mm half sensor, but Godot's CameraAttributesPhysical takes the vertical FOV from
+  a 24 mm sensor height (12 mm half), so asking for 44 deg gave 30.15 deg: every shot was about 1.5x zoomed in. Now
+  12 / tan(fov / 2); checked headless, cam.fov reads 44.0 for 44 and 60.0 for 60. Brightness is unchanged (f/22, the
+  same shutter); only the framing widens. Found by the lagoon dressing thread.
+
 ## 0.6.0-dev (28 Nov 2026): the sky's handedness
 - Engine: WorldRoot.to_godot is now Unreal (x, y, z) -> Godot (x, z, y) (was (x, z, -y), the island frame's map), and
   sky_stars s_zup is its inverse. Evidence: the lagoon GLBs are written (x, z, -y) from island metres, and Unreal
@@ -106,6 +153,22 @@
   loads the 19 world textures (AO_WORLDTEX for the shot tool).
 
 ## 0.6.0-dev (27 Nov 2026, evening): gameplay now built on Gary's Thalassa v20.19
+- M04 body 0.2.0: stress test tests/test_body_stress.gd (Gary 27 Nov: "every case, every limb, every body part
+  interaction, constraints, IK"). 45 cases (walk, turn, jump, crouch, walls, low ceiling, steps, ramps, ledges, stairs,
+  beach, waves, swimming, caves, sea floor, current, ceilings, hits, frame hitches, teleport) plus random monkey runs,
+  checked every tick: bone lengths, elbow/knee direction and limits, joint pops, limbs in rock, soles on and not sunk
+  into the ground, planted-foot slide <= 3 cm, legs/arms not through each other or the body. Planted faults (bone
+  length, no-clip off, flipped elbow) must fail. --film renders the clips on the proof page. Result: 60 Hz 40/45 + 5
+  known open (step down, 30 deg slope walked across x2, stairs), gating in run_all; 30 Hz 40/45, 120 Hz 38/45 and
+  monkeys 1/4 reported, not yet gating. FIX lines (all off under thalassa_exact, both goldens still MATCH):
+  rig sub-steps dt > 1/55 s; feet keep a 7-point sole plate on the ground (toe/heel pivot, slope-aware tread
+  centring, lateral reach limits); a planted foot past the leg's reach or clamp steps at once (foot_placer forced,
+  FORCED_HARD 7 cm overrides waiting for the other foot); the pelvis yields to a planted foot it would lift; walls
+  push the foot with a lip rule; swim legs stay on the hip's side of rock (hip-to-ankle ray), buried points are pushed
+  out, the clearance push grows at up to 9 m/s; non-finite floor fallbacks (chest went NaN off the world edge).
+  M02 motor FIXes (config thalassa_exact): walking off a drop > 0.36 m falls under gravity; the mid-air jump offset is
+  re-based when the floor under her changes (eye dropped 32 cm in one tick off a step); no 60% crouch cut and no loss
+  of the eye's trail at take-off (18 cm camera pop jumping from a crouch). WorldQuery rays ignore back faces.
 - M04 body 0.1.0 = Thalassa core/ik-rig.js DiverBodyRig (swim pose, shore walk/wade pose, swim-walk blend, head
   look, no-clip arms and legs) + ik-solvers.js (two-bone IK, leg with fin), procedural-locomotion.js
   (BalanceFootPlacer incl. jumps), physics-control.js (PhysicsControlRig profiles, hit reactions), crit springs and

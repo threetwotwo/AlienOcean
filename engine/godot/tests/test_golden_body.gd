@@ -20,8 +20,10 @@ func _initialize() -> void:
 	var worst_all := 0.0
 	for name in ["shore", "dive"]:
 		var s = Swimmer.new()
+		s.config.thalassa_exact = true
 		s.set_pose(starts[name], 0.0, 0.0)
 		var rig = Rig.new()
+		rig.thalassa_exact = true
 		var tr: Array = gold[name]
 		var k := 0
 		var worst := 0.0
