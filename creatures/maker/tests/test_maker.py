@@ -16,6 +16,7 @@ def test_proof_record(tmp_path):
     assert R['OP2_pass']
     assert R['P3_pass'] and R['IC1_pass'] and R['EY1_pass']
     assert all(R['PLANTED_caught'].values()), R['PLANTED_caught']
+    assert R['SIL1_pass'] is False and R['SIL1_reference'] is None      # no traced outline for the proof record yet
     assert set(R['SR1_range']) == {'gape', 'flare', 'bend', 'wave', 'arch', 'combo'}
 
 
