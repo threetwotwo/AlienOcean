@@ -1,5 +1,49 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): the water's fill light can be occluded
+- Engine: seabed_surface and ground_surface no longer add the water's fill (sky from above, sand bounce from below, through
+  the depth) as unoccluded emission. It now goes through Godot's ambient path, so SSAO, SSIL, the material AO and any GI
+  occlude and bounce it. Godot's ambient is one colour, so each pixel's fill colour and depth ride in ALBEDO as a ratio
+  (`w_fill_ratio`, water_physics.gdshaderinc) and light() divides it back out. The sun and the light net are unchanged.
+  Calibrated with SSAO and SSIL off: the same picture as before (mean 0.65 of 255). Key frame camera, SSAO + SSIL: coral
+  shadow L* 52.9 -> 50.2, rock face 50.4 -> 48.5 (key frame 43.8 / 42.9). Switch: WorldRoot.fill_occluded (AO_FILL_AO=0).
+- Art levers (real water conditions, defaults unchanged): WorldRoot.cdom (yellow substance, 0.03) and scat_k (particles,
+  0.40); shot tool AO_CDOM / AO_SCAT. Far water hue at Cdom 0.03 / 0.01 / 0: -141 / -125 / -117 (key frame -132).
+- Shot tool checks: AO_SSAO=0, AO_SSIL=0, AO_SSAO_R + AO_SSAO_I, AO_SDFGI=1. SDFGI on (not default yet) gives coral
+  shadow 45.4 and rock face 42.7 (key frame 43.8 / 42.9), but the hero fish goes black and the coral's shadow stripes;
+  both to fix before it becomes the default.
+
+## 0.6.0-dev (28 Nov 2026, later): the light net from the FFT sea's own slopes
+- Engine: caustics map 0.2.0 (`look/caustics_slope.gdshader`, `adapters/godot/caustics_map.gd`). While the FFT sea
+  runs (global sea_on) the map's slope pass reads the sea's slope atlas (sea_deriv.rg), as v98's CAUS_SLOPE_HLSL read
+  RT_LW_Deriv, so the net on the sand is drawn from the waves drawn overhead. Cascade 2 (sea_patch.z 2.56 m) is the
+  map's tile one to one (same island xy / patch); cascade 3 (sea_patch.w 0.32 m) repeats 8 times over it (v98 Fine 1).
+  Each depth takes the wrap-averaged mip whose texel is its own (2 / 4 / 8 cm: cascade 2 mips 1 / 2 / 3, cascade 3
+  mips 4 / 5 / 6), read at texel centres: v98's 16-tap mean and halvings, exactly. Focus, sun's disc, reader and tile
+  break unchanged. Without the sea, or with `WorldRoot.caustics.from_sea = false` (shot tool AO_CAUS=waves), the 32
+  waves as before. The per-pixel check path stays on the 32 waves, so it no longer matches the map while the sea runs.
+- Measured on the engine's map (two sea times), std at 0.8 / 2 / 5 m: 0.15 / 0.31 / 0.35-0.37 (v98 emulated
+  0.14-0.15 / 0.29-0.31 / 0.34; the 32 waves 0.14 / 0.30 / 0.30); cell 12-14 / 13-14 / 16 cm (v98 12 / 12-14 / 15-16).
+  Frame (llvmpipe, 960 x 540, shots 01 / 04): 761 / 1019 ms from the sea, 807 / 1002 ms from the 32 waves: no
+  difference beyond the noise. Shot tool: AO_CAUS_T now holds the sea at that second too. test_world_clock 42 / 42.
+
+## 0.6.0-dev (28 Nov 2026): the arch's foot and round 6 of the lagoon dressing
+- World: the focal arch head (heads_v18c) now stands on its own fallen rock: `SB_Bommie_0_v18c_apron` = Terrain's gate fall
+  (`seabed/tools/gate_fall.py` v3, grown from the head's own `handoff_terrain.json` fall record: 14 slab blocks 0.2-0.75 m at both
+  mouths, roof and wear chips; flat seat, local wave bearing 40 as the key frame rig's arch_seat_v18c_r5_w40) plus the
+  `rubble_rule.py` v11 apron round its real outline. Blocks carry one convex hull each, chips one concave mesh. Painted with the
+  kit's own age ramp (reef_rock_rgb): the rig's KF_Rock put the sand film over whole low blocks.
+- World: meadow tiles culled at export by the key frame rig's `habitat.cull_meadow` for this layout (grazing halo round heads and
+  corals, upstream scour, open lanes; whole blades). Second head to (9.5, 18) (water gap), staghorn to (0.45, 5.6). Paint: rock
+  walls x0.90 value and x0.80 chroma, table rim #f2a99c. Manifest 0.5.0.
+- Fable critique r6: FAIL overall, foreground group now matches; next: rounded buttress boulders at the camera-facing foot,
+  second head nearer and larger in frame, school + hero fish material (other threads), uniform salmon table.
+
+## 0.6.0-dev (28 Nov 2026): one sky dome
+- Engine: look/sky.gdshader takes its dome from look/sky_dome.gdshaderinc (the water surface's copy), so the sky overhead
+  and the sky in the water can't drift apart. The old look/water_surface.gdshader is removed (SeaSurface replaced it,
+  PR #37). Shot tool: the sea is pinned at its mean level by default (WorldRoot.tide_on false); AO_TIDE=1 follows the moons.
+
 ## 0.6.0-dev (28 Nov 2026): the Unreal god rays
 - Engine: god rays 0.1.0 (`look/god_rays.gdshaderinc`, drawn by underwater view 0.2.0): the lagoon's light shafts as
   they ran at lagoonwater v98 (GodPhys 1, GodUnits 1, GodPick 1). Source: the god-ray node as built
@@ -153,6 +197,26 @@
   loads the 19 world textures (AO_WORLDTEX for the shot tool).
 
 ## 0.6.0-dev (27 Nov 2026, evening): gameplay now built on Gary's Thalassa v20.19
+- M04 body 0.2.0: stress test tests/test_body_stress.gd (Gary 27 Nov: "every case, every limb, every body part
+  interaction, constraints, IK"). 45 cases (walk, turn, jump, crouch, walls, low ceiling, steps, ramps, ledges, stairs,
+  beach, waves, swimming, caves, sea floor, current, ceilings, hits, frame hitches, teleport) plus random monkey runs,
+  checked every tick: bone lengths, elbow/knee direction and limits, joint pops, limbs in rock, soles on and not sunk
+  into the ground, planted-foot slide <= 3 cm, legs/arms not through each other or the body. Planted faults (bone
+  length, no-clip off, flipped elbow) must fail. --film renders the clips on the proof page. Result: 60 Hz 40/45 + 5
+  known open (step down, 30 deg slope walked across x2, stairs), gating in run_all; 30 Hz 40/45, 120 Hz 38/45 and
+  monkeys 1/4 reported, not yet gating. FIX lines (all off under thalassa_exact, both goldens still MATCH):
+  rig sub-steps dt > 1/55 s; feet keep a 7-point sole plate on the ground (toe/heel pivot, slope-aware tread
+  centring, lateral reach limits); a planted foot past the leg's reach or clamp steps at once (foot_placer forced,
+  FORCED_HARD 7 cm overrides waiting for the other foot); the pelvis yields to a planted foot it would lift; walls
+  push the foot with a lip rule; swim legs stay on the hip's side of rock (hip-to-ankle ray), buried points are pushed
+  out, the clearance push grows at up to 9 m/s; non-finite floor fallbacks (chest went NaN off the world edge).
+  M02 motor FIXes (config thalassa_exact): walking off a drop > 0.36 m falls under gravity; the mid-air jump offset is
+  re-based when the floor under her changes (eye dropped 32 cm in one tick off a step); no 60% crouch cut and no loss
+  of the eye's trail at take-off (18 cm camera pop jumping from a crouch). WorldQuery rays ignore back faces.
+  Round 2: a planted foot turned past the hip's rotation range asks for a step (the leg solver twisted it about the
+  ankle, sliding heel and ball in fast turns); a foot 3 cm out of reach steps even with the other foot in the air
+  (FORCED_HARD/HARD_MISS 0.03, was 7 cm); the air floor clamp no longer pops a crouched take-off up 14 cm. Now 60 Hz
+  42/45 + 3 known (slope across x2, stairs), 30 Hz 41/45, 120 Hz 38/45, monkeys 2/4 (3.1 and 3.8 cm slides left).
 - M04 body 0.1.0 = Thalassa core/ik-rig.js DiverBodyRig (swim pose, shore walk/wade pose, swim-walk blend, head
   look, no-clip arms and legs) + ik-solvers.js (two-bone IK, leg with fin), procedural-locomotion.js
   (BalanceFootPlacer incl. jumps), physics-control.js (PhysicsControlRig profiles, hit reactions), crit springs and

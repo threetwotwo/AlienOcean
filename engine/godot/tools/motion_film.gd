@@ -140,7 +140,7 @@ func _physics_process(dt: float) -> bool:
 			bwq = WorldQuery.new(world.get_world_3d(), 1); bwq.exclude.append(body.get_rid()); benv = bwq.as_env()
 		var s = body.motor.swimmer
 		s.config.surface_y = env.water_y(p.x, p.z, t) if env.level > -999.0 else -1000.0
-		bwq.top = s.pos.y + 1.0
+		bwq.top = s.pos.y + 0.05     # floor rays start at the eye (from higher up a cave roof reads as floor)
 		brig.update_timers(dt)
 		mq.set_meta("pose", brig.update_swim(dt, s, null, t, benv))
 	var shot := ""

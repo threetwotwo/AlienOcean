@@ -158,16 +158,16 @@ def cage_checks(C, V, form, rec):
 
 def pose_checks(C, V, rec, jaw_w=None, sweep=True):
     """GP0 no crossing faces at rest; GP1 gape to the record's real gape and GF1 gill flare 0-20 deg add no crossings or flipped faces and
-    leave the eye rims in place; SR1 stylized range: gape, flare, C-bend, S-wave, arch, twist and all at once each stay
-    clean up to the cartoon-scale target (gape: 1.3 x the record gape within 45-65 deg) (pose.py)."""
+    leave the eye rims in place; SR1 stylized range: gape, flare, C-bend, S-wave, arch and all at once each stay
+    clean up to the species' own target x 1.3 (record gape, muscle strain limit for the body), poses it cannot make skipped (pose.py)."""
     from .pose import stress, range_sweep
     S = stress(C, V, rec, jaw_w=jaw_w)
     R = {'GP0_rest_crossings': S['rest_crossings'], 'GP0_pass': S['GP0_pass'], 'GP1_gape': S['gape'], 'GP1_pass': S['GP1_pass'],
          'GF1_flare': S['flare'], 'GF1_pass': S['GF1_pass']}
     if sweep:
         R['SR1_range'] = range_sweep(C, V, rec, jaw_w=jaw_w)
-        R['SR1_safe'] = {k: v['safe'] for k, v in R['SR1_range'].items()}
-        R['SR1_short'] = sorted(k for k, v in R['SR1_range'].items() if v['safe'] < v['target'])
+        R['SR1_safe'] = {k: v.get('safe') for k, v in R['SR1_range'].items()}
+        R['SR1_short'] = sorted(k for k, v in R['SR1_range'].items() if 'skipped' not in v and v['safe'] < v['target'])
         R['SR1_pass'] = not R['SR1_short']
     return R
 
@@ -261,7 +261,12 @@ def check(out, record_path, with_planted=False, sweep=True):
     stp = os.path.join(out, 'glb_stats.json')
     if os.path.exists(stp): R.update(export_checks(out, json.load(open(stp))))
     R['P9_form_cage_s'] = round(C['stats']['build_s'] - C['stats']['bake_s'], 1); R['P9_pass'] = R['P9_form_cage_s'] < 60
-    if with_planted: R['PLANTED_caught'] = planted(C, Z['V'], Z['VN'], form, rec)
+    from .silhouette import silhouette_check
+    R.update(silhouette_check(C, Z['V'], rec, record_path))      # SIL1: silhouette before detail
+    if with_planted:
+        R['PLANTED_caught'] = planted(C, Z['V'], Z['VN'], form, rec)
+        from .silhouette import planted_sil
+        R['PLANTED_caught'].update(planted_sil(C, Z['V'], rec))
     J = lambda o: bool(o) if isinstance(o, np.bool_) else (float(o) if isinstance(o, np.generic) else str(o))
     json.dump(R, open(os.path.join(out, 'checks.json'), 'w'), indent=1, default=J)
     return R
