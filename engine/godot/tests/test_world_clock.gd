@@ -27,5 +27,9 @@ func _init():
 			bad += 1; print("MISMATCH h=", r.h, " key ", key, " want ", r.key)
 		for i in 3:
 			if not _close(st.sun.dir[i], r.sun_dir[i], "dir"): bad += 1; print("MISMATCH sun_dir ", r.h)
+	# the adapter's axes: Unreal (x, y, z) cm is Godot (x, z, y) m. Anchor: LG_table_5's box corner in the lagoon slice 4
+	# manifest (Unreal cm, checked in Unreal by P4) against the same corner of its GLB (Godot m).
+	var corner := WorldRoot.to_godot(Vector3(241.46, -1037.43, 4.08) * 0.01)
+	if not corner.is_equal_approx(Vector3(2.4146, 0.0408, -10.3743)): bad += 1; print("MISMATCH to_godot ", corner)
 	print("world clock: %d rows, %d mismatches -> %s" % [rows.size(), bad, "PASS" if bad == 0 else "FAIL"])
 	quit(0 if bad == 0 else 1)

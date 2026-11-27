@@ -3,7 +3,8 @@
 // the glints, the moons' sky glow (Krisciunas & Schaefer 1991), the planet, the Milky Way with its dust, star clouds
 // and nebulae, the faint-star haze and speckle, airglow, zodiacal light, clusters, and the night haze on the horizon.
 // Included by sky.gdshader, which adds the result (nits) over the dome; the parameters keep Unreal's names and values.
-// All of it runs in the clock's z-up axes (Unreal's), so every constant is Unreal's: z-up (x, y, z) = Godot (x, -z, y).
+// All of it runs in the clock's z-up axes (Unreal's), so every constant is Unreal's: Unreal (x, y, z) = Godot (x, z, y),
+// the inverse of WorldRoot.to_godot (a swap: Unreal is left-handed, so the figures are not mirrored).
 // Not carried over (no such system here, or dead code in Unreal at its shipped values):
 //   clouds in front (CloudOn 0: no clouds), SceneDepth occlusion (the sky is behind everything in Godot: vis 1, isSky 1,
 //   so the haze over far geometry, hzG, is not drawn), the under-water refraction through the tank's waves (v27-v30;
@@ -83,7 +84,7 @@ const int S_NOC[3] = {3, 4, 4};
 
 float s_sat(float x) { return clamp(x, 0.0, 1.0); }
 float s_log10(float x) { return log(x) * 0.4342944819032518; }
-vec3 s_zup(vec3 g) { return vec3(g.x, -g.z, g.y); }
+vec3 s_zup(vec3 g) { return vec3(g.x, g.z, g.y); }
 float s_h3(vec3 q) { return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
 // value noise, oct octaves (x 2.03, half the weight each), the lattice shifted by seed; -1..1
 float s_vn(vec3 fp, float seed, int oct) {
