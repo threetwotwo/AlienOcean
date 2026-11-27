@@ -1,5 +1,11 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): the stars turn with the sun
+- Engine: the star sphere now turns about north by -2 pi (days - 0.5), so the stars rise and set on the same side as
+  the sun and the moons. Unreal's Stars actor turned the other way (sun_v184 apply_fast, though its comment said "with
+  the sun"); Gary picked "Turn with the sun (fix)" 27 Nov 17:44Z. The midnight sky is unchanged; only the sense of the
+  motion changes.
+
 ## 0.6.0-dev (28 Nov 2026): the camera's field of view
 - Engine: WorldRoot.set_fov used an 18 mm half sensor, but Godot's CameraAttributesPhysical takes the vertical FOV from
   a 24 mm sensor height (12 mm half), so asking for 44 deg gave 30.15 deg: every shot was about 1.5x zoomed in. Now
