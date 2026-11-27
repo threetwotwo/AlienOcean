@@ -30,8 +30,8 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 ## overall loss. The haze along the view (absorption + scattering between eye and object) is untouched.
 ## Art direction: stops added under water on top of the place's compensation, and the water haze's strength
 ## (Unreal GlowK, Gary's clarity pick 2.5). Under water only, so the sky above the sea keeps its exposure.
-@export var under_exposure_art := 0.0
-@export var glow_k := WaterOptics.LOOK_SET.glow_k
+@export var under_exposure_art := 1.0     # Gary picked "Brighter" 27 Nov 17:06Z
+@export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
 @export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
 @export var depth_colour_share := DEPTH_WB   # art direction lever (27 Nov: Gary 'art direction trumps'); Unreal 0.25
 const DEPTH_WB := 0.25                # the share given back
