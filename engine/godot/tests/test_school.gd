@@ -60,6 +60,7 @@ func _inside_rock(p: Vector3) -> bool:
 func _school(id: String, n: int, sd: int, home: Vector3, tether: bool, threaded := false) -> FishSchool:
 	var s := FishSchool.new()
 	s.species_id = id; s.count = n; s.seed_ = sd; s.home = home; s.tethered = tether; s.threaded = threaded
+	s.use_asset = false        # checks run on the record's body length (assets are gitignored); films use the export
 	s.process_mode = Node.PROCESS_MODE_DISABLED
 	world.add_child(s)
 	if fault:
@@ -333,6 +334,23 @@ func _run() -> void:
 		var inv := _invariants(rec, sim.p)
 		_add("S13", "ride escort (Thalassa): fish keep with the ridden manta (within 14.5 m, heading its way), none inside its body or startled", float(near) / sim.N >= 0.7 and follow >= 0.7 and dmin >= 1.2 and rec.startled_max <= int(0.05 * sim.N) and inv.S4 and inv.S5,
 			{"near": snappedf(float(near) / sim.N, 0.01), "heading_with_it": snappedf(follow, 0.01), "min_dist_m": snappedf(dmin, 0.01), "startled_max": rec.startled_max})
+	# S14: the creature maker's export in the school (when its gitignored glbs are present; else reported as skipped)
+	if _want("S14"):
+		var CM = load("res://fish/creature_school_mesh.gd")
+		var aid: String = Species.params("trevally").get("asset", "")
+		if not CM.available(aid):
+			print("SKIP  S14 export %s not present (assets are gitignored; fetch per assets.lock.json)" % aid)
+		else:
+			var a: Dictionary = CM.load_species(aid)
+			var ok: bool = a.meshes.size() == 3
+			var snout := INF; var tail := -INF
+			var m0: ArrayMesh = a.meshes[0]
+			var vs: PackedVector3Array = m0.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+			for q in vs: snout = minf(snout, 0.5 - q.x); tail = maxf(tail, 0.5 - q.x)
+			var f_rec: float = CM.beat_hz(a.swim, float(a.swim.beat_law.U_rec_BLps))
+			ok = ok and absf(a.bl_m - float(a.swim.body_length_m)) < 1e-4 and absf(snout) < 0.01 and absf(tail - 1.0) < 0.01 and absf(f_rec - float(a.swim.beat_law.f_rec_Hz)) < 1e-6
+			_add("S14", "maker export in the school: 3 LODs, body length from the glb, snout at s 0 and body tail at s 1, beat law at U_rec = f_rec", ok,
+				{"bl_m": a.bl_m, "body_s_range": [snappedf(snout, 0.001), snappedf(tail, 0.001)], "f_at_U_rec": f_rec, "surfaces": [a.meshes[0].get_surface_count(), a.meshes[1].get_surface_count(), a.meshes[2].get_surface_count()]})
 	# S10: cost (cloud CPU; the Mac's P-cores are faster)
 	if _want("S10"):
 		_new_world(); await _settle_physics()
