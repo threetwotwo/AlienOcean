@@ -110,7 +110,8 @@ func _setup():
 			path = func(tt: float) -> Vector3: return home + Vector3(-30.0, 0.0, 0.0)
 			cam_path = func(tt: float) -> Array:
 				var c: Vector3 = s4.sim.metrics().centre_m
-				return [c + Vector3(-0.4, 0.25, 1.6), c]
+				var k: float = s4.params.bl_m / 0.17       # framed for a 17 cm fish; scaled to the export's body length
+				return [c + Vector3(-0.4, 0.25, 1.6) * k, c]
 			dur = 6.0
 		"circle":
 			var s3 := _school("trevally", 0, 4, home + Vector3(0.0, 0.8, 0.0), true, {"back_colour": Color(0.16, 0.26, 0.30), "flank_colour": Color(0.80, 0.84, 0.86)})

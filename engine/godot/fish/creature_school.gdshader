@@ -1,9 +1,10 @@
-// Creature school 0.1.0: a creature maker export drawn in a MultiMesh school (fish/creature_school_mesh.gd). The maker's
+// Creature school 0.2.0: a creature maker export drawn in a MultiMesh school (fish/creature_school_mesh.gd). The maker's
 // PBR material, and its swim wave from the glTF extras (alien_ocean.swim.wave.amplitude_envelope_BL: per station s, half
 // sideways swing in BL with recoil included, phase lag in turns behind the snout), played back as the extras' rule says:
 // lateral z(s) = A(s) x amp_scale x sin(phase - 2 pi lag(s)), phase advancing at f(U) (beat_law), amp_scale = A_U / A.
-// INSTANCE_CUSTOM: r = swim phase (rad), g = amplitude scale (A_U / A, startle boosted), b = body bend (turning, as the
-// stand-in), a = startle. Mesh frame: one body length, head toward +x, x = 0.5 - s, y up.
+// r2: three tables (wave.envelopes_by_speed at env_u) blended at the fish's drawn speed U.
+// INSTANCE_CUSTOM: r = swim phase (rad), g = drawn speed U (BL/s, picks the table), b = body bend (turning, as the
+// stand-in), a = amplitude factor (A_U / A for a one-table export, x startle boost, x burst-and-coast glide fade). Mesh frame: one body length, head toward +x, x = 0.5 - s, y up.
 // No fog here: the underwater view quad fogs every pixel along the view ray.
 shader_type spatial;
 render_mode cull_disabled, depth_draw_opaque;
@@ -21,31 +22,45 @@ uniform sampler2D roughness_tex : hint_default_white, filter_linear_mipmap;
 uniform float use_mr_tex = 0.0;
 uniform float swim_on = 1.0;
 uniform float env_s[16];
-uniform float env_a[16];
-uniform float env_lag[16];
+uniform float env_a0[16];
+uniform float env_lag0[16];
+uniform float env_a1[16];
+uniform float env_lag1[16];
+uniform float env_a2[16];
+uniform float env_lag2[16];
+uniform vec3 env_u = vec3(1.0, 2.0, 3.0);   // the speeds (BL/s) of the three tables
 uniform int env_n = 0;
 
-void table(float s, out float a, out float lag) {
-	a = env_a[0]; lag = env_lag[0];
+// the three tables blended at U: linear between the two nearest speeds, end tables held outside (export r2 rule)
+float row_a(int i, float u01, float u12, bool hi) { return hi ? mix(env_a1[i], env_a2[i], u12) : mix(env_a0[i], env_a1[i], u01); }
+float row_l(int i, float u01, float u12, bool hi) { return hi ? mix(env_lag1[i], env_lag2[i], u12) : mix(env_lag0[i], env_lag1[i], u01); }
+
+void table(float s, float U, out float a, out float lag) {
+	bool hi = U > env_u.y;
+	float u01 = clamp((U - env_u.x) / max(env_u.y - env_u.x, 1e-5), 0.0, 1.0);
+	float u12 = clamp((U - env_u.y) / max(env_u.z - env_u.y, 1e-5), 0.0, 1.0);
+	a = row_a(0, u01, u12, hi); lag = row_l(0, u01, u12, hi);
 	if (env_n <= 0) { a = 0.0; lag = s; return; }
 	if (s <= env_s[0]) { return; }
 	for (int i = 1; i < 16; i++) {
 		if (i >= env_n) break;
 		if (s <= env_s[i]) {
 			float u = (s - env_s[i - 1]) / max(env_s[i] - env_s[i - 1], 1e-5);
-			a = mix(env_a[i - 1], env_a[i], u); lag = mix(env_lag[i - 1], env_lag[i], u);
+			a = mix(row_a(i - 1, u01, u12, hi), row_a(i, u01, u12, hi), u);
+			lag = mix(row_l(i - 1, u01, u12, hi), row_l(i, u01, u12, hi), u);
 			return;
 		}
 	}
 	// past the last station (tail tip): extend the last segment's slope
 	int l = max(env_n - 1, 1);
 	float u = (s - env_s[l - 1]) / max(env_s[l] - env_s[l - 1], 1e-5);
-	a = mix(env_a[l - 1], env_a[l], u); lag = mix(env_lag[l - 1], env_lag[l], u);
+	a = mix(row_a(l - 1, u01, u12, hi), row_a(l, u01, u12, hi), u);
+	lag = mix(row_l(l - 1, u01, u12, hi), row_l(l, u01, u12, hi), u);
 }
 
-float lateral(float s, float ph, float amp, float bend) {
+float lateral(float s, float ph, float U, float amp, float bend) {
 	float a; float lag;
-	table(s, a, lag);
+	table(s, U, a, lag);
 	float sb = s - 0.42;
 	return a * amp * sin(ph - 6.2831853 * lag) + 0.5 * bend * sb * sb;
 }
@@ -53,11 +68,12 @@ float lateral(float s, float ph, float amp, float bend) {
 void vertex() {
 	float s = 0.5 - VERTEX.x;
 	float ph = INSTANCE_CUSTOM.r;
-	float amp = INSTANCE_CUSTOM.g * swim_on;
+	float U = INSTANCE_CUSTOM.g;
 	float bend = INSTANCE_CUSTOM.b;
-	float w = lateral(s, ph, amp, bend);
+	float amp = INSTANCE_CUSTOM.a * swim_on;
+	float w = lateral(s, ph, U, amp, bend);
 	float ds = 0.01;
-	float dw = (lateral(s + ds, ph, amp, bend) - lateral(s - ds, ph, amp, bend)) / (2.0 * ds);   // dz/ds
+	float dw = (lateral(s + ds, ph, U, amp, bend) - lateral(s - ds, ph, U, amp, bend)) / (2.0 * ds);   // dz/ds
 	VERTEX.z += w;
 	// rotate the normal and tangent by the local midline slope (dz/dx = -dz/ds)
 	float ang = atan(-dw);
