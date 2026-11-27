@@ -31,6 +31,11 @@ class Foot:
 var initialized := false
 var last_vessel_id = null
 var feet := {"L": Foot.new(), "R": Foot.new()}
+## Set by the body rig when a planted foot is held back by its reach limits (it would be dragged): step it now.
+var forced := {"L": false, "R": false}
+## Optional world check set by the body rig: filter(body_ground: Vector3, to: Vector3, yaw: float) -> Vector3 returns
+## a landing spot the foot can really stand on (Thalassa's placer only knew a flat deck).
+var target_filter = null
 var last_stepped := "R"
 var step_count := 0
 var support_cooldown := 0.0
@@ -208,6 +213,7 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var rem_t := maxf(0.0, (1.0 - f.t) * f.dur)
 		if f.t < 0.80:
 			var tg: Vector3 = target_at.call(key, rem_t)
+			if target_filter != null: tg = target_filter.call(lp, tg, f.to_yaw)
 			var rk := BM.expk(16.0, sdt)
 			f.to.x = lerpf(f.to.x, tg.x, rk)
 			f.to.y = lp.y
@@ -433,9 +439,11 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 
 	var trigger := func(key: String, urgent := false) -> void:
 		var f: Foot = feet[key]
+		forced[key] = false
 		f.from = f.cur
 		f.dur = clampf(planned * 0.88 if urgent else planned, 0.25, 0.46)
 		f.to = target_at.call(key, f.dur)
+		if target_filter != null: f.to = target_filter.call(lp, f.to, yaw)
 		f.from_yaw = f.yaw
 		f.to_yaw = yaw
 		f.stepping = true
@@ -454,7 +462,11 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var idle := speed < 0.06 and des_speed < 0.06 and absf(yaw_rate) < 0.22
 		var trig := 0.22 if idle else lerpf(config.baseTriggerDist, config.maxTriggerDist, speed_norm)
 		var emerg := lerpf(config.emergencyTrailDist, 0.48, rb)
-		if not step_l and trail_l > emerg and (not step_r or feet.R.t >= 0.72):
+		if not step_l and forced.L and (not step_r or feet.R.t >= 0.25):
+			trigger.call("L", true)
+		elif not step_r and forced.R and (not step_l or feet.L.t >= 0.25):
+			trigger.call("R", true)
+		elif not step_l and trail_l > emerg and (not step_r or feet.R.t >= 0.72):
 			trigger.call("L", true)
 		elif not step_r and trail_r > emerg and (not step_l or feet.L.t >= 0.72):
 			trigger.call("R", true)
@@ -626,8 +638,8 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 	return {
 		"gaitMode": gait, "runBlend": rb, "speed": speed, "speedNorm": speed_norm, "vFwd": v_fwd, "vRight": v_right,
 		"trajectory": traj,
-		"footL": {"pos": fl_.cur, "yaw": fl_.yaw, "stepping": fl_.stepping, "t": fl_.t, "toePitch": fl_.toe_pitch, "heelKick": fl_.heel_kick},
-		"footR": {"pos": fr_.cur, "yaw": fr_.yaw, "stepping": fr_.stepping, "t": fr_.t, "toePitch": fr_.toe_pitch, "heelKick": fr_.heel_kick},
+		"footL": {"pos": fl_.cur, "yaw": fl_.yaw, "stepping": fl_.stepping, "t": fl_.t, "toePitch": fl_.toe_pitch, "heelKick": fl_.heel_kick, "from": fl_.from, "to": fl_.to},
+		"footR": {"pos": fr_.cur, "yaw": fr_.yaw, "stepping": fr_.stepping, "t": fr_.t, "toePitch": fr_.toe_pitch, "heelKick": fr_.heel_kick, "from": fr_.from, "to": fr_.to},
 		"pelvisOffset": pelvis_off, "pelvisYaw": pelvis_yaw, "pelvisRoll": pelvis_roll,
 		"spineLeanFwd": spine_lean_fwd, "spineLeanLat": spine_lean_lat, "spineTwist": spine_twist,
 		"armSwingL": arm_swing_l, "armSwingR": arm_swing_r, "comY": com_y, "comVelY": com_vel_y,

@@ -13,7 +13,7 @@ of the JavaScript.
 | Service | Shape | Real implementation | Test implementation |
 |---|---|---|---|
 | WaterQuery | `level: float` (-1000 = no water), `water_y(x, z, t) -> float`, `current(p: Vector3, t) -> Vector3` | core/world/lagoon_water.gd (LagoonWaterField) | tests/harness/test_env.gd |
-| WorldQuery | `floor_height(x, z) -> float` (-INF = none), `floor_normal(x, z) -> Vector3`, `nearest_surface(p, r, filter = null) -> {dist, normal, point}` or `{}` | adapters/godot/world_query.gd (Jolt) | the same adapter on tests/harness/test_worlds.gd geometry |
+| WorldQuery | `floor_height(x, z) -> float` (-INF = none), `floor_normal(x, z) -> Vector3`, `nearest_surface(p, r, filter = null) -> {dist, normal, point}` or `{}`, `point_solid(p) -> bool`, `ray(from, to) -> {position, normal}` or `{}` | adapters/godot/world_query.gd (Jolt) | the same adapter on tests/harness/test_worlds.gd geometry |
 | Clock | `SkyClock`: game time, sun and moon directions, tide inputs | core/world/sky_clock.gd (SkyClock, M30) | same |
 | InputSource | one `InputPacket` per tick (core/m01_input/input_packet.gd) | adapters/godot/input_reader.gd | scripted packets in tests |
 

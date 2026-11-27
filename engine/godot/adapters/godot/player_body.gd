@@ -39,6 +39,7 @@ func _init() -> void:
 	safe_margin = 0.01
 	collision_layer = 2
 	collision_mask = 1
+	motor.swimmer.config.step_lag = 0.37        # stress J5: climb a ledge over ~0.15 s, not one tick (< step_height + 2 cm)
 	_env_dict = {"floor_height": _floor_height, "terrain_normal": _terrain_normal, "local_surface": _local_surface,
 		"water_current": _water_current, "resolve_collisions": _resolve, "stand_blocked": _stand_blocked}
 

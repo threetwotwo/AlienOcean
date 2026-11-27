@@ -22,6 +22,7 @@ func _initialize() -> void:
 		var s = Swimmer.new()
 		s.set_pose(starts[name], 0.0, 0.0)
 		var rig = Rig.new()
+		rig.thalassa_exact = true
 		var tr: Array = gold[name]
 		var k := 0
 		var worst := 0.0

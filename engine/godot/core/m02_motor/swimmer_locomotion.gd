@@ -26,7 +26,7 @@ var config := {
 	"has_surface": true, "surface_y": 0.0, "sway_scale": 0.85, "classic_drag": false, "pitch_limit": 1.42,
 	"base_fov": 74.0, "sprint_fov": 80.5,
 	"walk_speed": 1.38, "jog_speed": 2.45, "crouch_speed": 0.82, "wade_min_speed_scale": 0.64,
-	"eye_height": 1.24, "crouch_eye_drop": 0.30, "jump_gravity": 9.81, "jump_speed": 3.15,
+	"step_lag": 0.04, "eye_height": 1.24, "crouch_eye_drop": 0.30, "jump_gravity": 9.81, "jump_speed": 3.15,
 	"wade_enter_depth": 1.04, "wade_exit_depth": 1.14,
 }
 
@@ -296,7 +296,9 @@ func _update_shore(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, 
 	# slide against rocks and hulls without overriding the standing eye height
 	var saved_y := pos.y
 	_resolve(env, c.radius * 0.72, true)
-	pos.y = maxf(saved_y, eff_floor + c.eye_height - shore_crouch_blend * c.crouch_eye_drop + shore_jump_offset - 0.04)
+	# step_lag: how far the eye may trail the standing height (Thalassa 0.04 m; the Godot adapter raises it so a
+	# 30 cm ledge is climbed over ~0.15 s by the 18/s follow above instead of snapping up in one tick)
+	pos.y = maxf(saved_y, eff_floor + c.eye_height - shore_crouch_blend * c.crouch_eye_drop + shore_jump_offset - c.step_lag)
 	shore_vel_xz = Vector2(vel.x, vel.z)
 	if sdt > 1e-4:
 		var raw_a := ((shore_vel_xz - prev_v) / sdt).clamp(Vector2(-18, -18), Vector2(18, 18))
