@@ -68,6 +68,17 @@ V = Z['V']
 # ---------------------------------------------------------------- BAKE: the professional step, in Blender's own tangent frame
 tmp_m = bpy.data.materials.new('bake_tmp'); tmp_m.use_nodes = True
 body = mesh_obj('body', V, C['faces'], C['uv'], tmp_m)
+INT_IDX, INT_SKIP = interior.slot(body, C)     # interior faces off the skin's bake target before anything is baked
+# orbit linings (the tuck ring of each eye patch) turn into the socket and lie inside the form by design, up to 1.6 % SL deep,
+# further than the bake cage reaches out: their rays start inside the solid and hit the form's far side from behind. They do not
+# sample the form: they wait on the throwaway slot too, and take a flat tangent normal (the cage's own shading) and the rim's AO.
+_tuck = set(v for rings in C['openings']['eye_rings'] for v in rings[-1])
+LINING = [k for k, (f, t) in enumerate(zip(C['faces'], C['ftag'])) if t == 'eye' and _tuck & set(f)]
+for k in LINING: body.data.polygons[k].material_index = INT_IDX
+PLANT = os.environ.get('CREATURE_PLANT_BAKE_FAULT', '')   # tests only: puts the 0.3.0 fault back, to show P6 catches it
+_inner = [k for k, t in enumerate(C['ftag']) if t in interior.INNER]
+if PLANT == 'interior_on_skin':
+    for k in _inner: body.data.polygons[k].material_index = 0
 Fm = np.load(os.path.join(OUT, 'form_mc.npz'))
 me = bpy.data.meshes.new('form'); me.from_pydata([B(v) for v in Fm['V']], [], Fm['F'].tolist()); me.update()
 for p_ in me.polygons: p_.use_smooth = True
@@ -86,6 +97,16 @@ NB_ = bake('NORMAL', imn)[..., :3] * 2 - 1
 ima = bpy.data.images.new('bake_ao', RES, RES, float_buffer=True); ima.colorspace_settings.name = 'Non-Color'
 scn.cycles.samples = 32; AO = bake('AO', ima)[..., 0]
 bake_s = round(_t.time() - t0, 1)
+for k in LINING: body.data.polygons[k].material_index = 0
+for k in _inner: body.data.polygons[k].material_index = INT_IDX
+if LINING:
+    from scipy.ndimage import distance_transform_edt
+    from creature_maker.maps import raster
+    _sk = [k for k, t in enumerate(C['ftag']) if t in ('body', 'eye', 'mouth', 'cap')]; _ln = set(LINING)
+    _F = raster([C['faces'][k] for k in _sk], [np.array(C['uv'][k]) for k in _sk], V, Z['VN'], RES)[3]     # face per texel, Blender's row order
+    _lin = np.isin(_F, [i for i, k in enumerate(_sk) if k in _ln]); _src = (_F >= 0) & ~_lin
+    _iy, _ix = distance_transform_edt(~_src, return_distances=False, return_indices=True)
+    NB_[_lin] = (0.0, 0.0, 1.0); AO[_lin] = AO[_iy[_lin], _ix[_lin]]
 # fine relief: UV-space height -> tangent normal, combined with the baked form normal (reoriented normal mapping)
 H = np.load(os.path.join(OUT, 'body_height.npy')); Mk = np.load(os.path.join(OUT, 'body_mask.npy'))
 if H.shape[0] != RES:
@@ -122,7 +143,7 @@ bpy.data.objects.remove(form)
 body_m = pbr('body', image('body_base', 'body_base.png'), image('body_normal', 'body_normal.png', True), image('body_orm', 'body_orm.png', True))
 body.data.materials[0] = body_m
 # interior slot: cavity + gill passage faces on their own material 'interior' (engine contract), maps baked from the cage itself
-INT_IDX, INT_STATS = interior.setup(body, body_m, C, OUT)
+INT_IDX, INT_STATS = interior.setup(body, body_m, C, OUT, INT_IDX, INT_SKIP)
 int_m = pbr('interior', image('interior_base', 'interior_base.png'), None, image('interior_orm', 'interior_orm.png', True), two_sided=False)
 body.data.materials[INT_IDX] = int_m
 # underwater skin: reflectance 0.01-0.06 % (lessons, fins handover s5) -> IOR of water-skin, not 1.5
