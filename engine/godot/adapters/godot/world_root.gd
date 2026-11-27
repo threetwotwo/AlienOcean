@@ -279,3 +279,22 @@ func _push_sky(st: Dictionary) -> void:
 		_dome_sun = ds; _dome_g = ground_lux_of_dome(ds)
 	mat.set_shader_parameter("sky_norm", (st.skylux - SkyClock.NIGHT_SKY_LUX) / _dome_g if _dome_g > 1e-12 else 0.0)
 	mat.set_shader_parameter("sea_nits", SkyClock.OCEAN_ALBEDO * st.total / PI)
+	# night sky (look/sky_stars.gdshaderinc, Unreal M_Stars): what the Unreal clock wrote to MPC_Sky and the Stars actor
+	if mat.get_shader_parameter("star_cat") == null:
+		mat.set_shader_parameter("star_cat", StarCatalogue.texture())
+	var north: Vector3 = st.frame[1]                       # the sky turns about the planet's axis once a day (z-up, as the clock)
+	var turn: float = deg_to_rad(fmod(rad_to_deg(TAU * (float(st.days) - 0.5)), 360.0))
+	mat.set_shader_parameter("star_spin", Vector4(north.x, north.y, north.z, turn))
+	var glow: float = st.eclipse.glow
+	mat.set_shader_parameter("stars_on", 1.0 if (float(st.total) < 50.0 or glow > 0.0) else 0.0)   # STARS_BELOW_LUX
+	var ra: float = SkyClock.MOONS[0].drawn_deg; var rb: float = SkyClock.MOONS[1].drawn_deg
+	mat.set_shader_parameter("moon_a_r", deg_to_rad(ra * 0.5) if float(st.A.elev) > -(ra * 0.5 + 0.5) else 0.0)   # MoonAView.w
+	mat.set_shader_parameter("moon_b_r", deg_to_rad(rb * 0.5) if float(st.B.elev) > -(rb * 0.5 + 0.5) else 0.0)
+	mat.set_shader_parameter("star_expo", exposure)        # Unreal's EyeAdaptation: exposed units per nit
+	mat.set_shader_parameter("site_lux", float(st.total))
+	mat.set_shader_parameter("eclipse_glow", glow)
+	var key_k: float = st[key].kelvin if key != "" else SkyClock.STAR.kelvin
+	mat.set_shader_parameter("key_kelvin", key_k)
+	# the stars are aimed through AgX's night darkening (NightSky, NightDeep); without that AgX they keep their own light
+	mat.set_shader_parameter("night_sky", agx_fx.night_sky if agx_fx.enabled else 0.0)
+	mat.set_shader_parameter("deep_comp", agx_fx.night_deep if agx_fx.enabled else 0.0)

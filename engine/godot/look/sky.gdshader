@@ -1,10 +1,12 @@
-// Sky 0.1.1 (engine thread; 0.1.1: twilight dome = the shape with the sun held at 1 deg, scaled to the clock's twilight sky_lux): the Unreal sky's drawn bodies, ported, over a clear-air dome.
+// Sky 0.2.0 (engine thread; 0.2.0: the night sky, M_Stars, in look/sky_stars.gdshaderinc; 0.1.1: twilight dome = the shape with the sun held at 1 deg, scaled to the clock's twilight sky_lux): the Unreal sky's drawn bodies, ported, over a clear-air dome.
 // Sun disc + corona: SUN_HLSL (sun_v184) as is: limb-darkened disc carrying the sun's whole light, drawn x5.29
 // (2.8 deg), air extinction per band (0.0862, 0.1665, 0.2961) x air mass, masked by the moons.
 // Moons A and B: MOON_HLSL as is: Lommel-Seeliger face, maria noise, planetshine, soft edge; lit by the true sun.
 // Dome: stand-in for Unreal's SkyAtmosphere (an engine feature, not our code): Rayleigh + sea-salt single scatter,
 // scaled by the clock so the sky's light on the ground is the clock's sky_lux (sky_norm, from WorldRoot).
-// Stars (STARS_HLSL) come next. Output in nits (background_intensity 1, physical light units).
+// Night sky: STARS_HLSL (M_Stars) in look/sky_stars.gdshaderinc, added over everything as in Unreal (an additive cube);
+// above water only, and not in the radiance cubemap passes (a star is measured in screen pixels).
+// Output in nits (background_intensity 1, physical light units).
 shader_type sky;
 render_mode use_debanding;
 
@@ -28,6 +30,7 @@ uniform float sky_norm = 1.0;           // set by the driver: dome scale so its 
 uniform float sea_nits = 0.0;           // below the horizon: the sea, seen from above
 
 const vec3 EXT = vec3(0.0862, 0.1665, 0.2961);
+#include "sky_stars.gdshaderinc"
 
 float airmass(float y) {
 	float eld = degrees(asin(clamp(y, 0.0, 1.0)));
@@ -113,6 +116,7 @@ void sky() {
 		// B is nearer (18 km) than A (20 km): it covers A
 		col = mix(col, air + ma.rgb, ma.a * (1.0 - mb.a));   // the air in front of a moon still glows
 		col = mix(col, air + mb.rgb, mb.a);
+		if (!AT_CUBEMAP_PASS) col += stars(v, POSITION, TIME, s, normalize(moon_a_dir), normalize(moon_b_dir));
 		COLOR = col;
 	}
 }

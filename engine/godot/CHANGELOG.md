@@ -1,5 +1,21 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (27 Nov 2026, late night): the Unreal night sky
+- Engine: Sky 0.2.0. `look/sky_stars.gdshaderinc` is sun_v184 M_Stars (STARS_HLSL, lines 6744-7877) ported line for
+  line in the clock's z-up axes: the star field (two random stars per cube cell plus the catalogue of 1914 bright stars
+  with the five figures and the clusters), glints, the planet, the Milky Way (dust, star clouds, nebulae), faint-star
+  haze and speckle, airglow, zodiacal light, the moons' sky glow (Krisciunas & Schaefer), the eclipse glow and the night
+  haze on the horizon. Above water only (Gary's rule, Unreal v32); not drawn in the sky's radiance cubemap.
+  `look/star_catalogue.gd` holds the catalogue (CAT[2319], CATS[385], copied value for value) and builds its float
+  texture at run time. WorldRoot._push_sky feeds what the Unreal clock wrote: the sky's turn (StarSpin), the moons'
+  view radii, exposure, site lux, eclipse glow, the key light's temperature, and AgX's NightSky / NightDeep.
+  Left out, no such system here: clouds in front, scene-depth occlusion and the haze over far geometry, the tank's
+  wave refraction; dead in Unreal too: the old aureole, airglow ripples.
+  Known gap, not fixed here: WorldRoot.apply has no night eye (Unreal held EV100 -4.75 to -3.25 at night, with the
+  night key and night lift on the compensation), so a moonless night is exposed about 8.7 stops over Unreal's and
+  nearly every star reaches its glint ceiling; under Unreal's eye the same shader gives the Unreal look. The sky now
+  uses TIME and POSITION, so Godot runs it as a realtime sky.
+
 ## 0.6.0-dev (27 Nov 2026, night): the Unreal AgX tonemapper
 - Engine: AgX post 0.1.0 (`look/agx_post.glsl`, `adapters/godot/agx_effect.gd`): sun_v184 M_PP_AgX ported line for
   line as a CompositorEffect after the transparent pass (Wrensch AgX fit, Punch 0.4, white balance following the light
