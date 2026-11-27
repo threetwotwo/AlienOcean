@@ -114,7 +114,7 @@ func _setup():
 		if aps.size() > 0:
 			ap = aps[0]; var a = ap.get_animation_list()[0]; ap.get_animation(a).loop_mode = Animation.LOOP_LINEAR; ap.play(a)
 	if dress and fish:
-		fish.position = dress.to_world(dress.manifest.hero.at); fish.rotation.y = dress.anchor_xform.basis.get_euler().y + float(dress.manifest.hero.rot)
+		fish.position = dress.on_sand(dress.manifest.hero.at); fish.rotation.y = dress.anchor_xform.basis.get_euler().y + float(dress.manifest.hero.rot)
 	var fp := fish.position if fish else Vector3(1.2, 0.9, -9.6)
 	shots = [
 		["01_hero_3p", fp + Vector3(-0.55, 0.18, 0.5), fp, 50.0],

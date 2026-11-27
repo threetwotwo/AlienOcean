@@ -176,7 +176,7 @@ func _physics_process(_delta: float) -> void:
 	if mounts.is_mounted("fauna"):
 		for s in school_nodes:
 			s.actors = actors.perceived(s.home, school_sense_radius)
-			s.advance(dt)
+			s.advance(dt, false)                  # step only; drawn once per rendered frame in _process
 	_mark("fauna", tp)
 	# plugs
 	tp = Time.get_ticks_usec()
@@ -215,6 +215,13 @@ func _world_phase(tp: int) -> void:
 	if sea != null: sea.visible = mounts.is_mounted("sea")
 	lagoon.visible = mounts.is_mounted("lagoon")
 	_mark("world", tp)
+
+func _process(delta: float) -> void:
+	## the schools' MultiMesh write once per drawn frame, interpolated to render time (school thread PR #49), after the
+	## physics ticks of this frame, so the fish are drawn where the camera already is
+	if not ready_done or not mounts.is_mounted("fauna"): return
+	var since := Engine.get_physics_interpolation_fraction() / Engine.physics_ticks_per_second
+	for s in school_nodes: s.draw_now(since, delta)
 
 func _mark(phase: String, since: int) -> void:
 	trace.append(phase)

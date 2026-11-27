@@ -140,7 +140,9 @@ func _step_actors() -> Array:
 
 func _collect() -> void:
 	if _task >= 0:
+		var tw := Time.get_ticks_usec()
 		WorkerThreadPool.wait_for_task_completion(_task)
+		wait_ms = (Time.get_ticks_usec() - tw) / 1000.0   # time the caller blocked on the worker (0 when it had a whole interval)
 		_task = -1
 		var t0 := Time.get_ticks_usec()
 		sim.guard(seg_fn)
@@ -159,10 +161,18 @@ func _threaded_step() -> void:
 
 ## Advance by delta seconds (called from _process; tests call it directly with a fixed delta).
 var _draw_dt := 1.0 / 60.0
-func advance(delta: float) -> void:
+var draw_ms := 0.0
+var wait_ms := 0.0                      # last collect's block on the worker step (not in main_ms)
+
+## Advance the school by delta seconds. draw=false steps only (for a fixed physics tick); then call draw_now() once per
+## rendered frame from _process.
+func advance(delta: float, draw := true) -> void:
 	_draw_dt = delta
 	main_ms = 0.0
-	if paused: _draw(1.0); return
+	wait_ms = 0.0
+	if paused:
+		if draw: _draw(1.0)
+		return
 	_update_actors(delta)
 	_acc += delta
 	if threaded:
@@ -184,7 +194,7 @@ func advance(delta: float) -> void:
 			main_ms += (Time.get_ticks_usec() - t0) / 1000.0
 			_task = WorkerThreadPool.add_task(_threaded_step, false, "fish school step")
 		# drawn one step behind the sim (the step in flight), interpolated over its interval
-		_draw(clampf(_acc / sim.dt, 0.0, 1.0))
+		if draw: _draw(clampf(_acc / sim.dt, 0.0, 1.0))
 	else:
 		var guard := 0
 		while _acc >= sim.dt and guard < 4:
@@ -196,7 +206,17 @@ func advance(delta: float) -> void:
 			_acc -= sim.dt
 			guard += 1
 		if guard == 4: _acc = 0.0      # a hitch: drop time rather than spiral
-		_draw(clampf(_acc / sim.dt, 0.0, 1.0))
+		if draw: _draw(clampf(_acc / sim.dt, 0.0, 1.0))
+
+## Draw once per rendered frame when advance() runs on a physics tick with draw=false. since_tick = render time since
+## the last advance() (e.g. Engine.get_physics_interpolation_fraction() / Engine.physics_ticks_per_second).
+func draw_now(since_tick := 0.0, frame_delta := 1.0 / 60.0) -> void:
+	_draw_dt = frame_delta
+	var keep := main_ms
+	main_ms = 0.0
+	_draw(clampf((_acc + since_tick) / sim.dt, 0.0, 1.0))
+	draw_ms = main_ms
+	main_ms = keep + draw_ms
 
 ## Finish any step in flight (tests, before reading the state).
 func sync() -> void:
