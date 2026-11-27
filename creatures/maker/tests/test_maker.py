@@ -66,9 +66,13 @@ def test_swim_clip_loops(tmp_path):
     assert bs[0]['beat_Hz'] < bs[1]['beat_Hz'] < bs[2]['beat_Hz'] and bs[0]['rows'] == env
     assert all(len(r) == 3 for b in bs for r in b['rows']) and bs[0]['rows'] != bs[2]['rows']
     assert all(b['loop_closure_BL'] < 1e-4 for b in bs)
+    bw = R['extras']['beat_law']            # the published law reproduces every measured beat
+    for b in bs: assert abs(bw['f_rec_Hz'] * (bw['c_BLps'] + b['U_BLps']) / (bw['c_BLps'] + bw['U_rec_BLps']) - b['beat_Hz']) < 2e-3
     # a cruise below the gait's steady band (the engine swims burst-and-coast there): the loop is taken at the band's floor and closes
     raw['body']['motion'] = dict(raw['body']['motion'], U=0.968, f=1.452)
     R2 = swim_clip.clips(C, V, raw, bl); st = R2['extras']['steady']
+    bw = R2['extras']['beat_law']
+    for b in R2['extras']['wave']['envelopes_by_speed']: assert abs(bw['f_rec_Hz'] * (bw['c_BLps'] + b['U_BLps']) / (bw['c_BLps'] + bw['U_rec_BLps']) - b['beat_Hz']) < 2e-3
     assert R2['loop_err'] < 1e-4 and st['U_loop_BLps'] == st['U_min_BLps'] > st['U_rec_BLps'] == 0.968
 
 
