@@ -65,7 +65,7 @@ def bake_body(B, uvr, res, out):
     _, PID = form.sd_full(P, parts=True)
     # fine relief = UV-space height (scales by row rule from the record count, lateral line); never in the SDF
     x = P[:, 0]; th = form.theta_of(P[:, 0], P[:, 1], P[:, 2]); arc = chart.arc_of(x, th)
-    SC = rec['scales']; sp0 = 1.0 / SC['lateral_line']
+    SC = rec['scales']; sp0 = 1.0 / max(SC['lateral_line'], 1.0)    # 0 rows = naked skin: relief zeroed below
     cap = chart.arc_of(x, np.full(x.shape, np.pi))
     fh = arc / np.maximum(cap, 1e-6)                       # 0 dorsal .. 1 ventral
     area = 1 - 0.22 * np.exp(-((fh - 0.9) / 0.12) ** 2) - 0.2 * np.clip((x - 0.8) / 0.15, 0, 1) - 0.18 * np.exp(-((fh - 0.02) / 0.06) ** 2)
@@ -81,6 +81,7 @@ def bake_body(B, uvr, res, out):
             take = cov & (jx < best)                       # the most anterior covering scale lies on top
             best = np.where(take, jx, best); h = np.where(take, np.clip((du + 0.78) / 1.56, 0, 1) ** 1.6, h)
     on_head = (PID > 0) | (x < rec['gill_u'])   # head = in front of the record's gill opening
+    if SC['lateral_line'] <= 0: h = np.zeros_like(h)
     h = h * (~on_head) * np.clip((x - rec['gill_u']) / 0.03, 0, 1) * np.clip((0.985 - x / XEND) / 0.03, 0, 1)
     ll = np.exp(-((fh - SC['ll_frac'] * (1 + 0.6 * np.clip((x - 0.55) / 0.4, 0, 1))) / 0.006) ** 2) * (x > 0.3)
     H = np.zeros((res, res)); H[M] = h * 0.55 + ll * 0.5

@@ -21,6 +21,9 @@ def plan(B):
     yj = form.loft_point(np.full(NT, XS[i_g]), TH)[:, 1]
     cols = [j for j in range(1, NT // 2) if ylo <= yj[j] <= yhi]
     G.info = None; G.ring_dx = lambda i, j: 0.0
+    if len(cols) < 3:      # small gill opening (puffers: a short slit in front of the pectoral): at least 3 columns round its centre
+        jc = int(np.argmin(np.abs(yj[1:NT // 2] - 0.5 * (ylo + yhi)))) + 1
+        cols = [j for j in (jc - 1, jc, jc + 1) if 1 <= j < NT // 2]
     if len(cols) < 3: return
     j_top, j_bot = min(cols), max(cols)
     if j_bot - j_top > 14: j_bot = j_top + 14

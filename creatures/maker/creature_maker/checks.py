@@ -35,7 +35,7 @@ def face_normal(V, f):
 
 
 def expected_parts(a):
-    fins = ['caudal'] + [m['name'] for m in a['fins']['median']] + [f'{n}_{s}' for n in ('pectoral', 'pelvic') for s in 'LR']
+    fins = ['caudal'] + [m['name'] for m in a['fins']['median']] + [f'{n}_{s}' for n in ('pectoral', 'pelvic') if n in a['fins'] for s in 'LR']
     return dict(eyes=2, fins=sorted(fins))
 
 

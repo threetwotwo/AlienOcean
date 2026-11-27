@@ -19,7 +19,7 @@ def get(d, path, default=None, need=True, where=''):
     return cur
 def dget(d, key, default, where):
     """dict.get that records the default it fell back to."""
-    if key in d: return d[key]
+    if isinstance(d, dict) and key in d: return d[key]       # a record may hold a bare number where a block is expected (0 = none)
     DEFAULTS.append(dict(input=f'{where}.{key}', source='DEFAULT', value=default)); return default
 
 def hex_rgb(h):
@@ -39,6 +39,14 @@ def cells_rgb(c, L=None):
     if L is not None:
         Y = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]; rgb *= lstar_to_Y(L) / max(Y, 1e-6)
     return np.clip(rgb, 0, 1).tolist()
+
+def caudal_outline(rnd):
+    """caudal ray-length profile (tip -1..1 -> length share) from record caudal.round when no outline is given:
+    round < 0 forks (centre 1 + 0.8 round: trevally -0.9 -> 0.28, its drawn outline), round > 0 rounds (lobes shorter)."""
+    ty = np.linspace(-1, 1, 9)
+    f = 1 + 0.8 * rnd * (1 - np.abs(ty)) ** 0.8 if rnd < 0 else 1 - 0.6 * rnd * ty ** 2
+    return [[float(a), float(b)] for a, b in zip(ty, f)]
+
 
 def adapt(path):
     D = json.load(open(path)); R = D['record']; prov = []; DEFAULTS.clear()
@@ -78,20 +86,26 @@ def adapt(path):
         m = M['d']; med.append(dict(name='dorsal', base=[m['u'][0] * f, m['u'][1] * f], h=[v * f for v in m['h']], lean=dget(m, 'lean', [35, 55], 'skeleton.median.<fin>'), top=True, rays=len(m['h']) + dget(m, 'spines', 0, 'skeleton.median.<fin>')))
     fins['median'] = med
     C = M['caudal']
-    fins['caudal'] = dict(x=dget(dget(C, 'proc', {}, 'skeleton.median.caudal'), 'uUp', SL, 'skeleton.median.caudal.proc') * f, len=C['len'] * f, spread=C['spread'], outline=C['outline'], rays=dget(C, 'n', 17, 'skeleton.median.caudal'))
-    P('caudal fin', 'record.skeleton.median.caudal (proc.uUp, len, spread deg, outline)')
+    fins['caudal'] = dict(x=dget(dget(C, 'proc', {}, 'skeleton.median.caudal'), 'uUp', SL, 'skeleton.median.caudal.proc') * f, len=C['len'] * f, spread=C['spread'], outline=C['outline'] if 'outline' in C else caudal_outline(C['round']), rays=dget(C, 'n', 17, 'skeleton.median.caudal'))
+    P('caudal fin', 'record.skeleton.median.caudal (proc.uUp, len, spread deg, outline; else outline from caudal.round)')
     PE = R['skeleton']['pectoral']
     fins['pectoral'] = dict(x=PE['base']['u'] * f, y=PE['base']['y'] * f, len=PE['length'], span=[s * f for s in dget(PE, 'span', [3, -3], 'skeleton.pectoral')],
                             sweep=dget(PE, 'sweep', [20, -30], 'skeleton.pectoral'), out=dget(PE, 'out', 30, 'skeleton.pectoral'), prof=dget(PE, 'prof', [[0, 1], [1, 0.4]], 'skeleton.pectoral'), rays=dget(PE, 'rays', 14, 'skeleton.pectoral'))
     P('pectoral fin', 'record.skeleton.pectoral (base, length (SL), span, sweep, out, prof)')
-    PV = R['skeleton']['pelvic']
-    fins['pelvic'] = dict(x=PV['base']['u'] * f, y=PV['base']['y'] * f, len=PV['length'], sweep=dget(PV, 'sweep', [40, -10], 'skeleton.pelvic'), out=dget(PV, 'out', 30, 'skeleton.pelvic'),
-                          prof=dget(PV, 'prof', [[0, 1], [1, 0.6]], 'skeleton.pelvic'), rays=dget(PV, 'rays', 6, 'skeleton.pelvic') + dget(PV, 'spines', 0, 'skeleton.pelvic'))
-    P('pelvic fin', 'record.skeleton.pelvic (base, length (SL), sweep, out, prof)')
+    if 'pelvic' in R['skeleton']:            # puffers, porcupinefish, filefish have no pelvic fins (anatomy, not a gap)
+        PV = R['skeleton']['pelvic']
+        fins['pelvic'] = dict(x=PV['base']['u'] * f, y=PV['base']['y'] * f, len=PV['length'], sweep=dget(PV, 'sweep', [40, -10], 'skeleton.pelvic'), out=dget(PV, 'out', 30, 'skeleton.pelvic'),
+                              prof=dget(PV, 'prof', [[0, 1], [1, 0.6]], 'skeleton.pelvic'), rays=dget(PV, 'rays', 6, 'skeleton.pelvic') + dget(PV, 'spines', 0, 'skeleton.pelvic'))
+        P('pelvic fin', 'record.skeleton.pelvic (base, length (SL), sweep, out, prof)')
+    else: P('pelvic fin', 'absent in record.skeleton (no pelvic fins)')
     out['fins'] = fins
     S = R.get('scales', {})
     ll = get(S, 'lateral_line.pored_scales', None, need=False) or get(S, 'grow.lateral_line.pored_scales.value', None, need=False)
     rows = float(np.mean(ll)) if ll else float(dget(S, 'rows', 60, 'scales'))
+    naked = 'naked' in str(get(S, 'grow.type_body.value', '', need=False))
+    if naked: rows = 0.0                     # naked skin (blennies): no scale relief
+    elif rows <= 0:                          # record: 0 = "none or too small to count" on a scaled body -> minute scales
+        rows = 150.0; DEFAULTS.append(dict(input='scales.rows', source='DEFAULT', value=150, note='scaled body with rows 0: minute scales'))
     out['scales'] = dict(lateral_line=rows, ll_frac=float(get(S, 'll_frac', 0.27, need=False, where='scales')),
                          type=get(S, 'grow.type_body.value', get(S, 'type', 'ctenoid', need=False), need=False))
     P('scale height (UV)', 'record.scales lateral_line pored_scales (else scales.rows)')
