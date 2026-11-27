@@ -16,6 +16,9 @@ var swimming_shape := false
 var blocked_stand := 0          # ticks the stand-up was refused for lack of room
 var last_sense := {}
 var step_pops := 0
+var eye_h := 1.24               # head height above the feet; eases between standing and swimming (no camera jump)
+var eye_speed := 2.5            # m/s
+var ticked := false
 
 func _init() -> void:
 	stand_shape.radius = 0.25
@@ -77,6 +80,8 @@ func tick(dt: float, inp, env, t: float) -> void:
 		if want > 0.002 and got < want * 0.5:
 			_try_step_up(before, v, dt)
 	motor.post_move(velocity)
+	eye_h = move_toward(eye_h, 0.55 if swimming_shape else 1.24, eye_speed * dt if ticked else 10.0)
+	ticked = true
 
 func _try_step_up(before: Vector3, v: Vector3, dt: float) -> void:
 	# Lift onto a ledge up to step_height: probe ahead by at least the capsule radius (so the down-probe lands on
@@ -121,3 +126,7 @@ func penetrating(margin: float = 0.02) -> bool:
 	q.collision_mask = collision_mask
 	q.exclude = [get_rid()]
 	return get_world_3d().direct_space_state.intersect_shape(q, 1).size() > 0
+
+## The head point the camera follows (1P lens sits here). Continuous even when the collision shape swaps.
+func eye_point() -> Vector3:
+	return global_position + Vector3(0, eye_h, 0)
