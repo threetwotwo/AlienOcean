@@ -91,19 +91,22 @@ def adapt(path, style=None):
     else:
         out['gape_deg'] = 30.0; DEFAULTS.append(dict(input='jaw.linkage.gape', source='DEFAULT', value=30))
     M = R['skeleton']['median']; fins = {}
+    # a traced fin carries its free edge (ray tips, first ray to last, record units): the card's rays end on it, so the
+    # fin's side silhouette is the photo's, not one guessed from heights and a lean (SIL1, Gary 27 Nov)
+    fin_edge = lambda m: sc(m['edge']) if isinstance(m, dict) and m.get('edge') else None
     med = []
     for key, top in (('d1', True), ('d2', True), ('an', False)):
         if key in M:
             m = M[key]; med.append(dict(name={'d1': 'dorsal1', 'd2': 'dorsal2', 'an': 'anal'}[key], base=[m['u'][0] * f, m['u'][1] * f],
                                         h=[v * f for v in m['h']], lean=dget(m, 'lean', [35, 55], 'skeleton.median.<fin>'), top=top,
-                                        rays=len(m['h']) + dget(m, 'spines', 0, 'skeleton.median.<fin>')))
-            P(f'fin {key}', f'record.skeleton.median.{key} (u, h, lean, spines)')
+                                        rays=len(m['h']) + dget(m, 'spines', 0, 'skeleton.median.<fin>'), edge=fin_edge(m)))
+            P(f'fin {key}', f'record.skeleton.median.{key} ' + ('(u, edge traced: ray tips on the free edge, spines)' if 'edge' in m else '(u, h, lean, spines)'))
     if 'd' in M:  # single dorsal fin records
-        m = M['d']; med.append(dict(name='dorsal', base=[m['u'][0] * f, m['u'][1] * f], h=[v * f for v in m['h']], lean=dget(m, 'lean', [35, 55], 'skeleton.median.<fin>'), top=True, rays=len(m['h']) + dget(m, 'spines', 0, 'skeleton.median.<fin>')))
+        m = M['d']; med.append(dict(name='dorsal', base=[m['u'][0] * f, m['u'][1] * f], h=[v * f for v in m['h']], lean=dget(m, 'lean', [35, 55], 'skeleton.median.<fin>'), top=True, rays=len(m['h']) + dget(m, 'spines', 0, 'skeleton.median.<fin>'), edge=fin_edge(m)))
     fins['median'] = med
     C = M['caudal']
-    fins['caudal'] = dict(x=dget(dget(C, 'proc', {}, 'skeleton.median.caudal'), 'uUp', SL, 'skeleton.median.caudal.proc') * f, len=C['len'] * f, spread=C['spread'], outline=C['outline'] if 'outline' in C else caudal_outline(C['round']), rays=dget(C, 'n', 17, 'skeleton.median.caudal'))
-    P('caudal fin', 'record.skeleton.median.caudal (proc.uUp, len, spread deg, outline; else outline from caudal.round)')
+    fins['caudal'] = dict(x=dget(dget(C, 'proc', {}, 'skeleton.median.caudal'), 'uUp', SL, 'skeleton.median.caudal.proc') * f, len=C['len'] * f, spread=C['spread'], outline=C['outline'] if 'outline' in C else caudal_outline(C['round']), rays=dget(C, 'n', 17, 'skeleton.median.caudal'), edge=fin_edge(C))
+    P('caudal fin', 'record.skeleton.median.caudal ' + ('(proc.uUp, edge traced: ray tips upper lobe to lower lobe)' if C.get('edge') else '(proc.uUp, len, spread deg, outline; else outline from caudal.round)'))
     PE = R['skeleton']['pectoral']
     fins['pectoral'] = dict(x=PE['base']['u'] * f, y=PE['base']['y'] * f, len=PE['length'], span=[s * f for s in dget(PE, 'span', [3, -3], 'skeleton.pectoral')],
                             sweep=dget(PE, 'sweep', [20, -30], 'skeleton.pectoral'), out=dget(PE, 'out', 30, 'skeleton.pectoral'), prof=dget(PE, 'prof', [[0, 1], [1, 0.4]], 'skeleton.pectoral'), rays=dget(PE, 'rays', 14, 'skeleton.pectoral'))

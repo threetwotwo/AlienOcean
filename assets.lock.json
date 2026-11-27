@@ -58,6 +58,13 @@
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
   },
   {
+   "path": "engine/godot/assets/world/lagoon_keyframe/SB_Skirt_0_v18c.glb",
+   "md5": "594c3b4f659f55b79420075023d35fd6",
+   "bytes": 553408,
+   "store": "project files assets/world/lagoon_keyframe/",
+   "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
+  },
+  {
    "path": "engine/godot/assets/world/lagoon_keyframe/SB_Skirt_1.glb",
    "md5": "499f29aab5091ccff17b4222aae2a4c7",
    "bytes": 360052,
@@ -150,10 +157,31 @@
   },
   {
    "path": "engine/godot/assets/world/lagoon_keyframe/kf_table_5.glb",
-   "md5": "4d683a21192bd465a714459f31b5b6bc",
+   "md5": "6c4a357203fad5e813e3a66082305054",
    "bytes": 2427156,
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
+  },
+  {
+   "path": "engine/godot/assets/creatures/caranx_melampygus/fish.glb",
+   "md5": "9c233a6cb32ceae0ab107d57a513c908",
+   "bytes": 4863620,
+   "store": "project files assets/creatures/caranx_melampygus/",
+   "built_by": "creatures/maker: python -m creature_maker glb"
+  },
+  {
+   "path": "engine/godot/assets/creatures/caranx_melampygus/fish_LOD1.glb",
+   "md5": "9ee5e67f917df5e355b9e77ff0edc0c3",
+   "bytes": 4656520,
+   "store": "project files assets/creatures/caranx_melampygus/",
+   "built_by": "creatures/maker: python -m creature_maker glb"
+  },
+  {
+   "path": "engine/godot/assets/creatures/caranx_melampygus/fish_LOD2.glb",
+   "md5": "4eda7550a6cc9520042f085693935b31",
+   "bytes": 4491152,
+   "store": "project files assets/creatures/caranx_melampygus/",
+   "built_by": "creatures/maker: python -m creature_maker glb"
   }
  ]
 }

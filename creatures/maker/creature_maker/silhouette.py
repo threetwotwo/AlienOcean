@@ -12,8 +12,8 @@ import json, os
 import numpy as np
 from PIL import Image, ImageDraw
 
-BOX = (-0.05, 1.30, -0.55, 0.55)      # x0, x1, y0, y1 in SL: room for the caudal fin past x 1 and tall fins
-RES = 900                             # pixels along x
+BOX = (-0.05, 1.60, -0.90, 0.90)      # x0, x1, y0, y1 in SL: room for long caudal lobes, filaments and tall fins (batfish, idol)
+RES = 1100                            # pixels along x
 SIL_MIN, SIL_HEAD_MIN = 0.90, 0.90    # DEFAULTS: pass marks for the whole side view and the head
 MEDIAN = ('dorsal', 'anal', 'caudal')
 
@@ -98,3 +98,100 @@ def planted_sil(C, V, rec):
     xh = max(p[0] for p in rec['cover']['rear'])
     bad = dict(side=[[x, y * 1.2] if x < xh else [x, y] for x, y in ref['side']])
     return {'SIL1 (own outline passes)': bool(good), 'SIL1 (head 20 % deeper)': not score(C, V, rec, bad)['SIL1_pass']}
+
+
+def fin_edges(ref, rec, margin_px=2):
+    """read each median fin's free outline off a traced reference, in SL units: a reading aid for the tracer, which writes
+    the result into the record as skeleton.median.<fin>.edge (the record stays the build's only input; the reference stays
+    the test). The free outline is the run of the traced outline lying off the body (outside side_body, or the record
+    body), from where the leading edge leaves the body to where the rear margin meets it: dorsal and anal front to back,
+    caudal top to bottom. A run that spans two fins (d1 and d2 joined by a notch) is split at its lowest point between them.
+    Returns {fin name: [[x, y], ...]} and, under '_faults', where a fin's outline and its record root disagree."""
+    side = np.asarray(ref['side'], float); x0, x1, y0, y1 = BOX
+    if ref.get('side_body'): body = poly_mask(ref['side_body'])
+    else:
+        O = rec['outline']; top, bot = np.array(O['top']), np.array(O['bot']); xs = np.linspace(0, 1, 200)
+        body = poly_mask(np.r_[np.c_[xs, np.interp(xs, top[:, 0], top[:, 1])], np.c_[xs, np.interp(xs, bot[:, 0], bot[:, 1])][::-1]])
+    from scipy.ndimage import binary_dilation
+    body = binary_dilation(body, iterations=margin_px); h, w = body.shape
+    px = lambda P: (np.clip(((P[:, 0] - x0) / (x1 - x0) * w).astype(int), 0, w - 1), np.clip(((y1 - P[:, 1]) / (y1 - y0) * h).astype(int), 0, h - 1))
+    c, r = px(side); off = ~body[r, c]
+    n = len(side); runs = []                                   # contiguous off-body runs, wrapping round the closed outline
+    if off.all(): return {'_faults': ['whole outline off the body']}
+    k0 = int(np.argmin(off)); seq = [(k0 + k) % n for k in range(n)]; cur = []
+    for k in seq:
+        if off[k]: cur.append(k)
+        elif cur: runs.append(cur); cur = []
+    if cur: runs.append(cur)
+    runs = [[(R[0] - 1) % n] + R + [(R[-1] + 1) % n] for R in runs if len(R) >= 3]     # anchor both ends on the body
+    pts = [side[R] for R in runs]
+    out, faults, used = {}, [], set()
+    cx = rec['fins']['caudal']['x']
+    ci = int(np.argmax([P[:, 0].max() for P in pts])) if pts else None
+    if ci is not None and pts[ci][:, 0].max() > cx:
+        P = pts[ci]; out['caudal'] = (P if P[0, 1] > P[-1, 1] else P[::-1]).tolist(); used.add(ci)
+    yc = lambda x: 0.5 * (np.interp(x, np.array(rec['outline']['top'])[:, 0], np.array(rec['outline']['top'])[:, 1]) +
+                          np.interp(x, np.array(rec['outline']['bot'])[:, 0], np.array(rec['outline']['bot'])[:, 1]))
+    for m in rec['fins']['median']:
+        a, b = m['base']; best, bo = None, 0.0
+        for k, P in enumerate(pts):
+            if k in used: continue
+            if (P[:, 1].mean() > yc(P[:, 0].mean())) != m['top']: continue
+            ov = min(b, P[:, 0].max()) - max(a, P[:, 0].min())
+            if ov > bo: best, bo = k, ov
+        if best is None: faults.append(f"{m['name']}: no traced outline over its root"); continue
+        P = pts[best]; P = P if P[0, 0] < P[-1, 0] else P[::-1]
+        out.setdefault('_runs', {}).setdefault(best, []).append(m['name']); out[m['name']] = P
+    for k, names in out.pop('_runs', {}).items():                 # one run over two fins: split at the notch between them
+        if len(names) < 2: out[names[0]] = out[names[0]].tolist(); continue
+        ms = sorted([m for m in rec['fins']['median'] if m['name'] in names], key=lambda m: m['base'][0]); P = out[ms[0]['name']]
+        cuts = [0]
+        for m0, m1 in zip(ms, ms[1:]):
+            lo, hi = sorted((m0['base'][1], m1['base'][0])); lo, hi = lo - 0.02, hi + 0.02
+            sel = np.where((P[:, 0] >= lo) & (P[:, 0] <= hi))[0]
+            if not len(sel): sel = np.array([int(np.argmin(np.abs(P[:, 0] - 0.5 * (lo + hi))))])
+            hgt = np.abs(P[sel, 1] - yc(P[sel, 0])); cuts.append(int(sel[np.argmin(hgt)]))
+        cuts.append(len(P) - 1)
+        for m, s_, e_ in zip(ms, cuts, cuts[1:]): out[m['name']] = P[s_:e_ + 1].tolist()
+    for m in rec['fins']['median']:
+        if m['name'] in out:
+            P = np.array(out[m['name']]); d = max(abs(P[0, 0] - m['base'][0]), abs(P[-1, 0] - m['base'][1]))
+            if d > 0.03: faults.append(f"{m['name']}: traced outline meets the body {d:.3f} SL from the record root ends")
+    out['_faults'] = faults
+    return out
+
+
+def board(outroot, record_dirs, names=()):
+    """SIL1 on every record, fast (build at low res, no pose sweeps): per species the scores and an overlay, plus one
+    contact sheet (sheet.png, worst first) and silboard.json. Run it whenever traced references or records change."""
+    import subprocess, sys
+    from concurrent.futures import ThreadPoolExecutor
+    from .board import find_records
+    from .record import adapt
+    recs = find_records(record_dirs)
+    if names: recs = [r for r in recs if os.path.basename(r)[:-5] in names]
+    cwd = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    def one(rp):
+        n = os.path.basename(rp)[:-5]; d = os.path.join(outroot, n)
+        p = subprocess.run([sys.executable, '-m', 'creature_maker', 'build', rp, d, '--res', '64', '--no-form'],
+                           capture_output=True, text=True, cwd=cwd, timeout=600)
+        if p.returncode: return n, dict(error=(p.stderr.strip().splitlines() or ['?'])[-1][:200])
+        ref = find_reference(rp)
+        if ref is None: return n, dict(SIL1_pass=False, SIL1_note='no traced reference silhouette yet')
+        C = json.load(open(os.path.join(d, 'cage.json'))); V = np.load(os.path.join(d, 'cage.npz'))['V']
+        rec = adapt(rp, C.get('style')); R = score(C, V, rec, json.load(open(ref)))
+        overlay(C, V, json.load(open(ref)), os.path.join(d, 'silhouette.png')); R['png'] = os.path.join(d, 'silhouette.png')
+        return n, R
+    with ThreadPoolExecutor(4) as ex: res = dict(ex.map(one, recs))
+    json.dump(res, open(os.path.join(outroot, 'silboard.json'), 'w'), indent=1)
+    rows = sorted([(v.get('SIL1_iou', 0), n) for n, v in res.items() if 'png' in res[n]])
+    if rows:
+        from PIL import ImageFont
+        tw, th = 300, 245; cols = 4; sh = Image.new('RGB', (cols * tw, ((len(rows) + cols - 1) // cols) * th), (255, 255, 255))
+        for i, (_, n) in enumerate(rows):
+            im = Image.open(res[n]['png']).convert('RGB'); im.thumbnail((tw, th - 20))
+            x, y = (i % cols) * tw, (i // cols) * th; sh.paste(im, (x, y + 20)); v = res[n]
+            ImageDraw.Draw(sh).text((x + 6, y + 4), f"{n}  whole {v['SIL1_iou']:.2f}  head {v['SIL1_head_iou']:.2f}" +
+                                    ('' if v['SIL1_pass'] else '  FAIL'), fill=(0, 0, 0) if v['SIL1_pass'] else (200, 0, 0))
+        sh.save(os.path.join(outroot, 'sheet.png'))
+    return res
