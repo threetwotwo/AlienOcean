@@ -175,7 +175,9 @@ func set_fov(fov_deg: float) -> void:
 func make_surface(_size_m := 160.0) -> Node3D:
 	## the drawn sea (adapters/godot/sea_surface.gd, water surface thread): the Unreal lagoon's FFT sea on camera-centred
 	## rings, seen from above and below. Its level is water_y (the tide); nothing to place or stream.
-	return SeaSurface.new()
+	var s := SeaSurface.new()
+	water.waves = s.fft            # water.water_y(x, z) follows the drawn crests
+	return s
 
 func apply(cam_y: float) -> Dictionary:
 	if tide_on: water.set_clock(hours)   # the sea level follows the two moons (core/world/tide.gd)
