@@ -37,9 +37,24 @@ def tissue(C, nv):
     return t
 
 
-def setup(body, body_m, C, out, res=512):
-    """adds the interior slot to the body object, remaps its UV island to fill its own texture, bakes its maps and returns the material."""
-    me = body.data; idx = len(me.materials)
+def slot(body, C):
+    """puts every interior face on its own material slot, with a throwaway bake target, and returns (slot index, that material).
+    Called before the skin is baked: Blender bakes every face of the object into its material's active image, and the interior
+    island lies over the skin islands in 0-1 UV space (it belongs to another texture), so on one shared material the cavity and
+    passage faces baked the form from the inside straight over the cheek, throat and tail-root texels of the skin maps."""
+    me = body.data; idx = len(me.materials); inner = np.array([t in INNER for t in C['ftag']])
+    dummy = bpy.data.images.new('bake_dummy', 8, 8); skip = bpy.data.materials.new('bake_skip'); skip.use_nodes = True
+    tn = skip.node_tree.nodes.new('ShaderNodeTexImage'); tn.image = dummy; skip.node_tree.nodes.active = tn
+    me.materials.append(skip)
+    for p in me.polygons:
+        if inner[p.index]: p.material_index = idx
+    return idx, skip
+
+
+def setup(body, body_m, C, out, idx, skip, res=512):
+    """remaps the interior UV island to fill its own texture, bakes its maps and returns (slot index, stats). idx and skip come
+    from slot()."""
+    me = body.data
     inner = np.array([t in INNER for t in C['ftag']])
     lo, hi = island_box(C); asp = (hi[0] - lo[0]) / max(hi[1] - lo[1], 1e-9)
     W = res; H = int(2 ** round(np.log2(max(64, res / max(asp, 1e-3))))) if asp > 1 else res
@@ -47,19 +62,16 @@ def setup(body, body_m, C, out, res=512):
     m = 0.02; uvl = me.uv_layers['UV0']
     for p in me.polygons:
         if inner[p.index]:
-            p.material_index = idx
             for li in p.loop_indices:
                 u, v = uvl.data[li].uv; uvl.data[li].uv = (m + (1 - 2 * m) * (u - lo[0]) / (hi[0] - lo[0]), m + (1 - 2 * m) * (v - lo[1]) / (hi[1] - lo[1]))
-    # bake materials: the body slot gets a throwaway target so the skin maps already in memory are never overwritten
-    dummy = bpy.data.images.new('bake_dummy', 8, 8); skip = bpy.data.materials.new('bake_skip'); skip.use_nodes = True
-    tn = skip.node_tree.nodes.new('ShaderNodeTexImage'); tn.image = dummy; skip.node_tree.nodes.active = tn
+    # bake materials: the body slot gets the throwaway target so the skin maps already in memory are never overwritten
     tmp = bpy.data.materials.new('interior_bake'); tmp.use_nodes = True; nt = tmp.node_tree
     at = nt.nodes.new('ShaderNodeAttribute'); at.attribute_name = 'tissue'; at.attribute_type = 'GEOMETRY'
     em = nt.nodes.new('ShaderNodeEmission'); nt.links.new(at.outputs['Color'], em.inputs['Color'])
     outn = nt.nodes['Material Output']; nt.links.new(em.outputs['Emission'], outn.inputs['Surface'])
     t = tissue(C, len(me.vertices)); col = (1 - t)[:, None] * np.array(MUCOSA) + t[:, None] * np.array(GILL_RED)
     ca = me.color_attributes.new('tissue', 'FLOAT_COLOR', 'POINT'); ca.data.foreach_set('color', np.c_[col, np.ones(len(col))].ravel())
-    me.materials[0] = skip; me.materials.append(tmp)
+    me.materials[0] = skip; me.materials[idx] = tmp
     scn = bpy.context.scene
     for o in scn.objects: o.select_set(False)
     body.select_set(True); bpy.context.view_layer.objects.active = body

@@ -97,3 +97,43 @@ def test_traced_fin_outline_sets_the_silhouette(tmp_path):
     C2 = json.load(open(os.path.join(out2, 'cage.json'))); V2 = np.load(os.path.join(out2, 'cage.npz'))['V']
     after = S.score(C2, V2, adapt(rp), ref)['SIL1_iou']
     assert after > before and after >= 0.93, (before, after)
+
+
+def test_skin_uv_islands_are_fold_free_twins(tmp_path):
+    """the two halves of the skin flatten without a fold or an overlap, SLIM runs on both, and the right island is the
+    left one half a texture lower (the bake's left/right check, P6, reads twin texels)."""
+    from scipy.spatial import cKDTree
+    out = str(tmp_path / 'beryx'); build(REC, out, res=64, dense_form=False, log=lambda *a: None)
+    R = check(out, REC, sweep=False)
+    assert R['P5_uv_folded_faces'] == 0 and R['P5_uv_overlap_texels'] == 0 and R['P5_uv_relaxed'] and R['P5_pass'], {k: v for k, v in R.items() if k.startswith('P5')}
+    C = json.load(open(os.path.join(out, 'cage.json'))); V = np.load(os.path.join(out, 'cage.npz'))['V']
+    side = lambda sg: np.array([uv for f, t, u in zip(C['faces'], C['ftag'], C['uv']) if t in ('body', 'eye', 'mouth', 'cap') and (V[f, 2].mean() >= 0) == (sg > 0) for uv in u])
+    L, Rt = side(1), side(-1)
+    assert L[:, 1].min() > 0.5 > Rt[:, 1].max()
+    assert cKDTree(L - [0, 0.5]).query(Rt)[0].max() < 1.5 / 4096         # twins to within a texel and a half at 4K
+
+
+def test_bake_keeps_interior_and_linings_off_the_skin_maps(tmp_path):
+    """the export bake (Blender) on the proof record: no patch of the normal map faces into the skin and both sides carry the
+    same map. Baking the cavity and gill passage faces into the skin's own image (they have their own UV island, laid over
+    the skin's) put backwards patches on the cheek and throat of one side: P6 must be clean, and the same fault planted
+    back (interior faces left on the skin's bake target) must be caught."""
+    import shutil, subprocess, pytest
+    pytest.importorskip('bpy')
+    if shutil.which('node') is None: pytest.skip('node not installed (swim clips)')
+    from creature_maker import checks
+    from PIL import Image
+    D = json.load(open(REC))          # the proof record has no gait yet: lend it one, as test_swim_clip_loops does
+    D['body'] = dict(D.get('body', {}), motion=dict(A=0.1, alpha=3.4, lam=1.0, St=0.3, U=1.5, f=3.0, alphaSlope=0.6, alphaMin=2.8, alphaMax=4.4))
+    rp = str(tmp_path / 'rec.json'); json.dump(D, open(rp, 'w'))
+    out = str(tmp_path / 'beryx'); build(rp, out, res=256, log=lambda *a: None)
+
+    def bake(env=None):
+        p = subprocess.run([sys.executable, '-m', 'creature_maker', 'glb', out, '--record', rp], cwd=ROOT, capture_output=True, text=True, env=dict(os.environ, **(env or {})))
+        assert p.returncode == 0, p.stderr[-800:]
+        N = np.asarray(Image.open(os.path.join(out, 'body_normal.png'))).astype(float)[..., :3] / 127.5 - 1
+        return checks.p6(N, np.load(os.path.join(out, 'body_mask.npy'))[::-1])
+    good = bake()
+    assert good['P6_pass'], good
+    bad = bake(dict(CREATURE_PLANT_BAKE_FAULT='interior_on_skin'))
+    assert not bad['P6_pass'] and bad['P6_backward_texels'] > 20 * max(good['P6_backward_texels'], 1), bad
