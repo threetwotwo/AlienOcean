@@ -239,6 +239,10 @@ if os.path.exists(_cp):
 from creature_maker.pose import FLARE_REAL
 GAPE_REAL = float(REC.get('gape_deg', 30.0)); CHK['real_gape_deg'] = GAPE_REAL; CHK['real_flare_deg'] = FLARE_REAL
 SW = swim_clip.clips(C, V, RAW, BL, CHK)
+# the shipped clips open only as far as the stress test found clean (SR1_safe): a clip past it would ship a measured fold. The real
+# angle stays in pose_limits.real, and SR1 keeps failing upstream until the cage reaches it.
+_safe = CHK.get('SR1_safe') or {}
+GAPE_CLIP = min(GAPE_REAL, float(_safe.get('gape', GAPE_REAL))); FLARE_CLIP = min(FLARE_REAL, float(_safe.get('flare', FLARE_REAL)))
 FPS = 120; scn.render.fps = FPS; scn.render.fps_base = 1.0
 chain = swim_clip.chain_names(NB); cmap = {chain[i]: f'spine_{i:02d}' for i in range(NB)}
 def timed(clip, fps):
@@ -252,9 +256,10 @@ def hinge(name):
 JAW = [hinge('jaw')]; COVERS = [hinge('opercleL'), hinge('opercleR')]
 rigging.key_clip(rig, 'swim_loop', timed(SW['swim'], SW['swim_fps']), FPS)
 rigging.key_clip(rig, 'breathe_loop', timed_b(SW['breathe'], SW['breathe_fps']), FPS)
-rigging.key_clip(rig, 'gape', rigging.hinge_frames(rig, JAW, GAPE_REAL), FPS)
-rigging.key_clip(rig, 'flare', rigging.hinge_frames(rig, COVERS, FLARE_REAL), FPS)
-SW['extras']['clips']['gape']['peak_deg'] = GAPE_REAL; SW['extras']['clips']['flare']['peak_deg'] = FLARE_REAL
+rigging.key_clip(rig, 'gape', rigging.hinge_frames(rig, JAW, GAPE_CLIP), FPS)
+rigging.key_clip(rig, 'flare', rigging.hinge_frames(rig, COVERS, FLARE_CLIP), FPS)
+SW['extras']['clips']['gape']['peak_deg'] = GAPE_CLIP; SW['extras']['clips']['flare']['peak_deg'] = FLARE_CLIP
+SW['extras']['clips']['gape']['peak_rule'] = SW['extras']['clips']['flare']['peak_rule'] = 'min(real angle, SR1_safe): the clip never opens past the clean stress-test range'
 SW['extras']['head_bones'] = {n: dict(pivot_m=[round(c, 6) for c in (B(bspec[n]['pivot']).x, B(bspec[n]['pivot']).z, -B(bspec[n]['pivot']).y)],
                                       axis_gltf=[round(c, 6) for c in (hinge(n)[2].x, hinge(n)[2].z, -hinge(n)[2].y)],
                                       opens='positive angle about axis_gltf (armature space, right hand)') for n in ('jaw', 'opercleL', 'opercleR')}
