@@ -17,6 +17,7 @@ python -m creature_maker build RECORD.json OUT [--res 2048]    # numpy only, a f
 python -m creature_maker glb OUT                                # Blender's Python (bpy) bakes and exports OUT/fish.glb + LODs
 python -m creature_maker check OUT RECORD.json --planted        # every check, and each planted fault must be caught
 python -m creature_maker board OUTROOT RECORD_DIR...            # all records: proves a rule is universal, not hero-only
+python -m creature_maker sheet OUT RECORD.json                  # turnarounds: 8 angles x rest / real size / stylized, faults magenta
 python -m creature_maker deviate OUTROOT RECORD_DIR...          # stylized proportions (eye, mouth, girth) on all records
 ```
 
