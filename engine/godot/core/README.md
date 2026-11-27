@@ -13,13 +13,18 @@ of the JavaScript.
 | Service | Shape | Real implementation | Test implementation |
 |---|---|---|---|
 | WaterQuery | `level: float` (-1000 = no water), `water_y(x, z, t) -> float`, `current(p: Vector3, t) -> Vector3` | core/world/lagoon_water.gd (LagoonWaterField) | tests/harness/test_env.gd |
-| WorldQuery | `floor_height(x, z) -> float` (-INF = none), `floor_normal(x, z) -> Vector3`, `nearest_surface(p, r, filter = null) -> {dist, normal, point}` or `{}` | adapters/godot/world_query.gd (Jolt) | the same adapter on tests/harness/test_worlds.gd geometry |
-| Clock | `SkyClock`: game time, sun and moon directions, tide inputs | core/world/sky_clock.gd (SkyClock, M30) | same |
+| WorldQuery | `floor_height(x, z) -> float` (-INF = none), `floor_normal(x, z) -> Vector3`, `nearest_surface(p, r, filter = null) -> {dist, normal, point}` or `{}`, `point_solid(p) -> bool`, `ray(from, to) -> {position, normal}` or `{}` | adapters/godot/world_query.gd (Jolt) | the same adapter on tests/harness/test_worlds.gd geometry |
+| SimClock | `.t` (sim s = tick x dt), `.tick`, `.dt`, `.hours` (world hour), `.paused`, `step()`, `set_hours(h)`: the only game time | core/world/sim_clock.gd (stepped first in every GameRoot tick) | same |
+| Sky (was "Clock") | `SkyClock`: sun and moon directions, light and tide inputs at a given hour (reads SimClock.hours) | core/world/sky_clock.gd (SkyClock, M30) | same |
+| ActorRegistry | `begin()`, `move(id, pos, vel[, axis, half_len])`, `commit(tick)`; readers `near(c, r, kinds)`, `perceived(c, r)` -> `[{id, kind, pos, vel, radius[, axis, half_len]}]` (snapshots, player first), `pois(c, r)` (Thalassa POI records), `player()` | core/m32_game/actor_registry.gd (M32) | same, tests/test_game_root.gd crowd |
+| FeatureMounts | `is_mounted(key)`, `set_mount(key, on)` (Thalassa FeatureMountManager) | core/m32_game/feature_mounts.gd | same |
 | InputSource | one `InputPacket` per tick (core/m01_input/input_packet.gd) | adapters/godot/input_reader.gd | scripted packets in tests |
 
 In the running game adapters/godot/world_root.gd (WorldRoot) owns the shared instances: `.clock` (SkyClock),
 `.state` (its last sky_state), `.water` (LagoonWaterField), `.optics` (WaterOptics), `.exposure` (buffer units per nit),
-`.streamer` (later). game_root adds it, calls `attach_camera(cam)`, and calls `apply(cam_y)` when the clock moves.
+`.streamer`. GameRoot (adapters/godot/game_root.gd, M32) adds it, calls `attach_camera(cam)`, moves the tide each tick and
+calls `apply(cam_y)` when the clock moves. GameRoot hands every plug one GameServices object (adapters/godot/game_services.gd:
+clock, water, world, actors, mounts, world_root, streamer) instead of globals; no autoloads.
 
 Cores take these as a Dictionary of Callables (`env`) or as the object itself. A new service gets a row here before
 any module uses it.
@@ -34,4 +39,6 @@ any module uses it.
 | m04_body | body rig: springs, IK, foot placement, swim and walk poses | core/ik-rig.js, ik-solvers.js, procedural-locomotion.js, ik-poses-world.js, physics-control.js (in progress) |
 | m12_streaming | open-world cell streamer (engine thread) | |
 | m29_water_physics | buoyancy | |
+| m31_school | fish schools: the Nov 1 schooling paper's rules (numpy school.py port, golden-checked) + M08 perceived actors (school thread) | research/schooling/school.py (not Thalassa) |
+| m32_game | game root: actor registry, feature mounts (adapter: adapters/godot/game_root.gd, actor_rig.gd, game_services.gd; scene scenes/game.tscn) | style/runtime.js updateSimulation tick order, runtime-senses.js POI records, core/feature-mounts.js |
 | world | shared world state: sky clock (M30), lagoon water, water optics (engine thread) | |

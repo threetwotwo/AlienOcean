@@ -35,6 +35,12 @@ uniform float moon_edge = 1.5;
 uniform vec3 dome_sun = vec3(0.0, 1.0, 0.0);   // the sun for the dome's shape: lifted to >= 1 deg (twilight stand-in)
 uniform float sky_norm = 1.0;           // set by the driver: dome scale so its ground light = clock sky_lux
 uniform float sea_nits = 0.0;           // below the horizon: the sea, seen from above
+// Under water, the sky Godot's lighting reads (the radiance cubemap: SDFGI's escaping rays) is the water's own light field at
+// water_zref, not the air above: two uniform hemispheres whose irradiance on a normal is exactly w_fill(z_ref, up)
+// (look/water_physics.gdshaderinc): the sky's light through the water from above, the sand's bounce from below. Set by WorldRoot.
+uniform float under_k = 0.0;            // 1 = the eye is under water
+uniform vec3 under_down = vec3(0.0);    // nits, the upper hemisphere (Ek(z_ref) / pi)
+uniform vec3 under_up = vec3(0.0);      // nits, the lower hemisphere (Eu(z_ref) / pi)
 
 const vec3 EXT = vec3(0.0862, 0.1665, 0.2961);
 #include "sky_stars.gdshaderinc"
@@ -44,26 +50,10 @@ float airmass(float y) {
 	return 1.0 / (clamp(y, 0.0, 1.0) + 0.50572 * pow(eld + 6.07995, -1.6364));
 }
 // Dome shape: Godot's own PhysicalSkyMaterial model (Preetham / three.js Sky, Godot's defaults), the closest Godot
-// counterpart of Unreal's SkyAtmosphere; only its shape is used, the clock sets its brightness (sky_norm).
-// Mirrored in WorldRoot.dome() (adapters/godot/world_root.gd).
-vec3 dome(vec3 v, vec3 s) {
-	float zenith_angle = clamp(s.y, -1.0, 1.0);
-	float sun_energy = max(0.0, 1.0 - exp(-((PI * 0.5) - acos(zenith_angle))));
-	float sun_fade = 1.0 - clamp(1.0 - exp(s.y), 0.0, 1.0);
-	vec3 rayleigh_beta = (2.0 - (1.0 - sun_fade)) * vec3(0.3, 0.405, 0.6) * 0.0001;
-	vec3 mie_beta = 10.0 * 0.005 * vec3(0.69, 0.729, 0.812) * 0.000434;
-	float zenith = acos(max(0.0, v.y));
-	float optical_mass = 1.0 / (cos(zenith) + 0.15 * pow(93.885 - degrees(zenith), -1.253));
-	vec3 extinction = exp(-(rayleigh_beta * 8.4e3 * optical_mass + mie_beta * 1.25e3 * optical_mass));
-	float cos_theta = dot(v, s);
-	float rayleigh_phase = (3.0 / (16.0 * PI)) * (1.0 + pow(cos_theta * 0.5 + 0.5, 2.0));
-	float g = 0.8;
-	float mie_phase = (1.0 / (4.0 * PI)) * ((1.0 - g * g) / pow(1.0 - 2.0 * g * cos_theta + g * g, 1.5));
-	vec3 ratio = (rayleigh_beta * rayleigh_phase + mie_beta * mie_phase) / (rayleigh_beta + mie_beta);
-	vec3 Lin = pow(sun_energy * ratio * (1.0 - extinction), vec3(1.5));
-	Lin *= mix(vec3(1.0), pow(sun_energy * ratio * extinction, vec3(0.5)), clamp(pow(1.0 - zenith_angle, 5.0), 0.0, 1.0));
-	return Lin;
-}
+// counterpart of Unreal's SkyAtmosphere; only its shape is used, the clock sets its brightness (sky_norm). One copy,
+// shared with the water shaders (look/sky_dome.gdshaderinc); mirrored on the CPU in WorldRoot.dome().
+#include "sky_dome.gdshaderinc"
+vec3 dome(vec3 v, vec3 s) { return sky_dome_shape(v, s); }
 float h31(vec3 q) { return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
 float vnoise(vec3 p) {
 	float m = 0.0, amp = 0.5;
@@ -113,7 +103,8 @@ vec4 moon(vec3 v, vec3 c, float deg, float real_deg, float albedo, float kelvin,
 }
 void sky() {
 	vec3 v = EYEDIR;
-	if (v.y < -0.02) { COLOR = vec3(sea_nits); }
+	if (AT_CUBEMAP_PASS && under_k > 0.5) { COLOR = v.y >= 0.0 ? under_down : under_up; }
+	else if (v.y < -0.02) { COLOR = vec3(sea_nits); }
 	else {
 		vec3 s = normalize(sun_dir);
 		vec3 air = dome(v, normalize(dome_sun)) * sky_norm;

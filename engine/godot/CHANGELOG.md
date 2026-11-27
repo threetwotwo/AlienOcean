@@ -1,5 +1,155 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): the shared game root (M32)
+- Game root thread: GameRoot (`adapters/godot/game_root.gd`, scene `scenes/game.tscn`) builds the world and its services and
+  runs one tick order: clock, input, player, actors, fauna, plugs, camera, world. Ported from Thalassa v20.19
+  style/runtime.js updateSimulation (fauna synced before anything reads them) and core/feature-mounts.js (FeatureMounts).
+  New: SimClock (`core/world/sim_clock.gd`, the only game time, t = tick x dt), ActorRegistry
+  (`core/m32_game/actor_registry.gd`, double-buffered, uniform grid, snapshot records for the fish schools, Thalassa POI
+  records), ActorRig (`adapters/godot/actor_rig.gd`, motor + body rig + mannequin as motion_film wires them), GameServices.
+  The tide now moves at the start of each tick, before the girl reads the water (was after, one tick late).
+  Deviation D1: fauna read the player after she moves this tick (Thalassa: the pre-move position).
+- M03 camera adapter 0.2.1: FIX against Thalassa's same-tick swimmer.applyLook: `integrate_look(dt, look)` lets the game
+  root apply the look before the motor reads cam_yaw (was one tick late); tick() keeps integrating for callers that don't.
+- Test: `tests/test_game_root.gd` + `tests/run_game_root.sh` (G1-G10 every tick, 30/60/120 fps, monkey runs, planted faults
+  late_write / clock / grid). Film: `tools/game_film.gd`.
+## 0.6.0-dev (28 Nov 2026, look thread): GI on by default, lit by the water's own light
+- Root cause of the black fish under SDFGI: Godot's SDFGI ignores the environment's ambient colour; its escaping rays read the
+  sky's radiance cubemap, which was the air above the water. Fix: under water, the sky shader's cubemap passes
+  (look/sky.gdshader under_*, AT_CUBEMAP_PASS) draw the water's light field at z_ref: upper hemisphere Ek/pi (the sky's light
+  through the water), lower hemisphere Eu/pi (the sand's bounce). Its irradiance on any normal is exactly w_fill(z_ref, up).
+  Check (sun off, key frame camera): open sand L* 49.6 with SDFGI against 48.2 from the analytic fill. The fish is lit and shaded.
+- SDFGI on by default (WorldRoot); AO_SDFGI=0 turns it off. The sea mesh, the underwater screen quad and the floor height pass
+  are kept out of the GI (gi_mode disabled): they are light boundaries and screen passes, not solids.
+- With SDFGI on, the seabed's albedo ratio is only the depth's own change (w_fill(z)/w_fill(z_ref), near 1): Godot's sky light
+  is one field for the scene, with no water between it and a point off z_ref (stand-in for per-probe water depth; owner look thread).
+- Art lever WorldRoot.gi_k (SDFGI energy, AO_GI_K): 1 = physical. Key frame camera, coral shadow / rock face / sunlit sand L*:
+  GI off 50.2 / 48.5 / 74.8; gi_k 1.0 54.1 / 51.2 / 75.7 (the sand's real bounce lifts the shadows); 0.5 47.1 / 47.2 / 74.0;
+  0.35 44.3 / 45.8 / 73.4 (key frame 43.8 / 41-43 / 78). Gary picks.
+- Godot's sky-sourced ambient (no GI) read black in the same check, so without GI the ambient stays one colour as before.
+- Test: tests/test_gi_light_field.gd (in run_all.sh) with a planted fault. Shot tool checks: AO_SDFGI_SKY, AO_SDFGI_OCC,
+  AO_SDFGI_CELL, AO_SDFGI_BOUNCE, AO_SUN=0, AO_SKY_MODE, AO_GI_DEBUG. Occlusion and 0.1 m cells changed the shadow by <3 L*.
+- Mac M1 cost of SDFGI not measured yet (Mac runs paused).
+
+## 0.6.0-dev (28 Nov 2026): dressed-place cameras stand on the sand
+- World: DressCell.seat() now also finds the sand under each manifest camera (at and look) and cam() returns their heights over it;
+  `on_sand(v)` does the same for any key-frame point (the shot tool's hero fish). The key frame's heights (camera 1.05 m, look
+  0.58 m) were over ITS sand (z 0); on the drawn floor, 0.17 m under the place's anchor, the camera stood 1.22 m up and the near
+  corals sat ~7 % low in frame (Fable silhouette review r7c). Now table/brain tops within 2-3 % of the key frame. Test D5.
+
+## 0.6.0-dev (28 Nov 2026): lagoon dressing round 7, silhouettes first
+- Gary 27 Nov 18:42Z: silhouettes of all assets before detail. Measured against the key frame at its camera: the arch massif ran
+  18-86 % of the frame width with its top cut off (key frame 5-63 %, top 11 % down) and the second head merged into it. The arch
+  head is now turned 13 deg left about the camera and set back to 16 m, its yaw turned with it so the gate still faces the camera
+  (gate camera, key_arch look and the lanes moved with it); the second head is 14 m out at x1.3. Now massif 1-58 %, second head
+  72-87 % (key frame 73-88 %) with a clear gap. Manifest 0.6.0; dress_cell `with` takes a list.
+- The v18c head gets a sand skirt (`SB_Skirt_0_v18c`): the key frame rig's habitat.bank (0.12 m against the foot, arch_set.sh),
+  concave collision. Table coral saturation x1.2 (kf_family x1.7 read orange under the Godot light).
+- Fable silhouette review r7c: second head and finger coral MATCH; massif extents fit but it reads as one flat slab (form);
+  foreground corals sit ~7 % lower in frame than the key frame; hero fish form is the creature thread's.
+
+## 0.6.0-dev (28 Nov 2026): the water's fill light can be occluded
+- Engine: seabed_surface and ground_surface no longer add the water's fill (sky from above, sand bounce from below, through
+  the depth) as unoccluded emission. It now goes through Godot's ambient path, so SSAO, SSIL, the material AO and any GI
+  occlude and bounce it. Godot's ambient is one colour, so each pixel's fill colour and depth ride in ALBEDO as a ratio
+  (`w_fill_ratio`, water_physics.gdshaderinc) and light() divides it back out. The sun and the light net are unchanged.
+  Calibrated with SSAO and SSIL off: the same picture as before (mean 0.65 of 255). Key frame camera, SSAO + SSIL: coral
+  shadow L* 52.9 -> 50.2, rock face 50.4 -> 48.5 (key frame 43.8 / 42.9). Switch: WorldRoot.fill_occluded (AO_FILL_AO=0).
+- Art levers (real water conditions, defaults unchanged): WorldRoot.cdom (yellow substance, 0.03) and scat_k (particles,
+  0.40); shot tool AO_CDOM / AO_SCAT. Far water hue at Cdom 0.03 / 0.01 / 0: -141 / -125 / -117 (key frame -132).
+- Shot tool checks: AO_SSAO=0, AO_SSIL=0, AO_SSAO_R + AO_SSAO_I, AO_SDFGI=1. SDFGI on (not default yet) gives coral
+  shadow 45.4 and rock face 42.7 (key frame 43.8 / 42.9), but the hero fish goes black and the coral's shadow stripes;
+  both to fix before it becomes the default.
+
+## 0.6.0-dev (28 Nov 2026, later): the light net from the FFT sea's own slopes
+- Engine: caustics map 0.2.0 (`look/caustics_slope.gdshader`, `adapters/godot/caustics_map.gd`). While the FFT sea
+  runs (global sea_on) the map's slope pass reads the sea's slope atlas (sea_deriv.rg), as v98's CAUS_SLOPE_HLSL read
+  RT_LW_Deriv, so the net on the sand is drawn from the waves drawn overhead. Cascade 2 (sea_patch.z 2.56 m) is the
+  map's tile one to one (same island xy / patch); cascade 3 (sea_patch.w 0.32 m) repeats 8 times over it (v98 Fine 1).
+  Each depth takes the wrap-averaged mip whose texel is its own (2 / 4 / 8 cm: cascade 2 mips 1 / 2 / 3, cascade 3
+  mips 4 / 5 / 6), read at texel centres: v98's 16-tap mean and halvings, exactly. Focus, sun's disc, reader and tile
+  break unchanged. Without the sea, or with `WorldRoot.caustics.from_sea = false` (shot tool AO_CAUS=waves), the 32
+  waves as before. The per-pixel check path stays on the 32 waves, so it no longer matches the map while the sea runs.
+- Measured on the engine's map (two sea times), std at 0.8 / 2 / 5 m: 0.15 / 0.31 / 0.35-0.37 (v98 emulated
+  0.14-0.15 / 0.29-0.31 / 0.34; the 32 waves 0.14 / 0.30 / 0.30); cell 12-14 / 13-14 / 16 cm (v98 12 / 12-14 / 15-16).
+  Frame (llvmpipe, 960 x 540, shots 01 / 04): 761 / 1019 ms from the sea, 807 / 1002 ms from the 32 waves: no
+  difference beyond the noise. Shot tool: AO_CAUS_T now holds the sea at that second too. test_world_clock 42 / 42.
+
+## 0.6.0-dev (28 Nov 2026): the arch's foot and round 6 of the lagoon dressing
+- World: the focal arch head (heads_v18c) now stands on its own fallen rock: `SB_Bommie_0_v18c_apron` = Terrain's gate fall
+  (`seabed/tools/gate_fall.py` v3, grown from the head's own `handoff_terrain.json` fall record: 14 slab blocks 0.2-0.75 m at both
+  mouths, roof and wear chips; flat seat, local wave bearing 40 as the key frame rig's arch_seat_v18c_r5_w40) plus the
+  `rubble_rule.py` v11 apron round its real outline. Blocks carry one convex hull each, chips one concave mesh. Painted with the
+  kit's own age ramp (reef_rock_rgb): the rig's KF_Rock put the sand film over whole low blocks.
+- World: meadow tiles culled at export by the key frame rig's `habitat.cull_meadow` for this layout (grazing halo round heads and
+  corals, upstream scour, open lanes; whole blades). Second head to (9.5, 18) (water gap), staghorn to (0.45, 5.6). Paint: rock
+  walls x0.90 value and x0.80 chroma, table rim #f2a99c. Manifest 0.5.0.
+- Fable critique r6: FAIL overall, foreground group now matches; next: rounded buttress boulders at the camera-facing foot,
+  second head nearer and larger in frame, school + hero fish material (other threads), uniform salmon table.
+
+## 0.6.0-dev (28 Nov 2026): one sky dome
+- Engine: look/sky.gdshader takes its dome from look/sky_dome.gdshaderinc (the water surface's copy), so the sky overhead
+  and the sky in the water can't drift apart. The old look/water_surface.gdshader is removed (SeaSurface replaced it,
+  PR #37). Shot tool: the sea is pinned at its mean level by default (WorldRoot.tide_on false); AO_TIDE=1 follows the moons.
+
+## 0.6.0-dev (28 Nov 2026): the Unreal god rays
+- Engine: god rays 0.1.0 (`look/god_rays.gdshaderinc`, drawn by underwater view 0.2.0): the lagoon's light shafts as
+  they ran at lagoonwater v98 (GodPhys 1, GodUnits 1, GodPick 1). Source: the god-ray node as built
+  (lw/lagoonwater/logs/god_code_v53.txt) plus v98's GOD_FFT (3328-3353), tb_weights_cached (2592-2612), GOD_NEW_ADD
+  (3374), GOD_RET_NEW (2013) and PHYS_CODE's shaft lines (2539-2547). Along each view ray: 20 jittered steps over
+  min(path, 25 m) (a = 3 / Visibility 15 m); each step reads `water_caus_map` where its sunlight came through the
+  surface, in one of the three tile-break copies picked by its weight, mixes the map's three depths by the step's
+  depth and adds exp(-a s) x step x (c - 1). The shafts are the sun's in-scatter per metre (b x the sun at the eye's
+  depth x the g 0.9 phase) x that sum, gaps never below -0.9 of the sun's haze. Same map, same entry point and same
+  copy weights as the sand's net, so a shaft ends on its line on the sand. GlowK does not scale them (as Unreal).
+  Switch: `WorldRoot.god_rays`, shot tool AO_GOD=0. Off with the net's per-pixel check path (no map).
+- Not ported (dead at v98): the old painted path (GodPhys 0: WaterColour, ShaftStrength, shadow mask), GodLod, the
+  three-read path, sub-bands. Not known for sure: ShaftSteps (v98's note says a 20-step ray, v30's says 12; 20 used)
+  and Visibility (15 m in the 6 Nov colour check).
+- Check (`tools/god_rays_check.gd` + `.py`, a numpy emulation of the Unreal node on the engine's map): the shader's
+  sum against it, hour 12 and 17: rms 0.0016 m on a sum of std 0.51 / 0.62 m, correlation 1.0000.
+- Open: Unreal moved the jitter each frame and let TSR average it. This project has no TAA, so the start point is
+  held (WorldRoot sets `god_frame` only when the viewport uses TAA) and one frame keeps the dither: the sum's noise
+  is std 0.47-0.57 m against 0.19-0.23 m for an 8-frame mean. The shot tool's AO_TAA=1 turns Godot's TAA on, which
+  averages it (checked on shot 03, hour 17); whether the game runs TAA is still open. On screen the shafts are faint, as the maths gives:
+  noon shots 02 / 03 / 04 change by at most 4-5 of 255 (the sun is outside the frame); shot 03 at hour 17, with the
+  sun in view, p1-p99 -4..+4 and up to 16 of 255, a fan of shafts round the sun.
+- Measured (llvmpipe, 960 x 540, ms a frame, without / with): shot 02 543 / 638, 03 254 / 377, 04 739 / 846, 03 at
+  hour 17 287 / 317.
+
+## 0.6.0-dev (28 Nov 2026): the stars turn with the sun
+- Engine: the star sphere now turns about north by -2 pi (days - 0.5), so the stars rise and set on the same side as
+  the sun and the moons. Unreal's Stars actor turned the other way (sun_v184 apply_fast, though its comment said "with
+  the sun"); Gary picked "Turn with the sun (fix)" 27 Nov 17:44Z. The midnight sky is unchanged; only the sense of the
+  motion changes.
+## 0.6.0-dev (28 Nov 2026): the lagoon dressed like the key frame (world_dress)
+- World: an authored place, `world_dress/lagoon_keyframe.json`, built by `world_dress/dress_cell.gd` (DressCell): the approved
+  key frame's content ported, not rebuilt. Rock's heads_v18c arch (Gary's pick) as the focal head at 13 m with its gate facing the
+  key camera, reef kit v18 heads b2 and b4 with their sand skirts, the five colony corals (table, brain, boulder, staghorn, finger),
+  and the colony maker's grown meadow bed. Every piece carries collision from its maker (kit UCX hulls, CoACD hulls for v18c and
+  the corals, concave sand skirts, grass as soft Area3D); every item is ray-seated on the floor; a keep-clear volume holds the fish
+  school's space and is checked against the real hulls. Pieces: `tools/lagoon_dress/export_pieces.py` with the key frame's
+  material family baked per vertex (`kf_paint.py`; rock top chroma x0.5 and walls x0.82 for the Godot water, art direction).
+- Tools: `tools/lagoon_shots.gd` takes AO_DRESS / AO_DRESS_PIECES (the place's cameras become shots 09+). Test:
+  `tests/test_dress_cell.gd` (collision, seating, school space, axis map; planted fault caught).
+
+## 0.6.0-dev (28 Nov 2026): the camera's field of view
+- Engine: WorldRoot.set_fov used an 18 mm half sensor, but Godot's CameraAttributesPhysical takes the vertical FOV from
+  a 24 mm sensor height (12 mm half), so asking for 44 deg gave 30.15 deg: every shot was about 1.5x zoomed in. Now
+  12 / tan(fov / 2); checked headless, cam.fov reads 44.0 for 44 and 60.0 for 60. Brightness is unchanged (f/22, the
+  same shutter); only the framing widens. Found by the lagoon dressing thread.
+
+## 0.6.0-dev (28 Nov 2026): the sky's handedness
+- Engine: WorldRoot.to_godot is now Unreal (x, y, z) -> Godot (x, z, y) (was (x, z, -y), the island frame's map), and
+  sky_stars s_zup is its inverse. Evidence: the lagoon GLBs are written (x, z, -y) from island metres, and Unreal
+  holds them at X = x, Y = -y (slice_common.py write_glb, manifest `axes`, check P4 in Unreal), so Unreal = (g.x, g.z,
+  g.y). Before, the sun's path, the moons and the star figures were mirrored along Unreal's Y (Godot z) against the
+  reefs: at noon_yaw 0 that is the rise-set line, so the sun now sets toward Godot -z (was +z) and rises at +z; its
+  lean toward the noon side (Godot -x) is as before.
+  Unchanged on purpose: the stars turn about north by +2 pi (days - 0.5) as Unreal's Stars actor did, which is against
+  the sun (in Unreal too; sun_v184 apply_fast). Still Godot's own, not Unreal's: the moon faces' and the corona
+  streaks' roll (built on Godot axes in sky.gdshader).
+
 ## 0.6.0-dev (28 Nov 2026): the light net from a map, once a frame
 - Engine: caustics map 0.1.0 (`adapters/godot/caustics_map.gd`, WorldRoot.caustics; `look/caustics_slope`, `_focus`,
   `_blur.gdshader`): lagoonwater v98's route. Each frame the net is drawn once into a 512 px tile of 2.56 m
@@ -31,8 +181,7 @@
   NIGHT_LIFT 0.5 on the compensation, dawn_dim, the steady under-water step fading out at night and NIGHT_EYE_UNDER 1.
   Before, a moonless night was exposed about 8.7 stops over Unreal's. Now EV100 -4.75 moonless (hour 22), -3.48 under
   two moons (hour 94), -3.69 at dusk (18.6), noon unchanged (15.5 air / 14.75 under water). Not ported: sunset_shut.
-  Open: the moon face clips white (Unreal's MoonCap not ported), and the sky is mirrored left-right against Unreal
-  (to_godot keeps handedness; being checked).
+  Moon face cap and the mirrored sky: fixed, see the entries above.
 
 ## 0.6.0-dev (28 Nov 2026): Gary's brightness pick
 - Engine: under water +1 stop (WorldRoot.under_exposure_art 1.0) and haze GlowK 1.0 (was 2.5) by default: Gary picked
@@ -96,6 +245,26 @@
   loads the 19 world textures (AO_WORLDTEX for the shot tool).
 
 ## 0.6.0-dev (27 Nov 2026, evening): gameplay now built on Gary's Thalassa v20.19
+- M04 body 0.2.0: stress test tests/test_body_stress.gd (Gary 27 Nov: "every case, every limb, every body part
+  interaction, constraints, IK"). 45 cases (walk, turn, jump, crouch, walls, low ceiling, steps, ramps, ledges, stairs,
+  beach, waves, swimming, caves, sea floor, current, ceilings, hits, frame hitches, teleport) plus random monkey runs,
+  checked every tick: bone lengths, elbow/knee direction and limits, joint pops, limbs in rock, soles on and not sunk
+  into the ground, planted-foot slide <= 3 cm, legs/arms not through each other or the body. Planted faults (bone
+  length, no-clip off, flipped elbow) must fail. --film renders the clips on the proof page. Result: 60 Hz 40/45 + 5
+  known open (step down, 30 deg slope walked across x2, stairs), gating in run_all; 30 Hz 40/45, 120 Hz 38/45 and
+  monkeys 1/4 reported, not yet gating. FIX lines (all off under thalassa_exact, both goldens still MATCH):
+  rig sub-steps dt > 1/55 s; feet keep a 7-point sole plate on the ground (toe/heel pivot, slope-aware tread
+  centring, lateral reach limits); a planted foot past the leg's reach or clamp steps at once (foot_placer forced,
+  FORCED_HARD 7 cm overrides waiting for the other foot); the pelvis yields to a planted foot it would lift; walls
+  push the foot with a lip rule; swim legs stay on the hip's side of rock (hip-to-ankle ray), buried points are pushed
+  out, the clearance push grows at up to 9 m/s; non-finite floor fallbacks (chest went NaN off the world edge).
+  M02 motor FIXes (config thalassa_exact): walking off a drop > 0.36 m falls under gravity; the mid-air jump offset is
+  re-based when the floor under her changes (eye dropped 32 cm in one tick off a step); no 60% crouch cut and no loss
+  of the eye's trail at take-off (18 cm camera pop jumping from a crouch). WorldQuery rays ignore back faces.
+  Round 2: a planted foot turned past the hip's rotation range asks for a step (the leg solver twisted it about the
+  ankle, sliding heel and ball in fast turns); a foot 3 cm out of reach steps even with the other foot in the air
+  (FORCED_HARD/HARD_MISS 0.03, was 7 cm); the air floor clamp no longer pops a crouched take-off up 14 cm. Now 60 Hz
+  42/45 + 3 known (slope across x2, stairs), 30 Hz 41/45, 120 Hz 38/45, monkeys 2/4 (3.1 and 3.8 cm slides left).
 - M04 body 0.1.0 = Thalassa core/ik-rig.js DiverBodyRig (swim pose, shore walk/wade pose, swim-walk blend, head
   look, no-clip arms and legs) + ik-solvers.js (two-bone IK, leg with fin), procedural-locomotion.js
   (BalanceFootPlacer incl. jumps), physics-control.js (PhysicsControlRig profiles, hit reactions), crit springs and

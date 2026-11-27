@@ -14,6 +14,9 @@ echo "== Thalassa port checks (golden traces from the v20.19 JS)"
 "$G" --headless --path . --script res://tests/test_golden_swimmer.gd 2>&1 | grep -E "PASS|FAIL|M02"; "$G" --headless --path . --script res://tests/test_golden_swimmer.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_golden_camera.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_golden_camera.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_golden_body.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_golden_body.gd >/dev/null 2>&1 || rc=1
+echo "== GI light field (look)"
+"$G" --headless --path . --script res://tests/test_gi_light_field.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_gi_light_field.gd >/dev/null 2>&1 || rc=1
+"$G" --headless --path . --script res://tests/test_gi_light_field.gd -- --fault >/dev/null 2>&1 && { echo "GI PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "GI planted fault caught"
 echo "== M29 buoyancy"
 for r in 30 60 120; do
   "$G" --headless --fixed-fps $r --path . --script res://tests/test_buoyancy.gd -- --rate $r --out "$OUT/m29_$r.json" 2>&1 | grep -E "FAIL|M29" || true
@@ -33,5 +36,18 @@ done
 "$G" --headless --fixed-fps 60 --path . --script res://tests/test_camera.gd -- --rate 60 --fault --only C2 --out "$OUT/m03_fault.json" >/dev/null 2>&1
 python3 -c "import json,sys; d=json.load(open('$OUT/m03_fault.json')); sys.exit(0 if not all(x['ok'] for x in d['results']) else 1)" && echo "M03 planted fault caught" || { echo "M03 PLANTED FAULT NOT CAUGHT"; rc=1; }
 python3 tests/compare_rates.py "$OUT" m03 || rc=1
+echo "== M04 body stress (every limb, every frame; KNOWN open cases listed in the test)"
+"$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --tick 60 > "$OUT/m04_60.txt" 2>&1 || rc=1
+grep -E "^(FAIL|XPASS)|^ +J[0-9]|M04 body stress tick" "$OUT/m04_60.txt"
+for f in len clip flip; do
+  if "$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --fault $f --only B2 >/dev/null 2>&1; then echo "M04 PLANTED FAULT $f NOT CAUGHT"; rc=1; else echo "M04 planted fault $f caught"; fi
+done
+# other tick rates and random monkey runs: reported, not yet gating (M04_STRICT=1 gates them)
+for r in 30 120; do
+  "$G" --headless --fixed-fps $r --path . --script res://tests/test_body_stress.gd -- --tick $r > "$OUT/m04_$r.txt" 2>&1 || { [ "${M04_STRICT:-0}" = 1 ] && rc=1; }
+  tail -1 "$OUT/m04_$r.txt"
+done
+"$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --monkey "${1:-4}" --monkey-secs 60 --only BM > "$OUT/m04_monkey.txt" 2>&1 || { [ "${M04_STRICT:-0}" = 1 ] && rc=1; }
+echo "monkey: $(tail -1 "$OUT/m04_monkey.txt")"
 echo "== result: $([ $rc = 0 ] && echo ALL GREEN || echo FAILURES)"
 exit $rc

@@ -1,5 +1,5 @@
 ## M23 harness: shared test worlds 0.1.0 (static boxes + an analytic water env). Used by every gameplay test.
-## Kinds: ramp {angle}, step {h}, shore {waves}, pool {waves, current}, cave {s}, wall, overhang.
+## Kinds: ramp {angle}, step {h}, stairs {n, rise, tread}, shore {waves}, pool {waves, current}, cave {s}, ceiling, wall, overhang.
 extends RefCounted
 
 const Env := preload("res://tests/harness/test_env.gd")
@@ -76,6 +76,19 @@ static func build(world: Node3D, kind: String, p: Dictionary):
 		"wall":   # open floor with a long wall along x = 1.0 (camera against a wall)
 			box(world, Vector3(0, -0.25, 0), Vector3(40, 0.5, 40), 0)
 			box(world, Vector3(1.0 + 0.5, 2.0, 0), Vector3(1.0, 4.0, 40), 0)
+		"stairs":   # a flight of n steps (rise r, tread d) going up toward -z from z=0, plateau on top
+			box(world, Vector3(0, -0.25, 3), Vector3(10, 0.5, 6), 0)
+			var n: int = p.get("n", 8)
+			var r: float = p.get("rise", 0.17)
+			var d: float = p.get("tread", 0.28)
+			for i in n:
+				var h := r * (i + 1)
+				box(world, Vector3(0, h * 0.5, -d * (i + 0.5)), Vector3(10, h, d), 0)
+			box(world, Vector3(0, r * n * 0.5, -d * n - 5), Vector3(10, r * n, 10), 0)
+		"ceiling":   # pool with a 10 x 10 m slab at y = -5 (its underside), to swim up into
+			env.level = 0.0
+			box(world, Vector3(0, -20.25, -20), Vector3(200, 0.5, 200), 0)
+			box(world, Vector3(0, -4.75, 0), Vector3(10, 0.5, 10), 0)
 		"overhang":   # low ceiling at 1.75 m over a 6 x 6 m patch, open floor around it
 			box(world, Vector3(0, -0.25, 0), Vector3(40, 0.5, 40), 0)
 			box(world, Vector3(0, 1.75 + 0.25, 0), Vector3(6, 0.5, 6), 0)

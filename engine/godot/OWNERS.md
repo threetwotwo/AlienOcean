@@ -10,7 +10,9 @@
 | docs/ engine and look evidence | Engine |
 | project.godot [input] [physics] [layer_names] [autoload] sections | Gameplay (Build the core gameplay modules) |
 | core/<every other module>/, adapters/godot/<its modules>, tests/test_<its modules>.gd, harness | Gameplay |
+| core/m31_school/, adapters/godot/school_node.gd, fish/, tests/test_school.gd, tests/test_golden_school.gd, tests/golden/school_*, tests/run_school.sh, tools/school_film.gd | Fish schools (Build the fish school system) |
 | VERSION bumps and CHANGELOG release headings (game code owner) | Gameplay |
+| core/m32_game/, core/world/sim_clock.gd, adapters/godot/game_root.gd, game_services.gd, actor_rig.gd, scenes/game*, tests/test_game_root.gd, tests/run_game_root.sh, tools/game_film.gd | Game root (Build the shared game root) |
 | README.md, CHANGELOG.md entries | shared: each owner edits only its own section / appends its own entries |
 
 Rules: re-read a shared file just before editing it (this is a network folder; last write wins). A change that touches the

@@ -16,3 +16,5 @@ __pycache__/
 *.pyc
 # creature maker build folders
 creatures/maker/out/
+# creature textures Godot extracts from the glTFs at import (the glTFs are listed in assets.lock.json)
+engine/godot/assets/creatures/**/*.png

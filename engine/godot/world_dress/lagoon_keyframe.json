@@ -1,0 +1,274 @@
+{
+ "version": "0.6.0",
+ "name": "lagoon_keyframe",
+ "intent": "The approved key frame (15 Nov, Blender) as a place in the open-world lagoon: a weathered head with a gate (focal point, upper left third), warm coral heads leading in from the near sand (table coral as the colour accent), the grown meadow framing the right edge, open sand and a clear blue lane for the fish school. Restrained, Japanese garden: three rock masses (focal arch, one behind, one far), five coral heads, one meadow bed, the rest is sand and water.",
+ "frame": "key frame layout metres (Blender: x right, y forward, z up). godot = anchor_yaw * (x, z, -y) + anchor",
+ "source": "papers/process/art_bible/style_level/keyframe/src/layout.json (scene.py cam slice) ported 1:1; upgrades are listed per item in 'why'; rocks from layout_arch_g.json (the arch as focal point, coordinator 21 Nov 05:16Z)",
+ "anchor": {
+  "x": 24.0,
+  "z": 20.0,
+  "yaw_deg": 0.0,
+  "match_sun_hour": 12.0,
+  "keyframe_sun": [
+   -0.155,
+   0.207,
+   0.966
+  ]
+ },
+ "seat": "every item is dropped onto the drawn ground under its own footprint (ray to the floor collision), as habitat.seat_blades did",
+ "items": [
+  {
+   "p": "SB_Bommie_0_v18c",
+   "at": [
+    -7.58,
+    14.1,
+    0.0
+   ],
+   "rot": 5.407,
+   "role": "focal head: Rock's heads_v18c (Gary's pick 21 Nov), gate turned to face the key camera",
+   "why": "upgrade: v18c replaces kit v18 b0 (layout_arch_g.json, Style 21 Nov); set back along the key camera's ray from 10.6 to 13.0 m (Fable r2 + measured r3: 10.6 m cut the top, 16.5 m lost it in the haze); r6 (Fable r5 \"hard base line\"): its foot, the gate fall Terrain grows from this head's own fall record (14 blocks at both mouths, roof and wear chips, seabed/tools/gate_fall.py v3) plus the rubble_rule v11 apron round its real outline; r7: its sand skirt from the key frame rig's habitat.bank (0.12 m bank against the foot, arch_set.sh), since v18c has no kit skirt; r7 SILHOUETTE (Gary 27 Nov 18:42Z silhouette before detail): the key frame's massif spans 5-63 % of the frame width with its top 13 % down; r6 ran 18-93 % with the top cut off. So the head turned 13 deg left about the camera and set back to 16 m (r7b at 17 deg / 17.5 m measured 1-50 %, r7c tuned to the key frame's 5-63 %), its yaw turned with it so the gate still faces the camera",
+   "with": [
+    "SB_Bommie_0_v18c_apron",
+    "SB_Skirt_0_v18c"
+   ]
+  },
+  {
+   "p": "SB_Bommie_2",
+   "at": [
+    4.33,
+    13.3,
+    0.0
+   ],
+   "rot": 0.6,
+   "role": "second mass, behind and right of the focal head",
+   "with": "SB_Skirt_2",
+   "why": "Fable r2: three masses only, the right of frame left to open blue; r6 (Fable r5): moved from (7.5, 20) to open a water gap between it and the focal head; r7 SILHOUETTE: the key frame's second head sits at 73-87 % of the width, its top 25 % down, with water between it and the massif; here 14 m out, x1.3 (r7b sat at 65-78 %: 6 deg right)",
+   "s": 1.3
+  },
+  {
+   "p": "SB_Bommie_4",
+   "at": [
+    -12.0,
+    24.0,
+    0.0
+   ],
+   "rot": 4.0,
+   "role": "the one far head, left",
+   "with": "SB_Skirt_4"
+  },
+  {
+   "p": "kf_table_5",
+   "at": [
+    -0.5,
+    2.9,
+    0.0
+   ],
+   "rot": 0.0,
+   "role": "colour accent, warm table coral",
+   "why": "meadow bed where the key frame had it; the gate stands in clear sand now that the head sits at 13 m"
+  },
+  {
+   "p": "kf_brain_2",
+   "at": [
+    -2.45,
+    3.1,
+    0.0
+   ],
+   "rot": 0.0,
+   "role": "near left coral head"
+  },
+  {
+   "p": "kf_boulder_1",
+   "at": [
+    -1.0,
+    4.05,
+    0.0
+   ],
+   "rot": 0.0,
+   "role": "boulder coral behind the table"
+  },
+  {
+   "p": "kf_staghorn_3",
+   "at": [
+    0.45,
+    5.6,
+    0.0
+   ],
+   "rot": 0.0,
+   "role": "branching coral, mid",
+   "why": "; r6 (Fable r5): 0.6 m right, out of the boulder's silhouette"
+  },
+  {
+   "p": "kf_finger_4",
+   "at": [
+    -3.5,
+    4.1,
+    0.0
+   ],
+   "rot": 0.0,
+   "role": "finger coral, left"
+  },
+  {
+   "p": "kf_LG_seagrass_m2_0_1",
+   "at": [
+    12.0,
+    -1.2,
+    0.0
+   ],
+   "rot": 0.0,
+   "keep": 1,
+   "role": "meadow bed (colony maker's grown tiles moved as one)",
+   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
+  },
+  {
+   "p": "kf_LG_seagrass_m2_1_1",
+   "at": [
+    12.0,
+    -1.2,
+    0.0
+   ],
+   "rot": 0.0,
+   "keep": 1,
+   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
+  },
+  {
+   "p": "kf_LG_seagrass_m2_1_2",
+   "at": [
+    12.0,
+    -1.2,
+    0.0
+   ],
+   "rot": 0.0,
+   "keep": 1,
+   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
+  },
+  {
+   "p": "kf_LG_seagrass_m2_2_0",
+   "at": [
+    12.0,
+    -1.2,
+    0.0
+   ],
+   "rot": 0.0,
+   "keep": 1,
+   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
+  },
+  {
+   "p": "kf_LG_seagrass_m2_2_1",
+   "at": [
+    12.0,
+    -1.2,
+    0.0
+   ],
+   "rot": 0.0,
+   "keep": 1,
+   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
+  }
+ ],
+ "keep_clear": [
+  {
+   "what": "fish school volume (Build the fish school system)",
+   "at": [
+    -1.4,
+    4.2,
+    1.6
+   ],
+   "size": [
+    1.2,
+    0.7,
+    0.45
+   ],
+   "heading": 0.4,
+   "why": "the key frame's small school sat here (layout smallschool -1.4, 3.7, 1.25), raised over the coral heads"
+  },
+  {
+   "what": "swim lane / sight line",
+   "from": [
+    0.5,
+    0.5
+   ],
+   "to": [
+    -7.93,
+    8.27
+   ],
+   "w": 1.6
+  },
+  {
+   "what": "swim lane through the gate side",
+   "from": [
+    -8.07,
+    8.44
+   ],
+   "to": [
+    -9.37,
+    13.17
+   ],
+   "w": 1.4
+  }
+ ],
+ "hero": {
+  "at": [
+   0.3,
+   1.05,
+   0.84
+  ],
+  "rot": 3.85
+ },
+ "cams": {
+  "key": {
+   "at": [
+    0.0,
+    0.0,
+    1.05
+   ],
+   "look": [
+    -0.25,
+    3.0,
+    0.58
+   ],
+   "vfov": 44,
+   "note": "the approved key frame camera (scene.py cam slice)"
+  },
+  "key_arch": {
+   "at": [
+    0.0,
+    0.0,
+    1.05
+   ],
+   "look": [
+    -2.76,
+    8.54,
+    0.85
+   ],
+   "vfov": 44,
+   "note": "key frame with the gate on the right third (Style 21 Nov)"
+  },
+  "gate": {
+   "at": [
+    -1.96,
+    7.92,
+    0.95
+   ],
+   "look": [
+    -1.96,
+    15.82,
+    1.05
+   ],
+   "vfov": 50,
+   "note": "through the turned gate"
+  },
+  "wide": {
+   "at": [
+    1.6,
+    -0.6,
+    1.15
+   ],
+   "look": [
+    -2.9,
+    8.4,
+    0.75
+   ],
+   "vfov": 46
+  }
+ }
+}

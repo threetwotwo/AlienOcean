@@ -5,10 +5,11 @@
 ## Cdom 0.03, ScatK 0.40, GlowK 2.50) in the seabed, surface and underwater-view shaders. Env: AO_HOUR (default 12).
 ## 0.3.0: the world (light, sky, exposure, water) comes from adapters/godot/world_root.gd, the same node the game uses.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/lagoon_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
-## Env: AO_UNDER_EV (art stops under water), AO_GLOW_K (haze strength, 2.5), AO_LIGHT_NEUTRAL=0..1 (art direction: sunlight keeps its colour on the way down), AO_DEPTH_COLOUR=1 (Unreal's depth colour give-back; AO_DEPTH_SHARE its share, default 0.25), AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_AGX_MODE=1 (raw buffer, for checks), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
-## Light net: AO_CAUS=pixel (per pixel instead of the map), AO_CAUS_T=<s> (hold the net at that second), AO_CAUS_DUMP=<file> (the map as raw float32 RGBA).
+## Env: AO_FILL_AO=0 (water fill unoccluded, as before), AO_SSAO=0, AO_SSIL=0, AO_SDFGI=0 (GI off), AO_GI_K (art lever: GI strength, 1 = physical), AO_SDFGI_SKY=0, AO_SDFGI_OCC=1, AO_SDFGI_CELL, AO_SDFGI_BOUNCE, AO_SUN=0, AO_SKY_MODE, AO_GI_DEBUG (GI checks), AO_CDOM / AO_SCAT (water's yellow substance / particles, art levers), AO_TIDE=1 (the sea follows the tide; default pinned at the mean), AO_DRESS=<world_dress/x.json> + AO_DRESS_PIECES=<dir> (an authored place built by world_dress/dress_cell.gd; its cameras become shots 09+), AO_UNDER_EV (art stops under water), AO_GLOW_K (haze strength, 2.5), AO_LIGHT_NEUTRAL=0..1 (art direction: sunlight keeps its colour on the way down), AO_DEPTH_COLOUR=1 (Unreal's depth colour give-back; AO_DEPTH_SHARE its share, default 0.25), AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_AGX_MODE=1 (raw buffer, for checks), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
+## Light net: AO_CAUS=pixel (per pixel instead of the map), AO_CAUS=waves (the map from the 32 waves instead of the FFT sea), AO_CAUS_T=<s> (hold the net and the sea at that second), AO_CAUS_DUMP=<file> (the map as raw float32 RGBA).
+## God rays: AO_GOD=0 turns them off (WorldRoot.god_rays), for before/after. AO_TAA=1: Godot TAA on (Unreal ran TSR; the rays' jitter is averaged).
 ## Night: the Unreal night eye (WorldRoot.apply) and the Unreal stars (look/sky_stars.gdshaderinc). Try AO_HOUR=22 (moonless), 94 (moonlit).
-## Still to port: the surface's waves and tide, god rays (the light net is in: look/caustics.gdshaderinc, adapters/godot/caustics_map.gd).
+## Still to port: the surface's waves and tide (the light net and the god rays are in: look/caustics.gdshaderinc, adapters/godot/caustics_map.gd).
 extends SceneTree
 
 const WATER_Y := LagoonWaterField.SURFACE_Y   # the Unreal lagoon's saved surface: SurfaceZ 400 cm (tide 0)
@@ -65,6 +66,22 @@ func _setup():
 	print("FLOOR y ", lo, " .. ", hi)
 	# light, sky, exposure and water uniforms: one WorldRoot driven by the world clock
 	wr = WorldRoot.new()
+	if OS.get_environment("AO_CDOM") != "": wr.cdom = float(OS.get_environment("AO_CDOM"))
+	if OS.get_environment("AO_SCAT") != "": wr.scat_k = float(OS.get_environment("AO_SCAT"))
+	if OS.get_environment("AO_FILL_AO") == "0": wr.fill_occluded = false   # the water fill as emission (unoccluded), before/after
+	if OS.get_environment("AO_SSIL") == "0": wr.env.ssil_enabled = false
+	if OS.get_environment("AO_SSAO") == "0": wr.env.ssao_enabled = false
+	if OS.get_environment("AO_SDFGI") == "0": wr.env.sdfgi_enabled = false   # GI off (before/after; SDFGI is the default since 28 Nov)
+	if OS.get_environment("AO_SDFGI_SKY") == "0": wr.env.sdfgi_read_sky_light = false   # GI checks: misses read no sky
+	if OS.get_environment("AO_SKY_MODE") != "": wr.env.sky.process_mode = int(OS.get_environment("AO_SKY_MODE"))   # GI checks: 0 auto, 1 quality, 2 incremental, 3 realtime
+	if OS.get_environment("AO_SDFGI_OCC") == "1": wr.env.sdfgi_use_occlusion = true
+	if OS.get_environment("AO_SDFGI_CELL") != "": wr.env.sdfgi_min_cell_size = float(OS.get_environment("AO_SDFGI_CELL"))
+	if OS.get_environment("AO_SDFGI_BOUNCE") != "": wr.env.sdfgi_bounce_feedback = float(OS.get_environment("AO_SDFGI_BOUNCE"))
+	if OS.get_environment("AO_GI_K") != "": wr.gi_k = float(OS.get_environment("AO_GI_K"))   # art lever: GI strength
+	if OS.get_environment("AO_SUN") == "0": wr.light.light_energy = 0.0   # GI checks: the fill and bounce alone
+	if OS.get_environment("AO_GI_DEBUG") != "": root.debug_draw = int(OS.get_environment("AO_GI_DEBUG"))   # e.g. 16 SDFGI, 17 SDFGI probes
+	if OS.get_environment("AO_SSAO_R") != "": wr.env.ssao_radius = float(OS.get_environment("AO_SSAO_R")); wr.env.ssao_intensity = float(OS.get_environment("AO_SSAO_I"))
+	wr.tide_on = OS.get_environment("AO_TIDE") == "1"   # reference shots pin the sea at its mean level (AO_TIDE=1: follow the moons)
 	wr.hours = float(OS.get_environment("AO_HOUR")) if OS.get_environment("AO_HOUR") != "" else 12.0
 	wr.depth_colour = OS.get_environment("AO_DEPTH_COLOUR") == "1"   # Unreal v168 depth colour give-back (off by default)
 	if OS.get_environment("AO_UNDER_EV") != "": wr.under_exposure_art = float(OS.get_environment("AO_UNDER_EV"))
@@ -76,8 +93,23 @@ func _setup():
 	if OS.get_environment("AO_AGX_MODE") != "": wr.agx_fx.mode = int(OS.get_environment("AO_AGX_MODE"))
 	if OS.get_environment("AO_CAUS") == "pixel": wr.caustics.per_pixel = true   # the light net per pixel instead of from its map (checks)
 	if OS.get_environment("AO_CAUS_T") != "": wr.caustics.frozen_time = float(OS.get_environment("AO_CAUS_T"))   # hold the net at this second
+	if OS.get_environment("AO_GOD") == "0": wr.god_rays = false   # the god rays off (before/after)
+	if OS.get_environment("AO_TAA") == "1": root.use_taa = true
 	if OS.get_environment("AO_CAUS_DUMP") != "": _caus_dump = OS.get_environment("AO_CAUS_DUMP")
-	world.add_child(wr.make_surface())
+	var sea := wr.make_surface() as SeaSurface
+	world.add_child(sea)
+	if OS.get_environment("AO_CAUS") == "waves": wr.caustics.from_sea = false   # the net from the 32 waves instead of the FFT sea (checks)
+	if OS.get_environment("AO_CAUS_T") != "":   # ... and hold the sea at the same second, so stills match run to run
+		sea.fft.hold = true; sea.fft.time_s = float(OS.get_environment("AO_CAUS_T"))
+	var dress: DressCell = null
+	if OS.get_environment("AO_DRESS") != "":   # an authored place (world_dress/<name>.json) built from its pieces (AO_DRESS_PIECES), seated on the floor
+		dress = DressCell.new(); dress.setup(OS.get_environment("AO_DRESS"), OS.get_environment("AO_DRESS_PIECES")); dress.ground_material = ground
+		world.add_child(dress); dress.build()
+		for mi in world.find_children("*", "MeshInstance3D", true, false):
+			if "floor" in String(mi.get_parent().name).to_lower(): mi.create_trimesh_collision()
+		await physics_frame; await physics_frame
+		var space := root.get_world_3d().direct_space_state
+		print("SEAT ", dress.seat(space), " KEEP_CLEAR ", dress.keep_clear_report(space))
 	# hero fish, hovering near the coral heads
 	fish = _load(args[1]) as Node3D
 	if fish:
@@ -88,7 +120,12 @@ func _setup():
 				if m is BaseMaterial3D: m.vertex_color_use_as_albedo = false   # our fish COLOR_0 is data
 		var aps := fish.find_children("*", "AnimationPlayer", true, false)
 		if aps.size() > 0:
-			ap = aps[0]; var a = ap.get_animation_list()[0]; ap.get_animation(a).loop_mode = Animation.LOOP_LINEAR; ap.play(a)
+			ap = aps[0]; var a = ap.get_animation_list()[0]
+			for an in ap.get_animation_list():   # the maker's swim clip ("swim" after an editor import, "swim_loop" at runtime)
+				if an.begins_with("swim"): a = an
+			ap.get_animation(a).loop_mode = Animation.LOOP_LINEAR; ap.play(a)
+	if dress and fish:
+		fish.position = dress.on_sand(dress.manifest.hero.at); fish.rotation.y = dress.anchor_xform.basis.get_euler().y + float(dress.manifest.hero.rot)
 	var fp := fish.position if fish else Vector3(1.2, 0.9, -9.6)
 	shots = [
 		["01_hero_3p", fp + Vector3(-0.55, 0.18, 0.5), fp, 50.0],
@@ -104,6 +141,10 @@ func _setup():
 	var mp := Vector3(0, WATER_Y + 1.5, 10)
 	shots.append(["06_moon_b", mp, mp + WorldRoot.to_godot(stm.B.dir) * 10.0, 12.0])
 	shots.append(["07_moon_a", mp, mp + WorldRoot.to_godot(stm.A.dir) * 10.0, 12.0])
+	if dress:   # the place's own cameras (the key frame's camera first)
+		var nk := 9
+		for c in dress.manifest.cams:
+			var cc := dress.cam(c); shots.append(["%02d_dress_%s" % [nk, c], cc[0], cc[1], cc[2]]); nk += 1
 	if OS.get_environment("AO_SHOTS") != "":
 		var keep := OS.get_environment("AO_SHOTS").split(",")
 		shots = shots.filter(func(sh): return sh[0].substr(0, 2) in keep)

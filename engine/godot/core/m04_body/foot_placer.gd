@@ -21,6 +21,7 @@ class Foot:
 	var yaw := 0.0
 	var from_yaw := 0.0
 	var to_yaw := 0.0
+	var to_raw := Vector3(0, -0.85, 0)     # the planner's own landing spot before the foothold check
 	var stepping := false
 	var t := 1.0
 	var dur := 0.32
@@ -31,6 +32,18 @@ class Foot:
 var initialized := false
 var last_vessel_id = null
 var feet := {"L": Foot.new(), "R": Foot.new()}
+## Set by the body rig when a planted foot is held back by its reach limits (it would be dragged): step it now.
+const DUR_MIN := 0.18
+const FORCED_MIN := 0.0
+const FORCED_HARD := 0.03     # any request counts; the rig discounts a just-landed foot so the other goes first
+var ttl := {"L": INF, "R": INF}     # set by the rig: s until her hip, as it moves now, takes a planted foot out of the leg's reach
+var forced := {"L": 0.0, "R": 0.0}     # set by the rig: how far (m) a planted foot is from where the leg can hold it
+## Optional world check set by the body rig: filter(take_off: Vector3, to: Vector3, yaw: float) -> Vector3 returns
+## a landing spot the foot can really stand on (Thalassa's placer only knew a flat deck).
+var target_filter = null
+## Off (null) reproduces Thalassa. Vector3(hip half width, inward reach, outward reach), set by the rig: landing spots
+## are kept inside the band the leg can reach sideways, so a strafe doesn't plant a foot the rig then has to drag.
+var lat_reach = null
 var last_stepped := "R"
 var step_count := 0
 var support_cooldown := 0.0
@@ -75,6 +88,7 @@ static func trajectory(pos: Vector2, v: Vector2, dv: Vector2, halflife := 0.14, 
 	return out
 
 func reset(lp: Vector3, yaw: float, vessel_id = null) -> void:
+	forced = {"L": 0.0, "R": 0.0}
 	var rx := cos(yaw); var rz := -sin(yaw)
 	var fx := -sin(yaw); var fz := -cos(yaw)
 	var hw: float = config.stanceHalfWidth
@@ -85,6 +99,7 @@ func reset(lp: Vector3, yaw: float, vessel_id = null) -> void:
 		f.planted = pts[k]; f.from = pts[k]; f.to = pts[k]; f.cur = pts[k]
 		f.yaw = yaw; f.from_yaw = yaw; f.to_yaw = yaw
 		f.stepping = false; f.t = 1.0; f.toe_pitch = 0.0; f.heel_kick = 0.0
+		f.to_raw = pts[k]
 	com_y = 0.0; com_vel_y = 0.0; run_blend = 0.0
 	pelvis_offset_spring.reset(); pelvis_yaw_spring.reset(); pelvis_roll_spring.reset()
 	spine_lean_fwd_spring.reset(); spine_lean_lat_spring.reset(); spine_twist_spring.reset()
@@ -190,7 +205,15 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var ll := Vector2(lx, lz).length()
 		if ll > max_reach and ll > 1e-4:
 			lx = lx / ll * max_reach; lz = lz / ll * max_reach
-		return Vector3(ppx + lx + rgt_x * (sg * hw) + fwd_x * idle_stag, lp.y, ppz + lz + rgt_z * (sg * hw) + fwd_z * idle_stag)
+		var ox := lx + rgt_x * (sg * hw) + fwd_x * idle_stag
+		var oz := lz + rgt_z * (sg * hw) + fwd_z * idle_stag
+		if lat_reach != null:
+			# FIX (stress J7, strafe skate): the lateral offset from her own hip, outward positive, is kept in the reach band
+			var lr: Vector3 = lat_reach
+			var lat := (ox * rgt_x + oz * rgt_z) * sg - lr.x
+			var cl := clampf(lat, -lr.y, lr.z)
+			ox += rgt_x * sg * (cl - lat); oz += rgt_z * sg * (cl - lat)
+		return Vector3(ppx + ox, lp.y, ppz + oz)
 
 	var ideal_l: Vector3 = target_at.call("L", 0.0)
 	var ideal_r: Vector3 = target_at.call("R", 0.0)
@@ -205,17 +228,39 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 			var late_peel := clampf((trail_fwd + 0.09) * 0.90, -0.26, 0.0) if (speed > 0.18 and trail_fwd < -0.09) else 0.0
 			f.toe_pitch = lerpf(f.toe_pitch, late_peel, BM.expk(11.0, sdt))
 			return
+		var ok_ := "R" if key == "L" else "L"
+		if not feet[ok_].stepping and ttl[ok_] < 9.0:
+			# stance budget: this swing lands before the stance leg runs out of reach
+			var budget: float = maxf(0.0, ttl[ok_] - (2.0 * sdt + 0.015))
+			if (1.0 - f.t) * f.dur > budget:
+				f.dur = maxf(DUR_MIN, budget / maxf(1.0 - f.t, 0.05))
 		var rem_t := maxf(0.0, (1.0 - f.t) * f.dur)
 		if f.t < 0.80:
 			var tg: Vector3 = target_at.call(key, rem_t)
 			var rk := BM.expk(16.0, sdt)
-			f.to.x = lerpf(f.to.x, tg.x, rk)
+			if target_filter == null:
+				f.to.x = lerpf(f.to.x, tg.x, rk)
+				f.to.z = lerpf(f.to.z, tg.z, rk)
+			else:
+				# ROOT (stress B37): a foothold is committed at take-off. The planner's drifting spot is followed raw;
+				# the committed spot follows its foothold only by small moves (blending between two treads stood a
+				# foot across the edge), and jumps to a new one only while the old became unusable early in the swing
+				f.to_raw = Vector3(lerpf(f.to_raw.x, tg.x, rk), lp.y, lerpf(f.to_raw.z, tg.z, rk))
+				var cand: Vector3 = target_filter.call(f.from, f.to_raw, f.to_yaw)
+				var dxz := Vector2(cand.x - f.to.x, cand.z - f.to.z).length()
+				if dxz < 0.05:
+					f.to.x = cand.x; f.to.z = cand.z     # (the raw spot is already smoothed; on open ground cand is it)
+				else:
+					# early in the swing (the foot has covered < 10 % of its way, so the jump moves it < 3 cm) or when the
+					# committed spot is no longer a foothold
+					var chk: Vector3 = target_filter.call(f.from, f.to, f.to_yaw)
+					if f.t < 0.35 or Vector2(chk.x - f.to.x, chk.z - f.to.z).length() > 0.005:
+						f.to.x = cand.x; f.to.z = cand.z
 			f.to.y = lp.y
-			f.to.z = lerpf(f.to.z, tg.z, rk)
 			f.to_yaw = BM.wrap_pi(f.to_yaw + BM.wrap_pi(yaw - f.to_yaw) * rk)
 		else:
 			f.to.y = lp.y
-		f.t = minf(1.0, f.t + sdt / maxf(0.18, f.dur))
+		f.t = minf(1.0, f.t + sdt / maxf(DUR_MIN, f.dur))
 		var u := f.t
 		var uh := u * u * u * (u * (u * 6.0 - 15.0) + 10.0)
 		var usk := pow(u, lerpf(0.86, 0.74, rb))
@@ -433,9 +478,15 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 
 	var trigger := func(key: String, urgent := false) -> void:
 		var f: Foot = feet[key]
+		forced[key] = 0.0
 		f.from = f.cur
 		f.dur = clampf(planned * 0.88 if urgent else planned, 0.25, 0.46)
+		var ok2 := "R" if key == "L" else "L"
+		if not feet[ok2].stepping and ttl[ok2] < 9.0:
+			f.dur = clampf(ttl[ok2] - (2.0 * sdt + 0.015), DUR_MIN, f.dur)
 		f.to = target_at.call(key, f.dur)
+		f.to_raw = f.to
+		if target_filter != null: f.to = target_filter.call(f.from, f.to, yaw)
 		f.from_yaw = f.yaw
 		f.to_yaw = yaw
 		f.stepping = true
@@ -446,6 +497,8 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		if rb > 0.25:
 			com_vel_y = maxf(com_vel_y, rb * 0.29)
 
+	if is_air:
+		forced = {"L": 0.0, "R": 0.0}     # a request from before take-off must not fire on the landing tick
 	if not (step_l and step_r) and not is_air:
 		var err_l := Vector2(feet.L.planted.x - ideal_l.x, feet.L.planted.z - ideal_l.z).length()
 		var err_r := Vector2(feet.R.planted.x - ideal_r.x, feet.R.planted.z - ideal_r.z).length()
@@ -454,7 +507,26 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var idle := speed < 0.06 and des_speed < 0.06 and absf(yaw_rate) < 0.22
 		var trig := 0.22 if idle else lerpf(config.baseTriggerDist, config.maxTriggerDist, speed_norm)
 		var emerg := lerpf(config.emergencyTrailDist, 0.48, rb)
-		if not step_l and trail_l > emerg and (not step_r or feet.R.t >= 0.72):
+		# the foot further from where it should be goes first (L always won before: the right foot could wait)
+		var f_first := "L" if forced.L >= forced.R else "R"
+		if minf(ttl.L, ttl.R) < 0.30 and ttl.L != ttl.R and forced.L > FORCED_MIN and forced.R > FORCED_MIN:
+			f_first = "L" if ttl.L < ttl.R else "R"     # both ask: the leg that runs out of reach sooner goes first
+		var f_other := "R" if f_first == "L" else "L"
+		var ft_ok := 0.25     # waiting for the other foot to land (0.85) left the forced foot dragging: 28 of 45, not 35
+		var hard := FORCED_HARD
+		if lat_reach != null and rb < 0.45:
+			# ROOT (stress B14/B37 crouch): walking has no flight phase. Lifting the forced foot with the other a quarter
+			# into its swing left both in the air, and the CoM, with no leg under it, fell at g (-0.275 m crouch per step
+			# down a 30 deg ramp). Walking, a forced foot waits for the other to be nearly down unless far out of reach.
+			ft_ok = 0.70
+			hard = 0.08
+		# a foot the leg can't hold at all (> FORCED_HARD) goes now, even with the other in the air (a running hop);
+		# after a dropped-frame catch-up both feet can be out of reach at once (stress B40)
+		if forced[f_first] > FORCED_MIN and not feet[f_first].stepping and (not feet[f_other].stepping or feet[f_other].t >= ft_ok or forced[f_first] > hard):
+			trigger.call(f_first, true)
+		elif forced[f_other] > FORCED_MIN and not feet[f_other].stepping and (not feet[f_first].stepping or feet[f_first].t >= ft_ok or forced[f_other] > hard):
+			trigger.call(f_other, true)
+		elif not step_l and trail_l > emerg and (not step_r or feet.R.t >= 0.72):
 			trigger.call("L", true)
 		elif not step_r and trail_r > emerg and (not step_l or feet.L.t >= 0.72):
 			trigger.call("R", true)
@@ -626,8 +698,8 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 	return {
 		"gaitMode": gait, "runBlend": rb, "speed": speed, "speedNorm": speed_norm, "vFwd": v_fwd, "vRight": v_right,
 		"trajectory": traj,
-		"footL": {"pos": fl_.cur, "yaw": fl_.yaw, "stepping": fl_.stepping, "t": fl_.t, "toePitch": fl_.toe_pitch, "heelKick": fl_.heel_kick},
-		"footR": {"pos": fr_.cur, "yaw": fr_.yaw, "stepping": fr_.stepping, "t": fr_.t, "toePitch": fr_.toe_pitch, "heelKick": fr_.heel_kick},
+		"footL": {"pos": fl_.cur, "yaw": fl_.yaw, "stepping": fl_.stepping, "t": fl_.t, "toePitch": fl_.toe_pitch, "heelKick": fl_.heel_kick, "from": fl_.from, "to": fl_.to, "dur": fl_.dur},
+		"footR": {"pos": fr_.cur, "yaw": fr_.yaw, "stepping": fr_.stepping, "t": fr_.t, "toePitch": fr_.toe_pitch, "heelKick": fr_.heel_kick, "from": fr_.from, "to": fr_.to, "dur": fr_.dur},
 		"pelvisOffset": pelvis_off, "pelvisYaw": pelvis_yaw, "pelvisRoll": pelvis_roll,
 		"spineLeanFwd": spine_lean_fwd, "spineLeanLat": spine_lean_lat, "spineTwist": spine_twist,
 		"armSwingL": arm_swing_l, "armSwingR": arm_swing_r, "comY": com_y, "comVelY": com_vel_y,

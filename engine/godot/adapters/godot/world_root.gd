@@ -11,11 +11,16 @@
 ## key_fade), EV100 slides with the light (noon cap 15.5), under water the steady eye sits 0.75 stop below the cap,
 ## each place has its compensation (calm lagoon +1.2). Under water the key light points along the refracted sun and
 ## is pre-attenuated to z_ref; water-aware shaders correct for their own depth.
-## Godot axes: SkyClock is z-up (x, y, z); Godot is y-up: (x, z, -y).
+## God rays (look/god_rays.gdshaderinc, lagoonwater v98's, drawn by the underwater view): .god_rays false = off.
+## Godot axes: SkyClock works in Unreal's world axes (z up, left-handed); Godot is y up, right-handed. Unreal (x, y, z)
+## is Godot (x, z, y): a swap, so a mirror, as Unreal's own glTF import does. The world pieces fix it: the lagoon GLBs
+## (island/tools/slice_common.py write_glb) sit in Unreal at (g.x, g.z, g.y) x 100 cm (lagoon slice check P4, bounding
+## boxes). The island frame (x east, y north, z up, right-handed) is a different one: island (x, y, z) = Godot (x, z, -y).
 class_name WorldRoot
 extends Node3D
 
 @export var hours := 12.0
+@export var tide_on := true          # the sea level follows the tide (false pins it at the mean, for reference shots)
 @export var place := "calm_lagoon"
 @export var noon_yaw := 0.0
 @export var floor_y := 0.0            # the lagoon's sand (floor tiles sit at y -0.3..0.1 under a 4 m surface)
@@ -31,8 +36,17 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 ## Art direction: stops added under water on top of the place's compensation, and the water haze's strength
 ## (Unreal GlowK, Gary's clarity pick 2.5). Under water only, so the sky above the sea keeps its exposure.
 @export var under_exposure_art := 1.0     # Gary picked "Brighter" 27 Nov 17:06Z
+@export var fill_occluded := true          # the water's fill light goes through Godot's ambient, so SSAO / SSIL occlude it (false = as before, unoccluded)
+@export var cdom := 0.03                   # art lever (a real condition): yellow substance in the water, Unreal LOOK_SET 0.03; less = bluer haze
+@export var scat_k := 0.40                 # art lever (a real condition): particles in the water, Unreal LOOK_SET 0.40; less = clearer
+@export var gi_k := 1.0                    # art lever: GI strength (SDFGI energy). 1 = physical (the water's fill + the sand's real bounce)
 @export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
 @export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
+## The god rays under the water (Unreal GodK): the light net's map summed along each view ray. false = off (checks).
+@export var god_rays := true:
+	set(v):
+		god_rays = v
+		if under_mat: under_mat.set_shader_parameter("god_k", 1.0 if v else 0.0)
 @export var depth_colour_share := DEPTH_WB   # art direction lever (27 Nov: Gary 'art direction trumps'); Unreal 0.25
 const DEPTH_WB := 0.25                # the share given back
 const DEPTH_WB_PATH := 1.2            # m of water per m of depth (sky light)
@@ -65,6 +79,7 @@ var key := ""
 var last := {}
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
+var under_mat: ShaderMaterial       # the underwater view quad's material (attach_camera)
 var caustics: CausticsMap           # the light net's map, drawn once a frame (adapters/godot/caustics_map.gd)
 var _dome_g := 0.0
 
@@ -96,7 +111,9 @@ static func _dawn_dim(total: float, noon_total: float, nw: float) -> float:
 	return minf(minf(O, maxf(K, fl)) - O, 0.0)
 
 static func to_godot(v: Vector3) -> Vector3:
-	return Vector3(v.x, v.z, -v.y)
+	## an Unreal world direction (the clock's) in Godot's axes. Not (x, z, -y): that is the island frame's map, and it
+	## showed the sky mirrored along Unreal's Y against the reefs (at noon_yaw 0 the sun set on the rising side).
+	return Vector3(v.x, v.z, v.y)
 
 static func ev100(lux: float) -> float:
 	return log(maxf(0.18 * lux / PI * 100.0 / 12.5, 1e-12)) / log(2.0)
@@ -122,6 +139,9 @@ func _init() -> void:
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.ssao_enabled = true; env.ssao_radius = 1.2; env.ssao_intensity = 1.6
 	env.ssil_enabled = true; env.ssil_radius = 4.0
+	# GI (28 Nov, look thread): SDFGI on by default. Its escaping rays read the water's light field under water (look/sky.gdshader
+	# under_*), so the fill is occluded by the real shapes (arch, table coral) and the sun's bounce off the sand comes for free.
+	env.sdfgi_enabled = true
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	env.glow_enabled = true; env.glow_intensity = 0.3
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
@@ -143,22 +163,32 @@ func attach_camera(cam: Camera3D) -> void:
 	var q := MeshInstance3D.new(); q.name = "UnderwaterView"
 	var qm := QuadMesh.new(); qm.size = Vector2(2, 2); q.mesh = qm
 	var qmat := ShaderMaterial.new(); qmat.shader = load("res://look/underwater_view.gdshader"); q.material_override = qmat
-	q.extra_cull_margin = 16384.0; q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; cam.add_child(q)
+	under_mat = qmat; qmat.set_shader_parameter("god_k", 1.0 if god_rays else 0.0)
+	q.gi_mode = GeometryInstance3D.GI_MODE_DISABLED   # a screen pass, not a solid: never in SDFGI / VoxelGI
+	q.extra_cull_margin = 16384.0; q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; q.layers = 1 << 3   # layer 4: the eye's own quads (the sea floor map's captures skip it)
+	cam.add_child(q)
+
+func _process(_dt: float) -> void:
+	## the god rays' start point moves on each frame only where TAA averages it (Unreal: StateFrameIndexMod8 under TSR);
+	## without TAA it holds still, or the shafts would boil.
+	if under_mat == null: return
+	var vp := get_viewport()
+	under_mat.set_shader_parameter("god_frame", float(Engine.get_frames_drawn() % 8) if vp and vp.use_taa else 0.0)
 
 func set_fov(fov_deg: float) -> void:
-	## CameraAttributesPhysical owns the field of view (18 mm half sensor height)
-	cam_attr.frustum_focal_length = 18.0 / tan(deg_to_rad(fov_deg) * 0.5)
+	## CameraAttributesPhysical owns the field of view: Godot takes the vertical FOV from a 24 mm sensor height (12 mm
+	## half), so the focal length for a vertical fov is 12 / tan(fov / 2). (Was 18: every shot was ~1.5x zoomed in.)
+	cam_attr.frustum_focal_length = 12.0 / tan(deg_to_rad(fov_deg) * 0.5)
 
-func make_surface(size_m := 160.0) -> MeshInstance3D:
-	## the drawn water surface overhead (look/water_surface.gdshader), at the water's level
-	var surf := MeshInstance3D.new(); surf.name = "WaterSurface"
-	var pm := PlaneMesh.new(); pm.size = Vector2(size_m, size_m); surf.mesh = pm
-	surf.position.y = water.level
-	var wm := ShaderMaterial.new(); wm.shader = load("res://look/water_surface.gdshader"); surf.material_override = wm
-	surf.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	return surf
+func make_surface(_size_m := 160.0) -> Node3D:
+	## the drawn sea (adapters/godot/sea_surface.gd, water surface thread): the Unreal lagoon's FFT sea on camera-centred
+	## rings, seen from above and below. Its level is water_y (the tide); nothing to place or stream.
+	var s := SeaSurface.new()
+	water.waves = s.fft            # water.water_y(x, z) follows the drawn crests
+	return s
 
 func apply(cam_y: float) -> Dictionary:
+	if tide_on: water.set_clock(hours)   # the sea level follows the two moons (core/world/tide.gd)
 	var water_y := water.level
 	var st := SkyClock.sky_state(hours, noon_yaw)
 	state = st
@@ -191,8 +221,15 @@ func apply(cam_y: float) -> Dictionary:
 	cam_attr.exposure_shutter_speed = pow(2.0, ev) / (22.0 * 22.0)
 	cam_attr.exposure_multiplier = pow(2.0, bias)
 	exposure = pow(2.0, bias) / (1.2 * pow(2.0, ev))  # buffer units per nit (Godot's normalisation)
+	env.sdfgi_energy = gi_k
 	_push_water(water_y, up_air, beam_h, st.skylux)
 	_push_sky(st)
+	# the sea surface's sky and sun (look/sky_dome.gdshaderinc, look/sea_*.gdshader): the dome the sky draws, the key body
+	var rsw := RenderingServer
+	rsw.global_shader_parameter_set("water_dome_sun", sky_mat.get_shader_parameter("dome_sun"))
+	rsw.global_shader_parameter_set("water_sky_norm", sky_mat.get_shader_parameter("sky_norm"))
+	rsw.global_shader_parameter_set("water_sun_air", up_air)
+	rsw.global_shader_parameter_set("water_sun_lux", beam_h / maxf(up_air.y, 0.02) if up_air.y > 0.0 else 0.0)
 	if agx_fx.enabled:
 		agx_fx.exposure = exposure; agx_fx.buf_scale = exposure   # Godot's buffer arrives already exposed (measured 27 Nov)
 		agx_fx.white_now = SkyClock.white_now(st)
@@ -202,7 +239,7 @@ func apply(cam_y: float) -> Dictionary:
 		var kw := clampf((water_y - cam_y) / UNDER_WHITE_FADE_M, 0.0, 1.0)
 		var dg: Vector3 = depth_gain(water_y - cam_y, depth_colour_share) if depth_colour else Vector3.ONE
 		agx_fx.depth_gain = dg * Vector3.ONE.lerp(UNDER_WHITE.get(place, Vector3.ONE), kw)
-	var a := WaterOptics.absorb(); var b := WaterOptics.scatter()
+	var a := WaterOptics.absorb(cdom); var b := WaterOptics.scatter(scat_k)
 	if under:
 		var tr := WaterOptics.refract_sun(up_air)
 		var kd: Vector3 = _art_k((a + WaterOptics.BB * b) / tr.y)
@@ -219,16 +256,29 @@ func apply(cam_y: float) -> Dictionary:
 			+ Vector3(exp(-ku.x * H), exp(-ku.y * H), exp(-ku.z * H)) * st.skylux * WaterOptics.FRESNEL_SKY)
 		var sand := Vector3(WaterOptics.SAND.r, WaterOptics.SAND.g, WaterOptics.SAND.b)
 		var eu: Vector3 = eh * sand * Vector3(exp(-ku.x * (H - z_ref)), exp(-ku.y * (H - z_ref)), exp(-ku.z * (H - z_ref)))
+		# Godot's sky light under water is this light field (look/sky.gdshader under_*): the ambient, SDFGI's escaping rays and
+		# every material read the same two hemispheres, so a fish's belly gets the sand's light and its back the sky's
+		sky_mat.set_shader_parameter("under_k", 1.0)
+		sky_mat.set_shader_parameter("under_down", ek / PI)
+		sky_mat.set_shader_parameter("under_up", eu / PI)
+		# Without GI, the ambient stays one colour (the field's mean); Godot's sky-sourced ambient read black in the 28 Nov
+		# check (cubemap ambient path, open question), and SDFGI replaces the ambient anyway.
 		var amb: Vector3 = (ek + eu) * 0.5 / PI * exposure            # ambient is in buffer units (measured 27 Nov)
 		var mx := maxf(amb.x, maxf(amb.y, amb.z))
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		env.ambient_light_color = Color(amb.x / mx, amb.y / mx, amb.z / mx) if mx > 0.0 else Color.BLACK
 		env.ambient_light_energy = mx
+		RenderingServer.global_shader_parameter_set("water_amb_ref", amb / maxf(exposure, 1e-12))
+		RenderingServer.global_shader_parameter_set("water_amb_sky", 1.0 if env.sdfgi_enabled else 0.0)
 	else:
+		sky_mat.set_shader_parameter("under_k", 0.0)
+		RenderingServer.global_shader_parameter_set("water_amb_sky", 0.0)
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		var dz := dome(Vector3.UP, _dome_sun); var dm := maxf(dz.x, maxf(dz.y, dz.z))
 		env.ambient_light_color = Color(dz.x / dm, dz.y / dm, dz.z / dm) if dm > 0.0 else Color.WHITE
 		env.ambient_light_energy = st.skylux / PI * exposure
+		var ac: Color = env.ambient_light_color * (st.skylux / PI)
+		RenderingServer.global_shader_parameter_set("water_amb_ref", Vector3(ac.r, ac.g, ac.b))
 		light.look_at_from_position(Vector3.ZERO, -up_air, Vector3.FORWARD if absf(up_air.y) > 0.99 else Vector3.UP)
 		light.light_intensity_lux = beam_h / maxf(up_air.y, 0.02)
 		light.light_color = tint
@@ -258,13 +308,16 @@ static func declare_globals() -> void:
 		"water_sand": [RenderingServer.GLOBAL_VAR_TYPE_COLOR, Color.WHITE],
 		# the light net (look/caustics.gdshaderinc): its map, and x 1 = read the map / 0 = per pixel, y the net's time (-1 = TIME)
 		"water_caus_map": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()],
-		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)]}
+		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)],
+		# the sea surface (water surface thread): the sky dome's shape sun and scale, the key body in air and its beam lux
+		"water_amb_ref": [V, Vector3.ONE], "water_fill_ao": [F, 1.0], "water_amb_sky": [F, 0.0],
+		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)
 
 func _push_water(water_y: float, sun_up_air: Vector3, beam_h_lux: float, sky_lux: float) -> void:
-	var a := WaterOptics.absorb(); var b := WaterOptics.scatter()
+	var a := WaterOptics.absorb(cdom); var b := WaterOptics.scatter(scat_k)
 	var tr := WaterOptics.refract_sun(sun_up_air)
 	var rs := RenderingServer
 	rs.global_shader_parameter_set("water_y", water_y)
@@ -278,6 +331,7 @@ func _push_water(water_y: float, sun_up_air: Vector3, beam_h_lux: float, sky_lux
 	rs.global_shader_parameter_set("water_ek0", sky_lux * WaterOptics.FRESNEL_SKY)      # horizontal lux of the sky just under
 	rs.global_shader_parameter_set("water_exposure", exposure)
 	rs.global_shader_parameter_set("water_glow_k", glow_k)
+	rs.global_shader_parameter_set("water_fill_ao", 1.0 if fill_occluded else 0.0)
 	rs.global_shader_parameter_set("water_sand", WaterOptics.SAND)
 	rs.global_shader_parameter_set("water_sky_nits", sky_lux / PI)   # clear sky as a uniform dome (stand-in for the surface)
 	rs.global_shader_parameter_set("water_zref", z_ref)
@@ -367,7 +421,9 @@ func _push_sky(st: Dictionary) -> void:
 	if mat.get_shader_parameter("star_cat") == null:
 		mat.set_shader_parameter("star_cat", StarCatalogue.texture())
 	var north: Vector3 = st.frame[1]                       # the sky turns about the planet's axis once a day (z-up, as the clock)
-	var turn: float = deg_to_rad(fmod(rad_to_deg(TAU * (float(st.days) - 0.5)), 360.0))
+	# Gary 27 Nov 17:44Z: the stars turn WITH the sun (Unreal turned the actor by +2 pi (days - 0.5), against the sun,
+	# though its comment said "with the sun"); the midnight sky is the same either way, only the motion's sense changes
+	var turn: float = -deg_to_rad(fmod(rad_to_deg(TAU * (float(st.days) - 0.5)), 360.0))
 	mat.set_shader_parameter("star_spin", Vector4(north.x, north.y, north.z, turn))
 	var glow: float = st.eclipse.glow
 	mat.set_shader_parameter("stars_on", 1.0 if (float(st.total) < 50.0 or glow > 0.0) else 0.0)   # STARS_BELOW_LUX

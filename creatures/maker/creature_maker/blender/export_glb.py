@@ -1,9 +1,15 @@
-"""Stage 7, EXPORT (Blender Python, bpy): cage + form -> Blender bake (selected-to-active, MikkTSpace normal + AO) -> rigged glTF LOD0-2 + renders.
-Usage: python -m creature_maker glb OUTDIR [--res 2048] [--views] [--wire] [--form] [--samples N]
+"""Stage 8, EXPORT (Blender Python, bpy): cage + form -> Blender bake (selected-to-active, MikkTSpace normal + AO) -> interior slot,
+rig (spine, jaw, gill covers), clips (swim_loop, breathe_loop, gape, flare), swim extras, LODs (meshoptimizer), collision (CoACD) ->
+fish.glb, fish_LOD1.glb, fish_LOD2.glb + glb_stats.json + renders.
+Usage: python -m creature_maker glb OUTDIR --record RECORD.json [--res 2048] [--views] [--wire] [--form] [--samples N]
 """
 import bpy, bmesh, json, sys, os, math
 import numpy as np
 from mathutils import Vector, Matrix
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))   # the maker root: creature_maker
+from creature_maker import rig as RIG, swim_clip, collision, glbpatch
+from creature_maker.record import adapt
+from creature_maker.blender import interior, rigging, lods as LODS
 
 OUT = sys.argv[1]; C = json.load(open(os.path.join(OUT, 'cage.json'))); Z = np.load(os.path.join(OUT, 'cage.npz'))
 S = C['SL_mm'] / 1000.0
@@ -62,6 +68,17 @@ V = Z['V']
 # ---------------------------------------------------------------- BAKE: the professional step, in Blender's own tangent frame
 tmp_m = bpy.data.materials.new('bake_tmp'); tmp_m.use_nodes = True
 body = mesh_obj('body', V, C['faces'], C['uv'], tmp_m)
+INT_IDX, INT_SKIP = interior.slot(body, C)     # interior faces off the skin's bake target before anything is baked
+# orbit linings (the tuck ring of each eye patch) turn into the socket and lie inside the form by design, up to 1.6 % SL deep,
+# further than the bake cage reaches out: their rays start inside the solid and hit the form's far side from behind. They do not
+# sample the form: they wait on the throwaway slot too, and take a flat tangent normal (the cage's own shading) and the rim's AO.
+_tuck = set(v for rings in C['openings']['eye_rings'] for v in rings[-1])
+LINING = [k for k, (f, t) in enumerate(zip(C['faces'], C['ftag'])) if t == 'eye' and _tuck & set(f)]
+for k in LINING: body.data.polygons[k].material_index = INT_IDX
+PLANT = os.environ.get('CREATURE_PLANT_BAKE_FAULT', '')   # tests only: puts the 0.3.0 fault back, to show P6 catches it
+_inner = [k for k, t in enumerate(C['ftag']) if t in interior.INNER]
+if PLANT == 'interior_on_skin':
+    for k in _inner: body.data.polygons[k].material_index = 0
 Fm = np.load(os.path.join(OUT, 'form_mc.npz'))
 me = bpy.data.meshes.new('form'); me.from_pydata([B(v) for v in Fm['V']], [], Fm['F'].tolist()); me.update()
 for p_ in me.polygons: p_.use_smooth = True
@@ -80,6 +97,16 @@ NB_ = bake('NORMAL', imn)[..., :3] * 2 - 1
 ima = bpy.data.images.new('bake_ao', RES, RES, float_buffer=True); ima.colorspace_settings.name = 'Non-Color'
 scn.cycles.samples = 32; AO = bake('AO', ima)[..., 0]
 bake_s = round(_t.time() - t0, 1)
+for k in LINING: body.data.polygons[k].material_index = 0
+for k in _inner: body.data.polygons[k].material_index = INT_IDX
+if LINING:
+    from scipy.ndimage import distance_transform_edt
+    from creature_maker.maps import raster
+    _sk = [k for k, t in enumerate(C['ftag']) if t in ('body', 'eye', 'mouth', 'cap')]; _ln = set(LINING)
+    _F = raster([C['faces'][k] for k in _sk], [np.array(C['uv'][k]) for k in _sk], V, Z['VN'], RES)[3]     # face per texel, Blender's row order
+    _lin = np.isin(_F, [i for i, k in enumerate(_sk) if k in _ln]); _src = (_F >= 0) & ~_lin
+    _iy, _ix = distance_transform_edt(~_src, return_distances=False, return_indices=True)
+    NB_[_lin] = (0.0, 0.0, 1.0); AO[_lin] = AO[_iy[_lin], _ix[_lin]]
 # fine relief: UV-space height -> tangent normal, combined with the baked form normal (reoriented normal mapping)
 H = np.load(os.path.join(OUT, 'body_height.npy')); Mk = np.load(os.path.join(OUT, 'body_mask.npy'))
 if H.shape[0] != RES:
@@ -115,8 +142,12 @@ _I.fromarray((orm * 255 + 0.5).astype(np.uint8)).save(os.path.join(OUT, 'body_or
 bpy.data.objects.remove(form)
 body_m = pbr('body', image('body_base', 'body_base.png'), image('body_normal', 'body_normal.png', True), image('body_orm', 'body_orm.png', True))
 body.data.materials[0] = body_m
+# interior slot: cavity + gill passage faces on their own material 'interior' (engine contract), maps baked from the cage itself
+INT_IDX, INT_STATS = interior.setup(body, body_m, C, OUT, INT_IDX, INT_SKIP)
+int_m = pbr('interior', image('interior_base', 'interior_base.png'), None, image('interior_orm', 'interior_orm.png', True), two_sided=False)
+body.data.materials[INT_IDX] = int_m
 # underwater skin: reflectance 0.01-0.06 % (lessons, fins handover s5) -> IOR of water-skin, not 1.5
-for m_ in (body_m, fin_m):
+for m_ in (body_m, fin_m, int_m):
     try: m_.node_tree.nodes['Principled BSDF'].inputs['IOR'].default_value = 1.33
     except Exception: pass
 def colour0(ob, vals):
@@ -172,85 +203,133 @@ for ob in eye_obs:
     for p in ob.data.polygons: p.flip()
     colour0(ob, np.ones(len(ob.data.vertices)))
 
-# ---------------------------------------------------------------- rig: spine chain + fin bones, weights from body coordinate u
-arm = bpy.data.armatures.new('rig'); rig = bpy.data.objects.new('rig', arm); scn.collection.objects.link(rig)
-bpy.context.view_layer.objects.active = rig; bpy.ops.object.mode_set(mode='EDIT')
-NB = C['bones']; xs = np.linspace(0.02, C['xend'] - 0.03, NB + 1); spine = []
-for i in range(NB):
-    eb = arm.edit_bones.new(f'spine_{i:02d}'); eb.head = B([xs[i], 0, 0]); eb.tail = B([xs[i + 1], 0, 0])
-    if spine: eb.parent = spine[-1]; eb.use_connect = True
-    spine.append(eb)
-def fin_bone(name, verts, parent):
-    v = np.array(verts); root = v[: len(v) // 6].mean(0); tip = v[-len(v) // 6:].mean(0)
-    eb = arm.edit_bones.new(name); eb.head = B(root); eb.tail = B(root + (tip - root) * 0.6); eb.parent = parent; return eb
-def spine_at(x): return spine[int(np.clip(np.searchsorted(xs, x) - 1, 0, NB - 1))]
-for k, f in C['fins'].items():
-    v = np.array(f['V']); fin_bone('fin_' + k, f['V'], spine_at(v[:, 0].mean()))
-bpy.ops.object.mode_set(mode='OBJECT')
-names = [f'spine_{i:02d}' for i in range(NB)]; ctrs = (xs[:-1] + xs[1:]) / 2
-def bind(ob, weights_fn):
-    for n in names + ['fin_' + k for k in C['fins']]: ob.vertex_groups.new(name=n)
-    for v in ob.data.vertices:
-        p = v.co; x = p.x / S
-        for n, w in weights_fn(x, v.index):
-            if w > 1e-3: ob.vertex_groups[n].add([v.index], float(w), 'REPLACE')
-    md = ob.modifiers.new('rig', 'ARMATURE'); md.object = rig  # no object parenting: glTF wants skinned meshes at the root (validator NODE_SKINNED_MESH_NON_ROOT)
-def spine_w(x):
-    f = np.interp(x, ctrs, np.arange(NB)); i0 = int(np.floor(f)); a = f - i0
-    return [(names[i0], 1 - a)] + ([(names[i0 + 1], a)] if i0 + 1 < NB else [])
-bind(body, lambda x, i: spine_w(x))
+# ---------------------------------------------------------------- rig: spine chain, jaw, gill covers (creature_maker.rig), fin bones
+REC_PATH = sys.argv[sys.argv.index('--record') + 1] if '--record' in sys.argv else None
+if REC_PATH is None: raise SystemExit('glb needs --record RECORD.json (jaw, cover and swim come from the record)')
+REC = adapt(REC_PATH, C.get('style')); RAW = json.load(open(REC_PATH))
+BL = RIG.bones(C, V, REC); NB, xs = RIG.spine_stations(C)
+spine_at = lambda x: f'spine_{RIG.spine_index(C, x):02d}'
+rig = rigging.build_armature(scn, BL, C['fins'], B, spine_at)
+W_body, RIG_INFO = RIG.weights(C, V, REC)
+rigging.bind_groups(body, rig, W_body)
+def spine_groups(xv, share=1.0):
+    i0, a0, i1, a1 = RIG.spine_weights(C, np.atleast_1d(xv)); g = {}
+    for k in range(len(i0)):
+        for i, a in ((i0[k], a0[k]), (i1[k], a1[k])):
+            n = f'spine_{i:02d}'; g.setdefault(n, np.zeros(len(i0)))[k] += a * share
+    return g
 for k, ob in fin_obs.items():
-    nv = len(ob.data.vertices); M = len(np.array(C['fins'][k]['V']))
-    rows = None
-    def wf(x, i, k=k):
-        t = (i // max(1, (len(C['fins'][k]['UV']) and 1)))
-        v = np.array(C['fins'][k]['UV'][i]); return [(n, w * 0.4) for n, w in spine_w(x)] + [('fin_' + k, 0.6)]
-    bind(ob, wf)
-for ob in eye_obs: bind(ob, lambda x, i: [(names[0], 1.0)])
-# a gentle swim pose action so the export carries an animation (S-wave down the chain)
-act = bpy.data.actions.new('swim'); rig.animation_data_create(); rig.animation_data.action = act
-bpy.context.view_layer.objects.active = rig; bpy.ops.object.mode_set(mode='POSE')
-for fr in range(0, 25, 3):
-    for i, n in enumerate(names):
-        pb = rig.pose.bones[n]; pb.rotation_mode = 'XYZ'
-        amp = 0.03 + 0.11 * (i / (NB - 1)) ** 2
-        pb.rotation_euler = (0, 0, amp * math.sin(2 * math.pi * fr / 24 - i * 0.7)); pb.keyframe_insert('rotation_euler', frame=fr)
-bpy.ops.object.mode_set(mode='OBJECT'); scn.frame_set(0)
-for i, n in enumerate(names): rig.pose.bones[n].rotation_euler = (0, 0, 0)
+    # every fin vertex follows the spine at its own x, so median fins bend with the body; paired fins (pectoral, pelvic) hand over to
+    # their own root bone from root (T = 0) to edge (T = 1), where they are articulated; median fins give their bone no weight yet
+    # (fin ray bones are the next step: HARD_PROBLEMS EXP-FIN-1)
+    fv = np.array(C['fins'][k]['V']); T = np.clip(np.array(C['fins'][k]['T'], float), 0, 1)
+    share = T if k.startswith(('pectoral', 'pelvic')) else np.zeros(len(fv))
+    g = {n: w * (1 - share) for n, w in spine_groups(fv[:, 0]).items()}; g['fin_' + k + '_root'] = share
+    rigging.bind_groups(ob, rig, g)
+for ob in eye_obs:   # a rigid shell: the skin weights at the eye centre, for every shell vertex (eyes ride with the skin round them)
+    e = C['eyes'][0 if ob.name.endswith('L') == (C['eyes'][0]['side'] > 0) else 1]
+    g = {n: np.full(len(ob.data.vertices), float(w[0])) for n, w in spine_groups(np.array([e['c'][0]])).items()}
+    rigging.bind_groups(ob, rig, g)
+
+# ---------------------------------------------------------------- clips: swim engine (swim_loop, breathe_loop) + head hinges (gape, flare)
+CHK = {}
+_cp = os.path.join(OUT, 'checks.json')
+if os.path.exists(_cp):
+    _c = json.load(open(_cp)); CHK = dict(SR1_safe=_c.get('SR1_safe'))
+from creature_maker.pose import FLARE_REAL
+GAPE_REAL = float(REC.get('gape_deg', 30.0)); CHK['real_gape_deg'] = GAPE_REAL; CHK['real_flare_deg'] = FLARE_REAL
+SW = swim_clip.clips(C, V, RAW, BL, CHK)
+FPS = 120; scn.render.fps = FPS; scn.render.fps_base = 1.0
+chain = swim_clip.chain_names(NB); cmap = {chain[i]: f'spine_{i:02d}' for i in range(NB)}
+def timed(clip, fps):
+    return [(k / fps, P) for k, P in enumerate(rigging.engine_frames(rig, clip, cmap))]
+cmap_b = dict(opercleL='opercleL', opercleR='opercleR')   # breathe keys the covers only, so it layers over swim
+def timed_b(clip, fps):
+    return [(k / fps, P) for k, P in enumerate(rigging.engine_frames(rig, clip, cmap_b))]
+bspec = {b['name']: b for b in BL}
+def hinge(name):
+    b = bspec[name]; ax = B(b['axis']) / S; return (name, B(b['pivot']), ax)   # B scales by S: axis back to unit length
+JAW = [hinge('jaw')]; COVERS = [hinge('opercleL'), hinge('opercleR')]
+rigging.key_clip(rig, 'swim_loop', timed(SW['swim'], SW['swim_fps']), FPS)
+rigging.key_clip(rig, 'breathe_loop', timed_b(SW['breathe'], SW['breathe_fps']), FPS)
+rigging.key_clip(rig, 'gape', rigging.hinge_frames(rig, JAW, GAPE_REAL), FPS)
+rigging.key_clip(rig, 'flare', rigging.hinge_frames(rig, COVERS, FLARE_REAL), FPS)
+SW['extras']['clips']['gape']['peak_deg'] = GAPE_REAL; SW['extras']['clips']['flare']['peak_deg'] = FLARE_REAL
+SW['extras']['head_bones'] = {n: dict(pivot_m=[round(c, 6) for c in (B(bspec[n]['pivot']).x, B(bspec[n]['pivot']).z, -B(bspec[n]['pivot']).y)],
+                                      axis_gltf=[round(c, 6) for c in (hinge(n)[2].x, hinge(n)[2].z, -hinge(n)[2].y)],
+                                      opens='positive angle about axis_gltf (armature space, right hand)') for n in ('jaw', 'opercleL', 'opercleR')}
+json.dump(dict(SW['extras']), open(os.path.join(OUT, 'swim.json'), 'w'), indent=1, default=float)
+
+# EX1/EX2: Blender's skinning at the real gape / flare equals the stress test's pose (creature_maker.pose), vertex for vertex
+def posed_body(Ps):
+    for n, P in Ps.items():
+        b = rig.data.bones[n]; pb = rig.pose.bones[n]; pb.rotation_mode = 'QUATERNION'
+        Pp = b.parent.matrix_local; basis = (Pp.inverted() @ b.matrix_local).inverted() @ Pp.inverted() @ P
+        loc, q, _ = basis.decompose(); pb.rotation_quaternion = q; pb.location = loc
+    dg = bpy.context.evaluated_depsgraph_get(); ev = body.evaluated_get(dg).data
+    P = np.array([v.co[:] for v in ev.vertices]); 
+    for pb in rig.pose.bones: pb.location = (0, 0, 0); pb.rotation_quaternion = (1, 0, 0, 0)
+    return np.c_[P[:, 0], P[:, 2], -P[:, 1]] / S                          # Blender -> record units
+EXS = {}
+for tag, specs, deg, name in (('EX1_gape', JAW, GAPE_REAL, 'gape'), ('EX2_flare', COVERS, FLARE_REAL, 'flare')):
+    Pb = posed_body(rigging.hinge_pose(rig, specs, deg)); Ps = RIG.stress_pose(C, V, REC, name, deg)
+    EXS[tag + '_max_err_pctSL'] = round(float(np.abs(Pb - Ps).max()) * 100, 5); EXS[tag + '_moved_pctSL'] = round(float(np.abs(Ps - V).max()) * 100, 3)
+print('EX', EXS)
+
+# ---------------------------------------------------------------- collision: CoACD hulls of the form, each on its nearest spine bone
+Fm = np.load(os.path.join(OUT, 'form_mc.npz')); HUL = collision.hulls(Fm['V'], Fm['F'], xs)
+cov, vol = collision.coverage(np.asarray(Fm['V']), np.asarray(Fm['F']), HUL)
+col_obs = []
+for k, (hv, hf, bi) in enumerate(HUL):
+    me_ = bpy.data.meshes.new(f'col_{k:02d}'); me_.from_pydata([B(v) for v in hv], [], hf.tolist()); me_.update()
+    ob = bpy.data.objects.new(f'col_{k:02d}-convcolonly', me_); scn.collection.objects.link(ob)
+    ob.parent = rig; ob.parent_type = 'BONE'; ob.parent_bone = f'spine_{bi:02d}'
+    bpy.context.view_layer.update(); ob.matrix_world = Matrix.Identity(4); ob.hide_render = True
+    col_obs.append(ob)
+bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------- export
-glb = os.path.join(OUT, 'fish.glb')
 EXP = dict(export_format='GLB', export_animations=True, export_skins=True, export_tangents=True, export_image_format='AUTO',
-           export_vertex_color='ACTIVE')
-def _exp(path, **kw):
-    try: bpy.ops.export_scene.gltf(filepath=path, **EXP, **kw)
-    except TypeError:
-        e2 = dict(EXP); e2.pop('export_vertex_color'); bpy.ops.export_scene.gltf(filepath=path, **e2, **kw)
-_exp(glb)
-# LOD chain: collapse-decimate copies (seams kept by the exporter's split), eyes dropped at LOD2
-lods = {}
-for lod, ratio in ((1, 0.4), (2, 0.14)):
-    mods = []
-    for o in [body] + list(fin_obs.values()):
-        md = o.modifiers.new('lod', 'DECIMATE'); md.ratio = ratio if o is body else max(ratio * 1.6, 0.3)
-        md.use_collapse_triangulate = True
-        while o.modifiers[0].name != 'lod': bpy.ops.object.modifier_move_up({'object': o}, modifier='lod') if False else o.modifiers.move(o.modifiers.find('lod'), 0)
-        mods.append((o, md))
+           export_vertex_color='ACTIVE', export_animation_mode='NLA_TRACKS', export_force_sampling=True, export_extras=False,
+           export_optimize_animation_size=True, export_optimize_animation_keep_anim_armature=False)   # a clip carries only the bones it moves
+def _exp(path, objs, **kw):
     for o in scn.objects: o.select_set(False)
-    keep = [body, rig] + list(fin_obs.values()) + (eye_obs if lod == 1 else [])
-    for o in keep: o.select_set(True)
-    pth = os.path.join(OUT, f'fish_LOD{lod}.glb'); _exp(pth, use_selection=True, export_apply=True)
-    dg = bpy.context.evaluated_depsgraph_get(); t = 0
-    for o in keep:
-        if o.type == 'MESH': t += sum(len(p.vertices) - 2 for p in o.evaluated_get(dg).data.polygons)
-    lods[f'LOD{lod}'] = dict(tris=t, kb=round(os.path.getsize(pth) / 1024))
-    for o, md in mods: o.modifiers.remove(md)
-stats = dict(glb_kb=round(os.path.getsize(glb) / 1024), objects=len([o for o in scn.objects if o.type == 'MESH']))
-tris = 0
-for o in scn.objects:
-    if o.type == 'MESH': tris += sum(len(p.vertices) - 2 for p in o.data.polygons)
-stats['tris_total'] = tris; stats['normal_specks_fixed'] = SPECKS_FIXED; stats['bones'] = len(arm.bones); stats['lods'] = lods; stats['blender_bake_s'] = bake_s
-json.dump(stats, open(os.path.join(OUT, 'glb_stats.json'), 'w')); print('EXPORT', stats)
+    for o in objs: o.select_set(True)
+    try: bpy.ops.export_scene.gltf(filepath=path, use_selection=True, **EXP, **kw)
+    except TypeError:
+        e2 = dict(EXP); e2.pop('export_vertex_color'); bpy.ops.export_scene.gltf(filepath=path, use_selection=True, **e2, **kw)
+anim_x = {n: dict(loop=n.endswith('_loop')) for n in ('swim_loop', 'breathe_loop', 'gape', 'flare')}
+def tris_of(objs):
+    return sum(sum(len(p.vertices) - 2 for p in o.data.polygons) for o in objs if o.type == 'MESH' and not o.name.startswith('col_'))
+def finish(path, lod):
+    glbpatch.patch(path, node_extras={'rig': {'alien_ocean': dict(swim=SW['extras'], lod=lod, species=C['species'])}}, anim_extras=anim_x)
+glb = os.path.join(OUT, 'fish.glb'); LOD0 = [body, rig] + list(fin_obs.values()) + eye_obs + col_obs
+_exp(glb, LOD0); finish(glb, 0)
+# LOD chain: meshoptimizer on seam-split copies (blender/lods.py); eyes dropped at LOD2, collision only on LOD0
+lods = {}; lod_obs = {}; CREASES = set(v for r in C['rolls'] for v in r)
+# targets are budgets (P1: LOD1 <= 60 % of LOD0, LOD2 <= 1,000 tris), not fixed ratios: a fish with bigger traced fins or more cage
+# rows gets a lower ratio. Start from the usual ratio, then scale it down until the LOD is inside its budget with a 5 % margin.
+T0 = tris_of(LOD0)
+for lod, ratio, budget in ((1, 0.4, 0.57 * T0), (2, 0.14, 950)):
+    for attempt in range(4):
+        obs = []
+        for o in [body] + list(fin_obs.values()):
+            lo, nt = LODS.simplify(o, ratio if o is body else max(ratio * 1.6, 0.3 * min(1.0, ratio / 0.14)), f'{o.name}_LOD{lod}', lock=CREASES if (o is body and lod == 1) else ()); lo.hide_render = True; obs.append(lo)
+        got = tris_of(obs + (eye_obs if lod == 1 else []))
+        if got <= budget or attempt == 3: break
+        for lo in obs: bpy.data.objects.remove(lo, do_unlink=True)
+        ratio *= 0.97 * budget / got
+    keep = obs + [rig] + (eye_obs if lod == 1 else [])
+    pth = os.path.join(OUT, f'fish_LOD{lod}.glb'); _exp(pth, keep); finish(pth, lod)
+    lint = sum(1 for p in obs[0].data.polygons if p.material_index == INT_IDX)
+    lods[f'LOD{lod}'] = dict(tris=tris_of(keep), kb=round(os.path.getsize(pth) / 1024), interior_tris=lint); lod_obs[lod] = obs
+stats = dict(glb_kb=round(os.path.getsize(glb) / 1024), objects=len([o for o in LOD0 if o.type == 'MESH' and not o.name.startswith('col_')]))
+stats['tris_total'] = tris_of(LOD0); stats['normal_specks_fixed'] = SPECKS_FIXED; stats['bones'] = len(rig.data.bones); stats['lods'] = lods; stats['blender_bake_s'] = bake_s
+stats.update(INT_STATS); stats.update(RIG_INFO); stats.update(EXS)
+stats['clips'] = {n: dict(loop=v['loop']) for n, v in anim_x.items()}; stats['swim_loop_closure_BL'] = SW['loop_err']
+stats['collision'] = dict(hulls=len(HUL), coverage=round(cov, 4), hull_over_form_volume=round(vol, 3), verts=[len(h[0]) for h in HUL], bones=[f'spine_{h[2]:02d}' for h in HUL])
+json.dump(stats, open(os.path.join(OUT, 'glb_stats.json'), 'w'), default=float); print('EXPORT', stats)
+for o in sum(lod_obs.values(), []): o.hide_render = True; o.hide_viewport = True
 
 # ---------------------------------------------------------------- turnaround renders
 if '--views' in sys.argv or '--wire' in sys.argv or '--form' in sys.argv:
@@ -273,7 +352,7 @@ if '--views' in sys.argv or '--wire' in sys.argv or '--form' in sys.argv:
              'q_above': (-0.6, 0.7, 0.45), 'q_below': (-0.6, 0.7, -0.45)}
     def shoot(tag, only=None):
         for o in scn.objects:
-            if o.type == 'MESH': o.hide_render = (only is not None and o.name not in only)
+            if o.type == 'MESH': o.hide_render = o.name.startswith('col_') or '_LOD' in o.name or (only is not None and o.name not in only)
         for vn, d in VIEWS.items():
             if tag != 'view' and vn not in ('side_L', 'q_above', 'front', 'bottom'): continue
             d = Vector(d).normalized(); cam.location = ctr + d * D

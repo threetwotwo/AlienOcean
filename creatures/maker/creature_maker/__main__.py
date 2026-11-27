@@ -5,7 +5,11 @@
   check OUT RECORD.json [--planted] [--quick]                 cage + export checks -> OUT/checks.json (--quick: no SR1 sweep)
   board OUTROOT RECORD_DIR_OR_FILE... [--only a,b] [--style eye=1.4]   every record through build + cage checks -> board.json
   deviate OUTROOT RECORD_DIR_OR_FILE... [--only a,b]         bigger/smaller eyes, mouth, girth on every record -> deviate.json
-  glb OUT                                                     OUT -> OUT/<species>.glb (runs Blender's Python: bpy)
+  silboard OUTROOT RECORD_DIR_OR_FILE... [--only a,b]        SIL1 silhouettes only, fast: overlays + sheet.png worst first
+  sheet OUT RECORD.json                                       turnarounds: 8 angles x rest, real size, stylized (needs bpy)
+  glb OUT --record RECORD.json [--views]                      OUT -> fish.glb + LOD1/LOD2 (Blender's Python: bpy): interior slot, rig with
+                                                              jaw + gill covers, clips swim_loop/breathe_loop/gape/flare, swim extras, collision
+  ship OUT ENGINE_SPECIES_DIR [--lock ASSETS_LOCK]            copy fish*.glb to the engine folder and list them in assets.lock.json
 """
 import sys, os, subprocess
 
@@ -40,6 +44,20 @@ def main(argv):
         only = args[args.index('--only') + 1].split(',') if '--only' in args else ()
         srcs = [a for i, a in enumerate(args[1:], 1) if not a.startswith('--') and args[i - 1] != '--only']
         for n, v in sorted(run(args[0], srcs, only).items()): print(n, v)
+        return 0
+    if cmd == 'silboard':
+        from .silhouette import board
+        only = args[args.index('--only') + 1].split(',') if '--only' in args else ()
+        srcs = [a for i, a in enumerate(args[1:], 1) if not a.startswith('--') and args[i - 1] != '--only']
+        for n, v in sorted(board(args[0], srcs, only).items()): print(n, {k: v[k] for k in v if k != 'png'})
+        return 0
+    if cmd == 'sheet':
+        from .sheet import sheet
+        sheet(args[0], args[1]); return 0
+    if cmd == 'ship':
+        from .ship import ship
+        lock = args[args.index('--lock') + 1] if '--lock' in args else None
+        for r in ship(args[0], args[1], lock): print(r)
         return 0
     if cmd == 'glb':
         script = os.path.join(os.path.dirname(__file__), 'blender', 'export_glb.py')
