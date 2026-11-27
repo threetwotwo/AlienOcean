@@ -46,6 +46,7 @@ def plan(B):
 
 ECAP = 17          # slit edges per side: the cavity hole has one cell less, and at most 16 fit on one side of a cavity ring
 DTH_UP = 6         # columns above the leg that share its bend
+HW_MIN = 0.03      # DEFAULT: half-width (SL) under which a head has no room for the ventral lens (trumpetfish, needlefish)
 
 
 def plan_leg(B, ring_dx):
@@ -55,7 +56,12 @@ def plan_leg(B, ring_dx):
     if form.vedge is None: return
     i_g, jc, iK = g['i'], g['bot'], B.mouth.iK
     ia = max(iK + 2, int(np.searchsorted(XS, form.vedge['xa'])), i_g - (ECAP - g['nj']))
-    if i_g - ia < 2: return
+    while ia < i_g and form.HW(XS[ia:i_g + 1]).min() < HW_MIN: ia += 1      # a slender head has no room for the lens
+    # the leg must run forward past the cavity slot it drains into (its front row, estimated as mouth.build_cavity lays
+    # it); a leg cut short of it has its end fold back over its own lining (moorish idol, rabbitfish)
+    from .mouth import NC
+    x0 = float(B.mouth.LIP3[:, 0].mean()) + 0.007; x_slot = x0 + (max(B.rec['gill_u'] - 0.03, B.mouth.x_r + 0.05) - x0) * (NC - 3) / (NC - 1)
+    if i_g - ia < 2 or XS[ia] > x_slot: return
     g['ia'] = ia; g['ne'] = g['nj'] + i_g - ia
     D = np.zeros(T.NU)
     for i in range(ia, i_g + 1):          # angle where the loft is as wide as the V edge, seen from below
@@ -84,7 +90,8 @@ def holes(B, xrow, c_g):
     g = B.gill.info; NT = B.T.NT; out = {}
     if g is None: return out
     leg = g['ne'] - g['nj']; fit = 0
-    while leg and c_g - 1 - fit >= 2 and xrow[c_g - 1 - fit] >= B.rec['jaw_joint'][0]: fit += 1
+    x_ap = B.T.XS[g['ia']] if leg else 0.0           # and no further forward than the leg itself runs
+    while leg and c_g - 1 - fit >= 2 and xrow[c_g - 1 - fit] >= B.rec['jaw_joint'][0] and xrow[c_g - fit] >= x_ap: fit += 1
     n_col = min(fit, leg); n_ring = g['ne'] - 1 - n_col
     k0 = NT // 2 - 1 - n_ring if leg else int(np.clip(NT // 4 - n_ring // 2, 1, NT // 2 - 1 - n_ring))
     k1 = k0 + n_ring; c_a = c_g - n_col; assert k0 >= 1, (k0, g)
@@ -150,13 +157,19 @@ def build_slits(B):
             for k in range(1, TG + 1):
                 Q = allr[k]; Qn = 0.5 * Q + 0.5 * (0.25 * (np.roll(Q, 1, 0) + np.roll(Q, -1, 0)) + 0.25 * (allr[k - 1] + allr[k + 1]))
                 allr[k] = wp * D1 + (1 - wp) * Qn if k == 1 else Qn
-        for k in range(1, TG + 1):
-            Q = allr[k]; Q[:, 2] = sg * np.maximum(sg * Q[:, 2], 0.0008)      # each passage on its own side (keeled bellies)
-            for _ in range(40):      # and inside the body
-                bad = form.sd_body(Q) > -0.0015
-                if not bad.any(): break
-                Q[bad] -= grad(form.sd_body, Q[bad]) * 0.0005
-            rows.append([mesh.add_v(p, np.nan, np.nan) for p in Q])
+        for k in range(1, TG + 1): allr[k][:, 2] = sg * np.maximum(sg * allr[k][:, 2], 0.0008)    # each passage on its own side (keeled bellies)
+        for _ in range(60):          # and inside the body: vertices, and edge midpoints too (a throat that curves in)
+            ok = True
+            for k in range(1, TG + 1):
+                Q = allr[k]
+                for T_, also in ((Q, 0), (0.5 * (Q + np.roll(Q, -1, 0)), -1), (0.5 * (Q + allr[k + 1]), 0)) + (((0.5 * (Q + allr[k - 1]), 0),) if k > 1 else ()):
+                    bad = form.sd_body(T_) > -0.0015
+                    if not bad.any(): continue
+                    ok = False; step = np.zeros_like(Q); step[bad] = grad(form.sd_body, T_[bad]) * 0.0005
+                    Q -= step + (np.roll(step, -also, 0) if also else 0)
+            if ok: break
+        for k in range(1, TG + 1): rows.append([mesh.add_v(p, np.nan, np.nan) for p in allr[k]])
         rows.append(H_loop)
         for a, b in zip(rows[:-1], rows[1:]): mesh.band(a, b, 'gill')
-        SLITS.append(dict(side=sg, A=list(Amap.values()), B=list(Amap.keys()), loop=S_loop, rows=rows, hole=H_loop))
+        turn = [rows[1][m] for m in range(nA + 1) if wp[m, 0] > 0]         # where the flap lining turns back: a designed hairpin
+        SLITS.append(dict(side=sg, A=list(Amap.values()), B=list(Amap.keys()), loop=S_loop, rows=rows, hole=H_loop, turn=turn))

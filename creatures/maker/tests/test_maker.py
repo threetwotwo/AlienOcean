@@ -38,6 +38,10 @@ def test_ventral_vs_from_the_record():
     e = form.vedge; xm = 0.5 * (e['xa'] + e['xc']); zm = float(form.vedge_z(xm)); y = float(form.BOT(xm)) + 0.004
     d_in, d_out = (float(form.sd_full(np.array([[xm, y, z]]))[0] - form.sd_body(np.array([[xm, y, z]]))[0]) for z in (zm - 0.004, zm + 0.004))
     assert d_out < d_in - 1e-4                                                      # the membrane stands proud outside the V edge only
+    # the proof record's slit is 14 columns long, so the 17-edge cap leaves no leg that reaches the cavity slot; a cover
+    # with a lower top (as most records have) gets the leg
+    assert build_cage(form, Chart(form), rec).gill.info['ia'] is None
+    rec['cover']['rear'] = rec['cover']['rear'][len(rec['cover']['rear']) // 2:]; form = Form(rec)
     B = build_cage(form, Chart(form), rec); g = B.gill.info
     assert g['ia'] is not None and g['ne'] == g['nj'] + g['i'] - g['ia'] <= 17
     for s in B.gill.slits:

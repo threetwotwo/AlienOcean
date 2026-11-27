@@ -77,7 +77,7 @@ class Form:
         self.VPLATES = self.ventral_plates(rec)
 
     def ventral_plates(self, rec):
-        """plates seen from below: (name, outline in the bottom view (x, |z|), thickness, free edge segment or None, fade,
+        """plates seen from below: (name, outline in the bottom view (x, |z|), thickness, free edge (front x, |z| at x) or None, fade,
         side-view line the plate stays under, provenance). Sets self.vedge, the gill V's free edge (None: no V)."""
         CV, MO = self.CV, self.MO; out = []; xj, yj = rec['jaw_joint']; on = lambda x, y: 0.92 * float(self.z_on(x, y))
         # lower jaw: each ramus lies between the dentary line (outer) and the mandible's lower edge (inner); the two meet
@@ -100,18 +100,19 @@ class Form:
         if zc <= float(self.HW(xc)) * np.cos(np.radians(CV.get('membrane_top_deg', 25))) and xa < xc - 0.03:
             za = max(float(self.HW(xa)) * np.sin(np.radians(CV.get('isthmus_deg', 20))), self.isthmus_z(xa))
             if za < zc:
-                self.vedge = dict(xa=xa, za=za, xc=xc, zc=zc)
+                self.vedge = dict(xa=xa, za=za, xc=xc, zc=zc, fa=za / float(self.HW(xa)), fc=zc / float(self.HW(xc)))
                 px, py = self.preop[int(np.argmin([p[0] for p in self.preop]))]          # under the opercle plate's lower side
                 self.vunder = [[float(min(px, xc - 1e-3)), float(py)], [float(xc), float(yc)]]
                 under = lambda x: np.minimum(np.interp(x, *zip(*self.vunder)), self.sec(np.clip(x, 0, self.XEND))[0])
-                out.append(('branchiostegal', [[xa, za], [xc, zc], [xc, 1.0], [xa, 1.0]], CV['step'], ((xa, za), (xc, zc)), 0.05, under,
+                poly = [[float(x), float(self.vedge_z(x))] for x in np.linspace(xa, xc, 16)] + [[xc, 1.0], [xa, 1.0]]
+                out.append(('branchiostegal', poly, CV['step'], (xa, self.vedge_z), 0.05, under,
                             'interopercle + branchiostegal membrane: cover corner to the isthmus at the interopercle front; angles from branchiostegals th0, dth, n'))
         return out
 
     def isthmus_th(self, x, room=0.012):
         """the angle nearest the ventral midline that still leaves `room` (SL) of skin to it: on a keeled belly a small |z|
         lies almost on the keel, and the two openings would meet."""
-        mid = self.loft_point(np.array(x), np.array(np.pi)); lo, hi = np.pi / 2, np.pi
+        mid = self.loft_point(np.array(x), np.array(np.pi)); lo, hi = np.pi / 2, np.pi; room = min(room, 0.5 * float(self.HW(x)))
         for _ in range(30):
             m = 0.5 * (lo + hi); lo, hi = (m, hi) if np.linalg.norm(self.loft_point(np.array(x), np.array(m)) - mid) > room else (lo, m)
         return lo
@@ -120,8 +121,11 @@ class Form:
         return float(self.loft_point(np.array(x), np.array(self.isthmus_th(x)))[2])
 
     def vedge_z(self, x):
-        """|z| of the gill V's free edge at x, seen from below."""
-        e = self.vedge; return e['za'] + (e['zc'] - e['za']) * (np.asarray(x) - e['xa']) / (e['xc'] - e['xa'])
+        """|z| of the gill V's free edge at x, seen from below: a share of the head's half-width that falls evenly from the
+        corner to the isthmus. On an evenly tapering head that is a straight V; a straight line in z left the body where a
+        tube snout necks in (trumpetfish)."""
+        e = self.vedge; s_ = np.clip((np.asarray(x, float) - e['xa']) / (e['xc'] - e['xa']), 0, 1.2)
+        return self.HW(np.clip(x, 0, self.XEND)) * (e['fa'] + (e['fc'] - e['fa']) * s_)
 
     # ---- level 0: the loft
     def TOP(self, x):
@@ -188,11 +192,8 @@ class Form:
         az = np.abs(z)
         for k, (name, poly, t0, free, fade, under, _) in enumerate(self.VPLATES):
             t = t0
-            if free is not None:      # full thickness at the free edge, thinning away from it (seen from below)
-                (x0, z0), (x1, z1) = free; ex_, ez_ = x1 - x0, z1 - z0
-                s_ = np.clip(((x - x0) * ex_ + (az - z0) * ez_) / (ex_ ** 2 + ez_ ** 2), 0, 1)
-                t = t0 * np.clip(1 - np.hypot(x - x0 - s_ * ex_, az - z0 - s_ * ez_) / fade, 0.15, 1)
-                t = t * np.clip((x - x0) / (0.6 * fade), 0, 1)        # and runs out at the edge's front end (the isthmus)
+            if free is not None:      # full thickness at the free edge, thinning away from it and running out at its front end
+                x0, ez = free; t = t0 * np.clip(1 - np.abs(az - ez(x)) / fade, 0.15, 1) * np.clip((x - x0) / (0.6 * fade), 0, 1)
             plate = np.maximum(np.maximum(d0 - t, -d0 - 0.004), np.maximum(poly_sd2(x, az, poly), y - under(x)))
             nd = smin(d, plate, 0.0006)
             ids = np.where(nd < d - 1e-5, len(self.PLATES) + k + 1, ids); d = nd

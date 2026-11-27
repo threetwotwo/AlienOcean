@@ -49,7 +49,7 @@ def write(B, uvr, fins, eyes, rec, form, map_prov, out, stats):
                     mouth_rows=[list(map(int, r)) for r in M.MROWS], eye_rings=B.eye['rings'],
                     cavity_rows=[list(map(int, r)) for r in M.CROWS + M.DOME] + [[int(M.gut)]],
                     gill_flaps=[list(map(int, s['A'])) for s in G.slits], gill_rows=[[list(map(int, r)) for r in s['rows']] for s in G.slits], jaw_joint=rec['jaw_joint'], opercle_hinge=rec['opercle_hinge'],
-                    gill_v=dict(form.vedge, under=form.vunder, apex=G.apex) if G.apex else None)   # the built gill V: pose.cover_weights, pose.flare
+                    gill_v=dict(edge=[[float(x), float(form.vedge_z(x))] for x in np.linspace(form.vedge['xa'], form.vedge['xc'], 16)], under=form.vunder, apex=G.apex) if G.apex else None)   # the built gill V: pose.cover_weights, pose.flare
     json.dump(dict(faces=[list(map(int, f)) for f in mesh.faces], ftag=mesh.ftag, uv=[u.tolist() for u in uvr['face_uv']],
                    fins={k: dict(V=v['V'].tolist(), F=v['F'], UV=v['UV'].tolist(), T=v['T']) for k, v in fins.items()},
                    s_uv=float(uvr['s_uv']), rolls=B.rolls(), junctions=B.junctions(), commissures=B.commissures, openings=openings,

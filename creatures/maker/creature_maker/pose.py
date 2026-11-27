@@ -75,8 +75,8 @@ def cover_weights(C, V, rec):
     w = inside * smooth((x - xp(y) + 0.01) / 0.02) * smooth((np.abs(V[:, 2]) - 0.25 * hw) / (0.35 * hw))
     gv = O.get('gill_v'); memb = np.zeros(len(V), bool)
     if gv:      # the branchiostegal membrane opens with the cover: the skin outside the V edge, under the opercle's lower side
-        ez = gv['za'] + (gv['zc'] - gv['za']) * (x - gv['xa']) / (gv['xc'] - gv['xa'])
-        memb = (x > gv['xa']) & (x < gv['xc'] + 1e-4) & (y < np.interp(x, *zip(*gv['under']))) & (np.abs(V[:, 2]) > ez)
+        ex, ez = zip(*gv['edge'])
+        memb = (x > ex[0]) & (x < ex[-1] + 1e-4) & (y < np.interp(x, *zip(*gv['under']))) & (np.abs(V[:, 2]) > np.interp(x, ex, ez))
         w = np.maximum(w, memb * 1.0)
     flaps = set(v for s in O['gill_flaps'] for v in s)
     skin = set(v for f, t in zip(C['faces'], C['ftag']) if t in ('body',) for v in f)
