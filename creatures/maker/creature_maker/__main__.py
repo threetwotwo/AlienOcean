@@ -5,6 +5,7 @@
   check OUT RECORD.json [--planted] [--quick]                 cage + export checks -> OUT/checks.json (--quick: no SR1 sweep)
   board OUTROOT RECORD_DIR_OR_FILE... [--only a,b] [--style eye=1.4]   every record through build + cage checks -> board.json
   deviate OUTROOT RECORD_DIR_OR_FILE... [--only a,b]         bigger/smaller eyes, mouth, girth on every record -> deviate.json
+  silboard OUTROOT RECORD_DIR_OR_FILE... [--only a,b]        SIL1 silhouettes only, fast: overlays + sheet.png worst first
   sheet OUT RECORD.json                                       turnarounds: 8 angles x rest, real size, stylized (needs bpy)
   glb OUT                                                     OUT -> OUT/<species>.glb (runs Blender's Python: bpy)
 """
@@ -41,6 +42,12 @@ def main(argv):
         only = args[args.index('--only') + 1].split(',') if '--only' in args else ()
         srcs = [a for i, a in enumerate(args[1:], 1) if not a.startswith('--') and args[i - 1] != '--only']
         for n, v in sorted(run(args[0], srcs, only).items()): print(n, v)
+        return 0
+    if cmd == 'silboard':
+        from .silhouette import board
+        only = args[args.index('--only') + 1].split(',') if '--only' in args else ()
+        srcs = [a for i, a in enumerate(args[1:], 1) if not a.startswith('--') and args[i - 1] != '--only']
+        for n, v in sorted(board(args[0], srcs, only).items()): print(n, {k: v[k] for k in v if k != 'png'})
         return 0
     if cmd == 'sheet':
         from .sheet import sheet
