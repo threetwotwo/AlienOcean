@@ -45,9 +45,9 @@ as a comment that says why.
 |---|---|---|
 | `template.py` | 50 rings x 36 columns evaluated on the loft; tail-root pole | denser rings at the head |
 | `eye.py` | eye hole in the template filled with 4 rings to the rim, then a tuck ring into the orbit | block = the columns within the eye margin of the rim plus one each side; rings laid out in the loft (x, theta) plane with radial spokes (border vertex to the rim point at its own angle), spaced by length on the skin; rim on the record eye circle (EY1); tuck goes down the socket axis, depth scaled to the eye and kept on its own side |
-| `mouth.py` | lip loop on the record mouth line, loops out to the shared head ring, lip roll, oval cavity, domed pharynx | snout chart (no snout pole); corner fan at the rictus; shared head ring bends round the eye (same eye margin as the eye block, measured on the skin; eye and lip margins shrink together, the ring never enters the eye); lip roll turns forward at the corners |
+| `mouth.py` | lip loop on the record mouth line, loops out to the shared head ring, lip roll, mouth lining, oval cavity, domed pharynx | snout chart (no snout pole); corner fan at the rictus, its spoke laid between the first loop's two neighbours of the corner; shared head ring bends round the eye (same eye margin as the eye block, measured on the skin; eye and lip margins shrink together, the ring never enters the eye); each lip column's lining runs straight in to its own point on the first oval behind the rictus (upper lip to the roof arc, lower lip to the floor arc, straight in the loft's section coordinates), so the corner column is a hinge line |
 | `gill.py` | one ring bent onto the cover edge and cut into a slit (flap over body lip), flat passage to a hole in the cavity wall | passage loops match the hole loop |
-| `finish.py` | one winding over skin and interior; snap onto the full form | rims, linings and the first lip loop follow their neighbours' snap |
+| `finish.py` | one winding over skin and interior; snap onto the full form | rims, linings and the first lip loop follow their neighbours' snap; the snap ignores the form's mouth cleft; quads at a slit corner are split from the corner vertex |
 | `../mesh.py` | the mesh under construction, `relax_rings` | rings slide, never shrink across a corner |
 
 Designed creases are registered where they are made (`rolls`, `junctions`, `commissures` in `cage.json`), so the fold
@@ -63,8 +63,10 @@ gape, flare, body C-bend, S-wave, arch and all of them at once are each swept un
 (neighbours turning past 90 deg) or crush (a skin triangle under 10 % of its rest area). The target is what the species
 can really do, times 1.3: the record gape (capped at 65 deg); for the body, the muscle strain limit (the inside of a bend
 shortens by curvature x half-width, at most 30 %); combo is all of them at once at real size. A pose under 10 deg is not
-one the body makes and is skipped (no S-wave for a puffer). Pose weights are the cage's structural rules softened by neighbour averaging, with lips, eyes, gill lips and the throat
-midline held, so a large pose does not fold the skin where two rules meet. Export: P1 triangle budget and LODs, P6 normal map
+one the body makes and is skipped (no S-wave for a puffer). The jaw weight is one field in the side view, the same for the skin and the lining under it: the lips blend to 1/2 toward
+the rictus over the length the corner must stretch (gape x rictus-to-joint distance), a lens-shaped blend joins rictus and
+joint, and the jaw fades out by angle about the joint. The cover weights are the cage's structural rules softened by
+neighbour averaging, with lips, eyes, gill lips and the throat midline held. Export: P1 triangle budget and LODs, P6 normal map
 carries the form, P7 bones, P8 Khronos glTF validator. Each check has a planted fault in `checks.planted`.
 
 ## Art direction
