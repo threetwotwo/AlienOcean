@@ -7,7 +7,7 @@
 ## Still to port: the sky (drawn sun, moons, stars), the surface's waves and mirror detail, the sand maps, god rays.
 extends SceneTree
 
-const WATER_Y := 4.0          # the Unreal lagoon's saved surface: MPC_Ocean SurfaceZ 400 cm over the world origin (tide 0)
+const WATER_Y := LagoonWaterField.SURFACE_Y   # the Unreal lagoon's saved surface: SurfaceZ 400 cm (tide 0)
 var args: PackedStringArray
 var shots := []               # [name, cam pos, look target, fov]
 var cam: Camera3D
