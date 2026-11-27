@@ -32,12 +32,12 @@ func _setup():
 	var scene: Node = doc.generate_scene(st)
 	root3d = Node3D.new(); root.add_child(root3d); root3d.add_child(scene)
 	var env := WorldEnvironment.new(); var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR; e.background_color = Color(0.82, 0.86, 0.88)
+	e.background_mode = Environment.BG_COLOR; e.background_color = Color(0.82, 0.86, 0.88); e.background_intensity = 1.2   # nits under physical light units
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR; e.ambient_light_color = Color(0.7, 0.75, 0.8); e.ambient_light_energy = 0.5
 	e.ssao_enabled = true; e.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.environment = e; root3d.add_child(env)
-	var key := DirectionalLight3D.new(); key.rotation_degrees = Vector3(-50, 30, 0); key.light_energy = 1.6; root3d.add_child(key)
-	var fill := DirectionalLight3D.new(); fill.rotation_degrees = Vector3(40, -150, 0); fill.light_energy = 0.4; root3d.add_child(fill)
+	var key := DirectionalLight3D.new(); key.rotation_degrees = Vector3(-50, 30, 0); key.light_energy = 1.6; key.light_intensity_lux = PI * 1.2; root3d.add_child(key)   # physical light units: PI x 1.2 lux = the old energy unit at EV 0
+	var fill := DirectionalLight3D.new(); fill.rotation_degrees = Vector3(40, -150, 0); fill.light_energy = 0.4; fill.light_intensity_lux = PI * 1.2; root3d.add_child(fill)
 	# report + bounds
 	var aabb := AABB(); var first := true; var tris := 0; var meshes := 0; var color := false; var joints := 0
 	for n in _all(scene):
