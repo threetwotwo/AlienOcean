@@ -44,8 +44,8 @@ as a comment that says why.
 | Module | Feature | Key rules |
 |---|---|---|
 | `template.py` | 50 rings x 36 columns evaluated on the loft; tail-root pole | denser rings at the head |
-| `eye.py` | eye hole in the template filled with 4 rings to the rim, then a tuck ring into the orbit | laid out on the chart; rim on the record eye circle (EY1); rim matched to the border by arc length |
-| `mouth.py` | lip loop on the record mouth line, loops out to the shared head ring, lip roll, oval cavity, domed pharynx | snout chart (no snout pole); corner fan at the rictus; shared head ring bends round the eye; lip roll turns forward at the corners |
+| `eye.py` | eye hole in the template filled with 4 rings to the rim, then a tuck ring into the orbit | block = the columns within the eye margin of the rim plus one each side; rings laid out in the loft (x, theta) plane with radial spokes (border vertex to the rim point at its own angle), spaced by length on the skin; rim on the record eye circle (EY1); tuck goes down the socket axis, depth scaled to the eye and kept on its own side |
+| `mouth.py` | lip loop on the record mouth line, loops out to the shared head ring, lip roll, oval cavity, domed pharynx | snout chart (no snout pole); corner fan at the rictus; shared head ring bends round the eye (same eye margin as the eye block, measured on the skin; eye and lip margins shrink together, the ring never enters the eye); lip roll turns forward at the corners |
 | `gill.py` | one ring bent onto the cover edge and cut into a slit (flap over body lip), flat passage to a hole in the cavity wall | passage loops match the hole loop |
 | `finish.py` | one winding over skin and interior; snap onto the full form | rims, linings and the first lip loop follow their neighbours' snap |
 | `../mesh.py` | the mesh under construction, `relax_rings` | rings slide, never shrink across a corner |
