@@ -332,9 +332,16 @@ func _push_sky(st: Dictionary) -> void:
 	mat.set_shader_parameter("moon_b_deg", SkyClock.MOONS[1].drawn_deg)
 	mat.set_shader_parameter("moon_a_albedo", SkyClock.MOON_LOOK.albedo_A)
 	mat.set_shader_parameter("moon_b_albedo", SkyClock.MOON_LOOK.albedo_B)
-	var ka := SkyClock.kelvin_rgb(SkyClock.MOONS[0].kelvin); var kb := SkyClock.kelvin_rgb(SkyClock.MOONS[1].kelvin)
-	mat.set_shader_parameter("moon_a_tint", Vector3(ka.r, ka.g, ka.b))
-	mat.set_shader_parameter("moon_b_tint", Vector3(kb.r, kb.g, kb.b))
+	mat.set_shader_parameter("moon_a_kelvin", SkyClock.MOONS[0].kelvin)
+	mat.set_shader_parameter("moon_b_kelvin", SkyClock.MOONS[1].kelvin)
+	for n in ["A", "B"]:   # MI_MoonA/B MoonTint: MOON_TINTS mixed by moon_tint_mix around luminance 1 (v83)
+		var mt: Color = SkyClock.MOON_TINTS[n]; var tmix: float = SkyClock.MOON_LOOK.moon_tint_mix
+		var ty := 0.2126 * mt.r + 0.7152 * mt.g + 0.0722 * mt.b
+		mat.set_shader_parameter("moon_%s_night" % n.to_lower(), Vector3(1.0 + tmix * (mt.r / ty - 1.0),
+			1.0 + tmix * (mt.g / ty - 1.0), 1.0 + tmix * (mt.b / ty - 1.0)))
+	mat.set_shader_parameter("moon_cap", SkyClock.MOON_LOOK.moon_cap)
+	mat.set_shader_parameter("moon_blue", SkyClock.MOON_LOOK.moon_blue)
+	mat.set_shader_parameter("moon_sat", SkyClock.MOON_LOOK.moon_sat)
 	mat.set_shader_parameter("maria", SkyClock.MOON_LOOK.maria)
 	mat.set_shader_parameter("planetshine", SkyClock.MOON_LOOK.planetshine)
 	mat.set_shader_parameter("moon_edge", SkyClock.MOON_LOOK.moon_edge)
