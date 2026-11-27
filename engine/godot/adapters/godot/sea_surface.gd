@@ -29,6 +29,7 @@ func _init() -> void:
 	under_mat.next_pass = top_mat
 	mesh_instance.material_override = under_mat
 	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mesh_instance.gi_mode = GeometryInstance3D.GI_MODE_DISABLED   # the sea is a light boundary, not a solid: never in SDFGI
 	# the vertex shader moves the rings to the camera: never cull them
 	mesh_instance.custom_aabb = AABB(Vector3(-1e5, -1e3, -1e5), Vector3(2e5, 2e3, 2e5))
 	mesh_instance.layers = 1 << (SeaFloorMap.SEA_LAYER - 1)   # never in the floor map's captures

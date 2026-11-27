@@ -7,7 +7,6 @@ render_mode blend_mix, cull_back, diffuse_lambert, specular_disabled;
 #include "res://look/world_surface.gdshaderinc"
 #include "res://look/water_physics.gdshaderinc"
 #include "res://look/caustics.gdshaderinc"
-global uniform float water_zref;
 
 uniform sampler2D rBC : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
 uniform sampler2D rN : repeat_enable, filter_linear_mipmap_anisotropic;
