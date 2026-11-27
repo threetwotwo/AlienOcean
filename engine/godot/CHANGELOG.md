@@ -1,6 +1,17 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
 ## 0.6.0-dev (27 Nov 2026), slice setup, not yet in a git repo
+- Engine: ported Unreal systems, round 1 (Gary 27 Nov 15:13Z "port working Unreal systems to Godot").
+  M30 world clock 0.1.0 (`core/m30_world_clock/sky_clock.gd`): the Unreal sky clock's maths (sun_v184) as is: G2V sun twin,
+  128 klx above the air, 78 deg noon, moons A and B (size, albedo, colour, phases, orbits), eclipses, twilight table, key-light
+  pick and hand-over fade. `tests/test_world_clock.gd` matches the old Python at 42 points (light 1e-5, angles 1e-4 deg). PASS.
+  Clock adapter 0.1.0 (`adapters/godot/sky_clock_driver.gd`): key light lux and colour, EV100 exposure (steady under-water eye
+  14.75 at noon, as Unreal's 14.6-14.9), calm lagoon +1.2 compensation. Physical light units on project-wide.
+  Lagoon water optics 0.1.0 (`look/water_optics.gd`, `look/water_physics.gdshaderinc`): the Unreal lagoon's water physics
+  (under_model / PHYS_CODE / UNDER_PHYS) with Gary's look set Cdom 0.03, ScatK 0.40, GlowK 2.50, as global shader uniforms.
+  Seabed 0.2.0 lit through the water; underwater view 0.1.0 (path glow + absorption per band); surface 0.2.0 (window + mirror).
+  Lagoon look 0.2.0: surface at 4 m (Unreal's SurfaceZ 400 cm). Measured: far water L* 59 (Unreal model 58-59), near sand
+  L* 68-70 (Unreal key 74-76: sand albedo and sand bounce not ported yet).
 - Gameplay: M01 input 0.1.0 (16/16): bindings as data, Create and PS buttons never bound, glyph names per platform and live
   swap, remap refused onto system or taken buttons, remap survives save/reload, controller loss pauses with neutral input.
   Root fix found by the test: InputMap's per-action deadzone stacked with the core's radial deadzone (half-speed small stick);

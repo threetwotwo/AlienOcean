@@ -8,6 +8,7 @@ window/size/viewport_width=960
 window/size/viewport_height=540
 [rendering]
 renderer/rendering_method="forward_plus"
+lights_and_shadows/use_physical_light_units=true
 [physics]
 3d/physics_engine="Jolt Physics"
 common/physics_ticks_per_second=60

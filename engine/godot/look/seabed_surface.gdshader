@@ -1,14 +1,25 @@
-// Seabed surface 0.1.0 (engine thread). For static world pieces whose COLOR_0 is paint (lagoon floor, rocks, corals, grass).
-// Adds sun caustics in world space (two drifting cell layers, min-combined, sharpened) where the sun reaches the surface.
-// Depth colour and distance murk come from the volumetric fog, not from here.
+// Seabed surface 0.2.0 (engine thread). Static world pieces whose COLOR_0 is paint (floor, rocks, corals, grass).
+// Lit by the ported lagoon water physics (look/water_optics.gd globals): the sun's beam loses exp(-Kd z) on its
+// way down (the key light arrives pre-attenuated to water_zref; this corrects to the pixel's own depth), the
+// sky's diffuse light exp(-Ku z) from above, and the sand's upwelling from below, as in under_model.py.
+// Caustics modulate the sun's beam only (as the Unreal light function did), mean ~1.
 shader_type spatial;
-render_mode blend_mix, cull_back, diffuse_burley, specular_schlick_ggx;
+render_mode blend_mix, cull_back, diffuse_lambert, specular_disabled, ambient_light_disabled;
+
+global uniform float water_y;
+global uniform float water_floor_y;
+global uniform vec3 water_kd;
+global uniform vec3 water_ku;
+global uniform vec3 water_sun_w;
+global uniform float water_es0;
+global uniform float water_ek0;
+global uniform float water_zref;
+global uniform vec4 water_sand;
 
 uniform float roughness_base : hint_range(0.0, 1.0) = 0.92;
-uniform float caustic_strength : hint_range(0.0, 4.0) = 1.4;
+uniform float caustic_strength : hint_range(0.0, 2.0) = 1.0;
 uniform float caustic_scale = 0.55;      // cells per metre
 uniform float caustic_speed = 0.35;
-uniform vec3 sun_dir_world = vec3(0.3, -0.9, 0.2);
 varying vec3 wpos;
 varying vec3 wnorm;
 
@@ -29,12 +40,22 @@ void vertex() {
 void fragment() {
 	ALBEDO = COLOR.rgb;
 	ROUGHNESS = roughness_base;
-	// caustics: project along the sun direction onto the horizontal plane
-	vec3 L = normalize(-sun_dir_world);
-	vec2 p = (wpos.xz - wpos.y * L.xz / max(L.y, 0.2)) * caustic_scale;
+	float z = max(water_y - wpos.y, 0.0);
+	float H = max(water_y - water_floor_y, 0.05);
+	vec3 ek = water_ek0 * exp(-water_ku * z);
+	vec3 eh = water_es0 * exp(-water_kd * H) + water_ek0 * exp(-water_ku * H);
+	vec3 eu = eh * water_sand.rgb * exp(-water_ku * max(H - z, 0.0));
+	float up = 0.5 + 0.5 * wnorm.y;
+	EMISSION = ALBEDO * (ek * up + eu * (1.0 - up)) / PI;   // nits; Godot applies the exposure
+}
+void light() {
+	float z = max(water_y - wpos.y, 0.0);
+	vec3 corr = exp(-water_kd * (z - water_zref));
+	vec3 L = water_sun_w;
+	vec2 p = (wpos.xz + z * L.xz / max(L.y, 0.2)) * caustic_scale;
 	float t = TIME * caustic_speed;
 	float c = min(cells(p, t), cells(p * 1.37 + 3.1, -t * 1.13));
 	c = pow(1.0 - smoothstep(0.0, 0.55, c), 3.0);
-	float facing = clamp(dot(wnorm, L), 0.0, 1.0);
-	EMISSION = COLOR.rgb * c * caustic_strength * facing * 0.6;
+	float caus = mix(1.0, 0.55 + 2.6 * c, caustic_strength);   // c averages ~0.17: mean stays ~1
+	DIFFUSE_LIGHT += clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * ATTENUATION * LIGHT_COLOR / PI * corr * caus;
 }
