@@ -261,7 +261,12 @@ def check(out, record_path, with_planted=False, sweep=True):
     stp = os.path.join(out, 'glb_stats.json')
     if os.path.exists(stp): R.update(export_checks(out, json.load(open(stp))))
     R['P9_form_cage_s'] = round(C['stats']['build_s'] - C['stats']['bake_s'], 1); R['P9_pass'] = R['P9_form_cage_s'] < 60
-    if with_planted: R['PLANTED_caught'] = planted(C, Z['V'], Z['VN'], form, rec)
+    from .silhouette import silhouette_check
+    R.update(silhouette_check(C, Z['V'], rec, record_path))      # SIL1: silhouette before detail
+    if with_planted:
+        R['PLANTED_caught'] = planted(C, Z['V'], Z['VN'], form, rec)
+        from .silhouette import planted_sil
+        R['PLANTED_caught'].update(planted_sil(C, Z['V'], rec))
     J = lambda o: bool(o) if isinstance(o, np.bool_) else (float(o) if isinstance(o, np.generic) else str(o))
     json.dump(R, open(os.path.join(out, 'checks.json'), 'w'), indent=1, default=J)
     return R
