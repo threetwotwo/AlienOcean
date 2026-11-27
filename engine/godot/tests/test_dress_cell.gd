@@ -31,7 +31,7 @@ func _init():
 	_write("t_LG_seagrass", {"t_LG_seagrass": _box_mesh(Vector3(2, 0.3, 2), Vector3(5, 2.4, 0))})   # a tile far from its origin, 2.25 m up (as slice v24)
 	var man := {"name": "t", "anchor": {"x": 10.0, "z": -4.0, "yaw_deg": 90.0}, "items": [
 		{"p": "t_rock", "at": [0.0, 3.0, 0.0], "rot": 0.0}, {"p": "t_LG_seagrass", "at": [0.0, 0.0, 0.0], "keep": 1}],
-		"keep_clear": [{"what": "school", "at": [0.0, 3.0, 2.5], "size": [0.5, 0.5, 0.4]}], "cams": {}}
+		"keep_clear": [{"what": "school", "at": [0.0, 3.0, 2.5], "size": [0.5, 0.5, 0.4]}], "cams": {"k": {"at": [0.0, -2.0, 1.05], "look": [0.0, 3.0, 0.58], "vfov": 44}}}
 	var f := FileAccess.open(DIR + "/t.json", FileAccess.WRITE); f.store_string(JSON.stringify(man)); f.close()
 	process_frame.connect(_run, CONNECT_ONE_SHOT)
 
@@ -50,6 +50,8 @@ func _run():
 	check("D2 all seated", rep.seated == 2 and rep.no_ground == 0, str(rep))
 	check("D2 rock base on ground", absf(rock.global_position.y - (-0.3)) < 0.001, str(rock.global_position.y))
 	check("D2 grass roots 1.5 cm in", absf(d._aabb_world(grass).position.y - (-0.315)) < 0.002, str(d._aabb_world(grass).position.y))
+	var kc: Array = d.cam("k")
+	check("D5 camera over the sand", absf(kc[0].y - (-0.3 + 1.05)) < 0.001 and absf(kc[1].y - (-0.3 + 0.58)) < 0.001, str(kc))
 	await physics_frame
 	check("D3 keep-clear empty", d.keep_clear_report(space).is_empty(), str(d.keep_clear_report(space)))
 	d.manifest.keep_clear[0].at = [0.0, 3.0, 0.5]   # planted fault: the school volume inside the rock

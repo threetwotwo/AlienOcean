@@ -16,7 +16,8 @@ def find_records(dirs):
         if d.endswith('.json'): recs.append(d); continue
         for sub in ('', 'stress/', 'cave/'):
             recs += [r for r in glob.glob(os.path.join(d, sub + '*.json'))
-                     if '_fb' not in os.path.basename(r) and 'stalk' not in r and 'draft' not in os.path.basename(r)]
+                     if '_fb' not in os.path.basename(r) and 'stalk' not in r and 'draft' not in os.path.basename(r)
+                     and not r.endswith('.sil.json') and os.path.basename(r) != 'run_report.json']
     return sorted(set(recs))
 
 

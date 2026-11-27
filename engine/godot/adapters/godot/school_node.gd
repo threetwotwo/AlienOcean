@@ -14,6 +14,7 @@ const Sim := preload("res://core/m31_school/school_sim.gd")
 const Species := preload("res://core/m31_school/school_species.gd")
 const WorldQuery := preload("res://adapters/godot/world_query.gd")
 const StandIn := preload("res://fish/standin_fish_mesh.gd")
+const CreatureMesh := preload("res://fish/creature_school_mesh.gd")
 const SHADER := preload("res://fish/school_fish.gdshader")
 
 @export var species_id := "lagoon_baitfish"
@@ -60,7 +61,15 @@ var _d_yaw := PackedFloat64Array()
 var step_ms := 0.0                      # last step's cost on its thread (ms)
 var main_ms := 0.0                      # this frame's main-thread cost (queries + guard + drawing), ms
 
+var use_asset := true                   # draw the creature maker's export when the species record names one and it is present
+var asset := {}                          # {meshes, swim, bl_m} of that export ({} = the stand-in)
+var _swim_ph := PackedFloat64Array()     # drawing-side swim phase (the export's beat law), rad
+
 func _ready() -> void:
+	var aid: String = Species.params(species_id).get("asset", "")
+	if use_asset and CreatureMesh.available(aid):
+		asset = CreatureMesh.load_species(aid, look)
+		if not asset.is_empty() and body_m <= 0.0: body_m = asset.bl_m     # body length from the glb (agreed with the maker)
 	params = Species.params(species_id, body_m)
 	if not tethered: params.R_home = 0.0
 	var n: int = count if count > 0 else params.school_size
@@ -73,12 +82,12 @@ func _ready() -> void:
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D
 		mm.use_custom_data = true
-		mm.mesh = StandIn.build(lod)
+		mm.mesh = asset.meshes[lod] if not asset.is_empty() else StandIn.build(lod)
 		mm.instance_count = n
 		mm.visible_instance_count = 0
 		var mi := MultiMeshInstance3D.new()
 		mi.multimesh = mm
-		mi.material_override = _mat
+		if asset.is_empty(): mi.material_override = _mat     # an export carries its own materials per surface
 		mi.top_level = true
 		mi.custom_aabb = AABB(Vector3(-1e4, -1e4, -1e4), Vector3(2e4, 2e4, 2e4))   # fish roam; culled per fish below
 		add_child(mi)
@@ -86,6 +95,8 @@ func _ready() -> void:
 	_spawn_outside_rock()
 	_take_snapshot(); _take_snapshot()
 	_bank.resize(n)
+	_swim_ph.resize(n)
+	for i in n: _swim_ph[i] = sim.phase[i]
 
 ## Fish spawned behind rock (the school's start cloud overlapping a reef) move to free spots of the cloud (seeded).
 func _spawn_outside_rock() -> void:
@@ -264,11 +275,19 @@ func _draw(alpha: float) -> void:
 		var mm := _mm[lod].multimesh
 		var k: int = counts[lod]
 		mm.set_instance_transform(k, Transform3D(basis, pos))
-		var f: float = (4.0 * v / sim.L[i] + 4.0) / 3.0
-		var amp: float = clampf(0.5 * 0.3 * v / maxf(f, 0.1), 0.02, 0.12) * (1.0 + 0.8 * _d_s[i])   # Strouhal 0.3
 		var bend := clampf(-yaw / maxf(v, 0.3), -cap, cap)     # body curvature x L into the turn
-		var dph := wrapf(_ph_cur[i] - _ph_prev[i], -PI, PI)
-		var ph := _ph_prev[i] + dph * alpha
+		var amp: float
+		var ph: float
+		if not asset.is_empty():
+			# the export's playback rule: beat at f(U) (beat_law), amplitude A_U / A (amp_law); a startle swims harder
+			_swim_ph[i] = fmod(_swim_ph[i] + TAU * CreatureMesh.beat_hz(asset.swim, v) * _draw_dt, TAU)
+			ph = _swim_ph[i]
+			amp = CreatureMesh.amp_scale(asset.swim, v) * (1.0 + 0.5 * _d_s[i])
+		else:
+			var f: float = (4.0 * v / sim.L[i] + 4.0) / 3.0
+			amp = clampf(0.5 * 0.3 * v / maxf(f, 0.1), 0.02, 0.12) * (1.0 + 0.8 * _d_s[i])   # Strouhal 0.3
+			var dph := wrapf(_ph_cur[i] - _ph_prev[i], -PI, PI)
+			ph = _ph_prev[i] + dph * alpha
 		mm.set_instance_custom_data(k, Color(ph, amp, bend, _d_s[i]))
 		counts[lod] = k + 1
 	for lod in 3: _mm[lod].multimesh.visible_instance_count = counts[lod]
