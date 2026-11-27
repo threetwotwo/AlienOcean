@@ -1,5 +1,17 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (27 Nov 2026, late): one world root
+- Engine: architecture cleanup agreed with gameplay. core/world/ holds the engine-free world state: SkyClock (was
+  core/m30_world_clock), WaterOptics and LagoonWaterField (were in look/). adapters/godot/world_root.gd (WorldRoot) is
+  the one node that owns the key light, environment, sky, camera exposure and the water_* shader globals; it replaces
+  sky_clock_driver.gd, look/sky_driver.gd and WaterOptics.push_globals, and caches the sky dome integral. look/ now
+  holds shaders only; the shot tool moved to tools/lagoon_shots.gd and builds its world through WorldRoot. Clock test
+  42/42, render unchanged (far water L* 57.0 vs 57.2 before).
+- Engine: shared ground material (`look/ground_surface.gdshader`): the Unreal WorldSurface.ush GroundBlend (sand
+  ripples, grains, rock, turf, crust; art bible v1.6 colours) converted by tools/ws_to_godot.py into
+  look/world_surface.gdshaderinc, so one HLSL source keeps feeding both engines. adapters/godot/world_textures.gd
+  loads the 19 world textures (AO_WORLDTEX for the shot tool).
+
 ## 0.6.0-dev (27 Nov 2026, evening): gameplay now built on Gary's Thalassa v20.19
 - M04 body 0.1.0 = Thalassa core/ik-rig.js DiverBodyRig (swim pose, shore walk/wade pose, swim-walk blend, head
   look, no-clip arms and legs) + ik-solvers.js (two-bone IK, leg with fin), procedural-locomotion.js

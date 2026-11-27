@@ -3,7 +3,7 @@
 // (2.8 deg), air extinction per band (0.0862, 0.1665, 0.2961) x air mass, masked by the moons.
 // Moons A and B: MOON_HLSL as is: Lommel-Seeliger face, maria noise, planetshine, soft edge; lit by the true sun.
 // Dome: stand-in for Unreal's SkyAtmosphere (an engine feature, not our code): Rayleigh + sea-salt single scatter,
-// scaled by the clock so the sky's light on the ground is the clock's sky_lux (sky_norm, from sky_driver math).
+// scaled by the clock so the sky's light on the ground is the clock's sky_lux (sky_norm, from WorldRoot).
 // Stars (STARS_HLSL) come next. Output in nits (background_intensity 1, physical light units).
 shader_type sky;
 render_mode use_debanding;
@@ -34,7 +34,7 @@ float airmass(float y) {
 }
 // Dome shape: Godot's own PhysicalSkyMaterial model (Preetham / three.js Sky, Godot's defaults), the closest Godot
 // counterpart of Unreal's SkyAtmosphere; only its shape is used, the clock sets its brightness (sky_norm).
-// Mirrored in SkyDriver.dome().
+// Mirrored in WorldRoot.dome() (adapters/godot/world_root.gd).
 vec3 dome(vec3 v, vec3 s) {
 	float zenith_angle = clamp(s.y, -1.0, 1.0);
 	float sun_energy = max(0.0, 1.0 - exp(-((PI * 0.5) - acos(zenith_angle))));

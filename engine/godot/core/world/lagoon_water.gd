@@ -1,4 +1,4 @@
-## Lagoon water field 0.1.0 (engine thread): the water query gameplay reads (same shape as M23's test_env:
+## Lagoon water 0.1.0 (core/world, the WaterQuery contract; engine thread): the water gameplay reads (shape:
 ## level, water_y(x, z, t), current(p, t)). It must return what the renderer draws.
 ## Now: still surface at Unreal's saved SurfaceZ 400 cm (tide 0); the drawn surface 0.2.0 tilts normals only, no
 ## displacement, so water_y = level everywhere. Coming with the surface port: the tide (from the two moons, Unreal's
