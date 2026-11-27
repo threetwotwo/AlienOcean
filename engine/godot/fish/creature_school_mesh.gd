@@ -1,4 +1,4 @@
-## Creature school mesh 0.1.0: turns a creature maker export (res://assets/creatures/<species>/fish.glb, fish_LOD1.glb,
+## Creature school mesh 0.2.0 (r2 export: swim envelopes at three speeds): turns a creature maker export (res://assets/creatures/<species>/fish.glb, fish_LOD1.glb,
 ## fish_LOD2.glb; editor-imported) into one static ArrayMesh per LOD for a MultiMesh school, plus its swim extras.
 ## The maker's frame (extras.alien_ocean.swim.frame): metres, snout at the origin, facing glTF -X, y up, s = x / body_length.
 ## The school frame (same as the stand-in, fish/school_fish*.gdshader): one body length long, head toward +x, centred
@@ -107,25 +107,59 @@ static func _material(src: Material, swim: Dictionary, look: Dictionary) -> Shad
 		sm.set_shader_parameter("roughness", s3.roughness)
 		if s3.metallic_texture: sm.set_shader_parameter("metallic_tex", s3.metallic_texture); sm.set_shader_parameter("use_mr_tex", 1.0)
 		if s3.roughness_texture: sm.set_shader_parameter("roughness_tex", s3.roughness_texture); sm.set_shader_parameter("use_mr_tex", 1.0)
+	# three envelope tables at env_u (wave.envelopes_by_speed, r2); an older export has one table, used at every speed
 	var w: Dictionary = swim.get("wave", {})
-	var rows: Array = w.get("amplitude_envelope_BL", [])
-	var es := PackedFloat32Array(); var ea := PackedFloat32Array(); var el := PackedFloat32Array()
-	for r in rows:
-		es.append(r[0]); ea.append(r[1]); el.append(r[2] if r.size() > 2 else float(r[0]) / float(w.get("lam_BL", 1.0)))
-	while es.size() < 16:       # pad (the shader reads env_n rows)
-		es.append(1.0); ea.append(ea[ea.size() - 1] if ea.size() > 0 else 0.0); el.append(el[el.size() - 1] if el.size() > 0 else 0.0)
-	sm.set_shader_parameter("env_s", es); sm.set_shader_parameter("env_a", ea); sm.set_shader_parameter("env_lag", el)
-	sm.set_shader_parameter("env_n", rows.size())
+	var sets: Array = []
+	var us := PackedFloat32Array()
+	for e in w.get("envelopes_by_speed", []):
+		sets.append(e.rows); us.append(float(e.U_BLps))
+	if sets.is_empty():
+		var one: Array = w.get("amplitude_envelope_BL", [])
+		sets = [one, one, one]; us = PackedFloat32Array([1.0, 2.0, 3.0])
+	while sets.size() < 3: sets.append(sets[sets.size() - 1]); us.append(us[us.size() - 1] + 1.0)
+	var es := PackedFloat32Array()
+	for j in 3:
+		var rows: Array = sets[j]
+		var ea := PackedFloat32Array(); var el := PackedFloat32Array()
+		for r in rows:
+			if j == 0: es.append(r[0])
+			ea.append(r[1]); el.append(r[2] if r.size() > 2 else float(r[0]) / float(w.get("lam_BL", 1.0)))
+		while ea.size() < 16:       # pad (the shader reads env_n rows)
+			ea.append(ea[ea.size() - 1] if ea.size() > 0 else 0.0); el.append(el[el.size() - 1] if el.size() > 0 else 0.0)
+		sm.set_shader_parameter("env_a%d" % j, ea); sm.set_shader_parameter("env_lag%d" % j, el)
+	var n_rows: int = es.size()
+	while es.size() < 16: es.append(1.0)
+	sm.set_shader_parameter("env_s", es)
+	sm.set_shader_parameter("env_u", Vector3(us[0], us[1], us[2]))
+	sm.set_shader_parameter("env_n", n_rows)
 	for k in look: sm.set_shader_parameter(k, look[k])
 	return sm
 
-## Swim playback from the extras (beat_law, amp_law): beat frequency (Hz) and amplitude scale (A_U / A) at U (BL/s).
+## Swim playback from the extras. Speeds in BL/s.
+static func has_speed_envelopes(swim: Dictionary) -> bool:
+	return swim.get("wave", {}).get("envelopes_by_speed", []).size() > 0
+
+## Below this speed the maker's engine swims burst-and-coast phrases, not a steady wave (steady.U_min_BLps); 0 = none.
+static func u_min(swim: Dictionary) -> float:
+	return float(swim.get("steady", {}).get("U_min_BLps", 0.0))
+
+## Beat frequency (Hz) at U. With r2 envelopes: through their measured (U, beat_Hz) points, the end slopes carried on
+## (the beat law is linear in U, so this is the law itself); otherwise the beat_law record.
 static func beat_hz(swim: Dictionary, U: float) -> float:
+	var es: Array = swim.get("wave", {}).get("envelopes_by_speed", [])
+	if es.size() >= 2:
+		var j := 1
+		while j < es.size() - 1 and U > float(es[j].U_BLps): j += 1
+		var u0 := float(es[j - 1].U_BLps); var u1 := float(es[j].U_BLps)
+		var f0 := float(es[j - 1].beat_Hz); var f1 := float(es[j].beat_Hz)
+		return maxf(0.3, f0 + (f1 - f0) * (U - u0) / maxf(u1 - u0, 1e-5))
 	var b: Dictionary = swim.get("beat_law", {})
 	if b.is_empty(): return (4.0 * U + 4.0) / 3.0
 	return float(b.f_rec_Hz) * (float(b.c_BLps) + U) / (float(b.c_BLps) + float(b.U_rec_BLps))
 
+## Amplitude scale A_U / A. r2 envelopes already carry amp_law per speed, so 1 there.
 static func amp_scale(swim: Dictionary, U: float) -> float:
+	if has_speed_envelopes(swim): return 1.0
 	var a: Dictionary = swim.get("amp_law", {})
 	if a.is_empty(): return 1.0
 	return clampf(float(a.ampMin) + (1.0 - float(a.ampMin)) * U / float(a.ampU1), 0.0, 1.0)

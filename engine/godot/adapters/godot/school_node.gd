@@ -64,6 +64,9 @@ var main_ms := 0.0                      # this frame's main-thread cost (queries
 var use_asset := true                   # draw the creature maker's export when the species record names one and it is present
 var asset := {}                          # {meshes, swim, bl_m} of that export ({} = the stand-in)
 var _swim_ph := PackedFloat64Array()     # drawing-side swim phase (the export's beat law), rad
+var _bc_t := PackedFloat64Array()        # burst-and-coast: time into this fish's phrase (s); < 0 = steady swimming
+var _bc_k := PackedFloat64Array()        # burst-and-coast: drawn amplitude factor (1 beating, eases to 0 in a glide)
+const BC_BEATS := 2.0                    # beats per burst (export r2: below U_min the engine swims beats then a glide)
 
 func _ready() -> void:
 	var aid: String = Species.params(species_id).get("asset", "")
@@ -97,6 +100,9 @@ func _ready() -> void:
 	_bank.resize(n)
 	_swim_ph.resize(n)
 	for i in n: _swim_ph[i] = sim.phase[i]
+	_bc_t.resize(n); _bc_k.resize(n)
+	var rb := RandomNumberGenerator.new(); rb.seed = seed_ * 31 + 5
+	for i in n: _bc_t[i] = rb.randf() * 3.0; _bc_k[i] = 1.0      # staggered phrases, so the school doesn't pulse together
 
 ## Fish spawned behind rock (the school's start cloud overlapping a reef) move to free spots of the cloud (seeded).
 func _spawn_outside_rock() -> void:
@@ -279,10 +285,12 @@ func _draw(alpha: float) -> void:
 		var amp: float
 		var ph: float
 		if not asset.is_empty():
-			# the export's playback rule: beat at f(U) (beat_law), amplitude A_U / A (amp_law); a startle swims harder
-			_swim_ph[i] = fmod(_swim_ph[i] + TAU * CreatureMesh.beat_hz(asset.swim, v) * _draw_dt, TAU)
+			var ub: float = _swim_drive(i, v)
 			ph = _swim_ph[i]
-			amp = CreatureMesh.amp_scale(asset.swim, v) * (1.0 + 0.5 * _d_s[i])
+			amp = _bc_k[i] * CreatureMesh.amp_scale(asset.swim, ub) * (1.0 + 0.5 * _d_s[i])
+			mm.set_instance_custom_data(k, Color(ph, ub, bend, amp))
+			counts[lod] = k + 1
+			continue
 		else:
 			var f: float = (4.0 * v / sim.L[i] + 4.0) / 3.0
 			amp = clampf(0.5 * 0.3 * v / maxf(f, 0.1), 0.02, 0.12) * (1.0 + 0.8 * _d_s[i])   # Strouhal 0.3
@@ -292,6 +300,30 @@ func _draw(alpha: float) -> void:
 		counts[lod] = k + 1
 	for lod in 3: _mm[lod].multimesh.visible_instance_count = counts[lod]
 	main_ms += (Time.get_ticks_usec() - t0) / 1000.0
+
+## The export's playback rule (r2) for fish i at speed v (BL/s): at or above steady.U_min, a steady wave at v (tables
+## blended at v, beat at f(v)); below it, burst-and-coast phrases: BC_BEATS beats at f(U_min) on the U_min table, then
+## a glide (amplitude eases out, phase held, the body straightens), the glide lengthening as the fish slows (duty =
+## v / U_min, at least 0.25). A startled fish always beats. Returns the drawn speed U (which table the shader uses).
+func _swim_drive(i: int, v: float) -> float:
+	var sw: Dictionary = asset.swim
+	var um: float = CreatureMesh.u_min(sw)
+	var dt := _draw_dt
+	if um <= 0.0 or v >= um or _d_s[i] > 0.05:
+		_bc_k[i] = lerpf(_bc_k[i], 1.0, 1.0 - exp(-dt / 0.1))
+		_swim_ph[i] = fmod(_swim_ph[i] + TAU * CreatureMesh.beat_hz(sw, v) * dt, TAU)
+		return maxf(v, um)
+	var f: float = CreatureMesh.beat_hz(sw, um)
+	var tb: float = BC_BEATS / f                          # burst length (s)
+	var period: float = tb / clampf(v / um, 0.25, 1.0)     # burst + glide
+	_bc_t[i] = fmod(_bc_t[i] + dt, period)
+	if _bc_t[i] < tb:
+		_bc_k[i] = lerpf(_bc_k[i], 1.0, 1.0 - exp(-dt / 0.1))
+		_swim_ph[i] = fmod(_swim_ph[i] + TAU * f * dt, TAU)
+	else:
+		_bc_k[i] = lerpf(_bc_k[i], 0.0, 1.0 - exp(-dt / 0.15))
+		if _bc_k[i] > 0.3: _swim_ph[i] = fmod(_swim_ph[i] + TAU * f * dt, TAU)   # finish the stroke, then hold
+	return um
 
 func metrics() -> Dictionary:
 	return sim.metrics()
