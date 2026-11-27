@@ -123,7 +123,7 @@ class Form:
         return np.maximum(d, np.maximum(-x, x - XEND))
 
     # ---- level 1: bone plates, orbit ring, mouth cleft
-    def sd_full(self, P, parts=False):
+    def sd_full(self, P, parts=False, cleft=True):
         XEND, HW, EY = self.XEND, self.HW, self.EY
         d0 = self.sd_body(P); d = d0.copy(); ids = np.zeros(d.shape, np.int8)
         x, y, z = P[..., 0], P[..., 1], P[..., 2]
@@ -145,7 +145,7 @@ class Form:
         # mouth cleft: the gape between the jaws is a real gap in the solid (groove cut by the lips meeting)
         ml = self.ml
         cl = np.abs(poly_sd2(x, y, [list(p) for p in ml] + [list(p - [0, 0.0012]) for p in ml[::-1]]))
-        d = np.maximum(d, -(cl - 0.0008) - np.clip(d0 + 0.004, 0, 1) * 10)
+        if cleft: d = np.maximum(d, -(cl - 0.0008) - np.clip(d0 + 0.004, 0, 1) * 10)
         return (d, ids) if parts else d
 
     def provenance(self):
