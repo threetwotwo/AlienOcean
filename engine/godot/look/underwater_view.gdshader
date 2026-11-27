@@ -14,7 +14,7 @@ render_mode unshaded, cull_disabled, depth_draw_never, depth_test_disabled, fog_
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 uniform float max_path = 400.0;
-uniform float god_k = 1.0;      // Unreal GodK: 1 = the god rays, 0 = off (WorldRoot.god_rays)
+uniform float god_k = 1.0;      // Unreal GodK: 1 = the god rays, 0 = off (WorldRoot.god_rays); 2 = show the sum, 0.5 + 0.25 x metres (checks)
 uniform float god_frame = 0.0;  // the frame count mod 8 when TAA averages the jitter, else 0 (WorldRoot)
 
 void vertex() { POSITION = vec4(VERTEX.xy * 2.0, 1.0, 1.0); }
@@ -32,6 +32,7 @@ void fragment() {
 		vec3 c = water_a + water_b;
 		vec3 glow = w_glow(d, water_y - cam.y, L);
 		vec3 god = god_k > 0.5 ? god_rays(cam, d, L, FRAGCOORD.xy, god_frame) : vec3(0.0);
-		ALBEDO = max(scene * exp(-c * L) + (glow + god) * water_exposure, vec3(0.0));
+		if (god_k > 1.5) ALBEDO = vec3(0.5 + 0.25 * god_acc(cam, d, L, FRAGCOORD.xy, god_frame));
+		else ALBEDO = max(scene * exp(-c * L) + (glow + god) * water_exposure, vec3(0.0));
 	}
 }
