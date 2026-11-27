@@ -4,10 +4,10 @@ Order (each step names what it reads and writes on the builder):
   template   rings x columns on the loft                         -> B.T
   eye.blocks eye holes in the template                            -> B.blk
   mouth.plan lip loop, shared head ring iK (clamps the eye blocks) -> B.mouth
-  gill.plan  slit ring and its bend onto the cover edge           -> B.gill
+  gill.plan  slit ring and its bend onto the cover edge; ventral leg and its column bend onto the gill V -> B.gill
   grid       template vertices and body quads                     -> mesh
   eye        eye patches + orbit tucks                            -> B.eye
-  mouth      loops round the lips, cavity, pharynx dome           -> B.mouth
+  mouth      loops round the lips, cavity, pharynx dome, gill holes (gill.holes) -> B.mouth
   gill       slits + passages to the cavity holes                 -> B.gill.slits
   cap        tail-root pole                                       -> B.tail
   finish     winding, snap onto the full form                     -> V, VN

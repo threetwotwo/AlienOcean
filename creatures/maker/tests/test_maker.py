@@ -24,3 +24,22 @@ def test_style_deviation_reaches_the_form():
     a, b = adapt(REC), adapt(REC, dict(eye=1.5, mouth=1.2, girth=0.8))
     assert abs(b['eye']['d'] / a['eye']['d'] - 1.5) < 1e-9 and b['style'] == dict(eye=1.5, mouth=1.2, girth=0.8)
     assert abs(b['outline']['hw'][3][1] / a['outline']['hw'][3][1] - 0.8) < 1e-9
+
+
+def test_ventral_vs_from_the_record():
+    """the lower-jaw V and the gill V are form plates, the slit has a ventral leg, and the hole loop matches the slit loop."""
+    from creature_maker.record import adapt
+    from creature_maker.form import Form
+    from creature_maker.chart import Chart
+    from creature_maker.cage import build_cage
+    rec = adapt(REC); form = Form(rec)
+    assert {'jaw.dentary', 'jaw.mandibleLow'} <= set(rec['defaults_used'])          # the proof record has no jaw bones: listed
+    assert [p[0] for p in form.VPLATES] == ['mandible', 'branchiostegal'] and form.vedge['za'] < form.vedge['zc']
+    e = form.vedge; xm = 0.5 * (e['xa'] + e['xc']); zm = float(form.vedge_z(xm)); y = float(form.BOT(xm)) + 0.004
+    d_in, d_out = (float(form.sd_full(np.array([[xm, y, z]]))[0] - form.sd_body(np.array([[xm, y, z]]))[0]) for z in (zm - 0.004, zm + 0.004))
+    assert d_out < d_in - 1e-4                                                      # the membrane stands proud outside the V edge only
+    B = build_cage(form, Chart(form), rec); g = B.gill.info
+    assert g['ia'] is not None and g['ne'] == g['nj'] + g['i'] - g['ia'] <= 17
+    for s in B.gill.slits:
+        assert len(s['loop']) == len(s['hole']) == 2 * g['ne']
+        assert abs(B.V[s['loop'][g['ne']]][2]) < abs(B.V[s['loop'][g['nj']]][2])    # the leg runs in toward the midline
