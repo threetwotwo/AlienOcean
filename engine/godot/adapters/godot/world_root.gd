@@ -166,8 +166,9 @@ func _process(_dt: float) -> void:
 	under_mat.set_shader_parameter("god_frame", float(Engine.get_frames_drawn() % 8) if vp and vp.use_taa else 0.0)
 
 func set_fov(fov_deg: float) -> void:
-	## CameraAttributesPhysical owns the field of view (18 mm half sensor height)
-	cam_attr.frustum_focal_length = 18.0 / tan(deg_to_rad(fov_deg) * 0.5)
+	## CameraAttributesPhysical owns the field of view: Godot takes the vertical FOV from a 24 mm sensor height (12 mm
+	## half), so the focal length for a vertical fov is 12 / tan(fov / 2). (Was 18: every shot was ~1.5x zoomed in.)
+	cam_attr.frustum_focal_length = 12.0 / tan(deg_to_rad(fov_deg) * 0.5)
 
 func make_surface(size_m := 160.0) -> MeshInstance3D:
 	## the drawn water surface overhead (look/water_surface.gdshader), at the water's level
