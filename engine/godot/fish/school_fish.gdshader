@@ -40,7 +40,7 @@ void vertex() {
 	dw += bend * sb;
 	VERTEX.z += w;
 	// rotate the normal by the local slope of the midline (dz/dx = -dz/ds)
-	float ang = atan(dw);
+	float ang = atan(-dw);   // n = (dz/ds, 0, 1) normalised for a sheet z = w(s), s = 0.5 - x
 	float c = cos(ang), sn = sin(ang);
 	NORMAL = normalize(vec3(NORMAL.x * c - NORMAL.z * sn, NORMAL.y, NORMAL.x * sn + NORMAL.z * c));
 	obj_pos = VERTEX;
