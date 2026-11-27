@@ -245,27 +245,28 @@ func apply(cam_y: float) -> Dictionary:
 		var uw: Vector3 = under_white if under_white != Vector3.ZERO else UNDER_WHITE.get(place, Vector3.ONE)
 		agx_fx.depth_gain = dg * Vector3.ONE.lerp(uw, kw)
 	var a := WaterOptics.absorb(cdom); var b := WaterOptics.scatter(scat_k)
+	# the water's light field at z_ref (sky from above, the sand's bounce from below): the lagoon's GI content is under water
+	# whatever the eye, so the GI's sky (look/sky.gdshader under_*, cubemap passes only) is this field above water too
+	var tr := WaterOptics.refract_sun(up_air)
+	var kd: Vector3 = _art_k((a + WaterOptics.BB * b) / tr.y)
+	var att := Color(exp(-kd.x * z_ref), exp(-kd.y * z_ref), exp(-kd.z * z_ref))
+	var ku: Vector3 = _art_k((a + WaterOptics.BB * b) / 0.75)
+	var ek: Vector3 = Vector3(exp(-ku.x * z_ref), exp(-ku.y * z_ref), exp(-ku.z * z_ref)) * st.skylux * WaterOptics.FRESNEL_SKY * sky_fill_k
+	# + the sand's bounce from below (Lighting's sand bounce: the lower hemisphere lit by the sand), half the sphere each
+	var H := water_y - floor_y
+	var eh: Vector3 = (Vector3(exp(-kd.x * H), exp(-kd.y * H), exp(-kd.z * H)) * beam_h * WaterOptics.FRESNEL_SUN
+		+ Vector3(exp(-ku.x * H), exp(-ku.y * H), exp(-ku.z * H)) * st.skylux * WaterOptics.FRESNEL_SKY * sky_fill_k)
+	var sand := Vector3(WaterOptics.SAND.r, WaterOptics.SAND.g, WaterOptics.SAND.b)
+	var eu: Vector3 = eh * sand * Vector3(exp(-ku.x * (H - z_ref)), exp(-ku.y * (H - z_ref)), exp(-ku.z * (H - z_ref)))
+	sky_mat.set_shader_parameter("under_k", 1.0)
+	sky_mat.set_shader_parameter("under_down", ek / PI)
+	sky_mat.set_shader_parameter("under_up", eu / PI)
+	RenderingServer.global_shader_parameter_set("water_amb_sky", 1.0 if env.sdfgi_enabled else 0.0)
 	if under:
-		var tr := WaterOptics.refract_sun(up_air)
-		var kd: Vector3 = _art_k((a + WaterOptics.BB * b) / tr.y)
-		var att := Color(exp(-kd.x * z_ref), exp(-kd.y * z_ref), exp(-kd.z * z_ref))
 		light.look_at_from_position(Vector3.ZERO, -tr, Vector3.FORWARD if absf(tr.y) > 0.99 else Vector3.UP)
 		light.light_intensity_lux = beam_h * WaterOptics.FRESNEL_SUN / tr.y
 		light.light_color = (tint * att)
-		# ambient for standard materials (fish): the water's diffuse light at z_ref, sky from above + sand from below
-		var ku: Vector3 = _art_k((a + WaterOptics.BB * b) / 0.75)
-		var ek: Vector3 = Vector3(exp(-ku.x * z_ref), exp(-ku.y * z_ref), exp(-ku.z * z_ref)) * st.skylux * WaterOptics.FRESNEL_SKY * sky_fill_k
-		# + the sand's bounce from below (Lighting's sand bounce: the lower hemisphere lit by the sand), half the sphere each
-		var H := water_y - floor_y
-		var eh: Vector3 = (Vector3(exp(-kd.x * H), exp(-kd.y * H), exp(-kd.z * H)) * beam_h * WaterOptics.FRESNEL_SUN
-			+ Vector3(exp(-ku.x * H), exp(-ku.y * H), exp(-ku.z * H)) * st.skylux * WaterOptics.FRESNEL_SKY * sky_fill_k)
-		var sand := Vector3(WaterOptics.SAND.r, WaterOptics.SAND.g, WaterOptics.SAND.b)
-		var eu: Vector3 = eh * sand * Vector3(exp(-ku.x * (H - z_ref)), exp(-ku.y * (H - z_ref)), exp(-ku.z * (H - z_ref)))
-		# Godot's sky light under water is this light field (look/sky.gdshader under_*): the ambient, SDFGI's escaping rays and
-		# every material read the same two hemispheres, so a fish's belly gets the sand's light and its back the sky's
-		sky_mat.set_shader_parameter("under_k", 1.0)
-		sky_mat.set_shader_parameter("under_down", ek / PI)
-		sky_mat.set_shader_parameter("under_up", eu / PI)
+		light.light_indirect_energy = 1.0
 		# Without GI, the ambient stays one colour (the field's mean); Godot's sky-sourced ambient read black in the 28 Nov
 		# check (cubemap ambient path, open question), and SDFGI replaces the ambient anyway.
 		var amb: Vector3 = (ek + eu) * 0.5 / PI * exposure            # ambient is in buffer units (measured 27 Nov)
@@ -274,10 +275,7 @@ func apply(cam_y: float) -> Dictionary:
 		env.ambient_light_color = Color(amb.x / mx, amb.y / mx, amb.z / mx) if mx > 0.0 else Color.BLACK
 		env.ambient_light_energy = mx
 		RenderingServer.global_shader_parameter_set("water_amb_ref", amb / maxf(exposure, 1e-12))
-		RenderingServer.global_shader_parameter_set("water_amb_sky", 1.0 if env.sdfgi_enabled else 0.0)
 	else:
-		sky_mat.set_shader_parameter("under_k", 0.0)
-		RenderingServer.global_shader_parameter_set("water_amb_sky", 0.0)
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		var dz := dome(Vector3.UP, _dome_sun); var dm := maxf(dz.x, maxf(dz.y, dz.z))
 		env.ambient_light_color = Color(dz.x / dm, dz.y / dm, dz.z / dm) if dm > 0.0 else Color.WHITE
@@ -287,6 +285,10 @@ func apply(cam_y: float) -> Dictionary:
 		light.look_at_from_position(Vector3.ZERO, -up_air, Vector3.FORWARD if absf(up_air.y) > 0.99 else Vector3.UP)
 		light.light_intensity_lux = beam_h / maxf(up_air.y, 0.02)
 		light.light_color = tint
+		# the GI's sand is under water: its bounce sees the sun as it arrives at z_ref (through the surface, refracted, attenuated),
+		# not the air's full beam (Godot's indirect energy is one scalar: the luminance of that loss)
+		var lum_att := att.r * 0.2126 + att.g * 0.7152 + att.b * 0.0722
+		light.light_indirect_energy = WaterOptics.FRESNEL_SUN * maxf(up_air.y, 0.02) / tr.y * lum_att
 	last = {"key": key, "elev": body.elev, "total_lux": st.total, "sky_lux": st.skylux, "beam_h": beam_h,
 		"ev100": ev, "bias": bias, "under": under, "night_w": nw}
 	return last
