@@ -6,7 +6,7 @@
 ## 0.3.0: the world (light, sky, exposure, water) comes from adapters/godot/world_root.gd, the same node the game uses.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/lagoon_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
 ## Env: AO_LIGHT_NEUTRAL=0..1 (art direction: sunlight keeps its colour on the way down), AO_DEPTH_COLOUR=1 (Unreal's depth colour give-back; AO_DEPTH_SHARE its share, default 0.25), AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_AGX_MODE=1 (raw buffer, for checks), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
-## Still to port: stars, AgX extras, the surface's waves and tide, caustics, god rays.
+## Still to port: stars, the surface's waves and tide, god rays (the light net is in: look/caustics.gdshaderinc).
 extends SceneTree
 
 const WATER_Y := LagoonWaterField.SURFACE_Y   # the Unreal lagoon's saved surface: SurfaceZ 400 cm (tide 0)
