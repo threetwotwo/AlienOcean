@@ -6,7 +6,7 @@
 extends SceneTree
 
 const BB := preload("res://adapters/godot/buoyant_body.gd")
-const Env := preload("res://core/m23_harness/test_env.gd")
+const Env := preload("res://tests/harness/test_env.gd")
 
 var rate := 60
 var out_path := ""

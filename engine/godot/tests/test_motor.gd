@@ -8,9 +8,9 @@ extends SceneTree
 
 const Packet := preload("res://core/m01_input/input_packet.gd")
 const Body := preload("res://adapters/godot/player_body.gd")
-const Env := preload("res://core/m23_harness/test_env.gd")
+const Env := preload("res://tests/harness/test_env.gd")
 const Motor := preload("res://core/m02_motor/player_motor.gd")
-const Worlds := preload("res://core/m23_harness/test_worlds.gd")
+const Worlds := preload("res://tests/harness/test_worlds.gd")
 
 var rate := 60     # frames per second (pass the same number to --fixed-fps)
 var tick := 60     # physics ticks per second: the fixed simulation step (project setting)
@@ -47,7 +47,7 @@ func _initialize() -> void:
 	_define_cases()
 	print("M02 harness: physics=%s fps=%d tick=%d cases=%d" % [ProjectSettings.get_setting("physics/3d/physics_engine"), rate, tick, cases.size()])
 
-# ---------------------------------------------------------------- worlds (shared: core/m23_harness/test_worlds.gd)
+# ---------------------------------------------------------------- worlds (shared: tests/harness/test_worlds.gd)
 func _build(kind: String, p: Dictionary) -> void:
 	world = Node3D.new()
 	root.add_child(world)

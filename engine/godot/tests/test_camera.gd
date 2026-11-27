@@ -9,7 +9,7 @@ extends SceneTree
 const Packet := preload("res://core/m01_input/input_packet.gd")
 const Body := preload("res://adapters/godot/player_body.gd")
 const Rig := preload("res://adapters/godot/camera_rig.gd")
-const Worlds := preload("res://core/m23_harness/test_worlds.gd")
+const Worlds := preload("res://tests/harness/test_worlds.gd")
 const Motor := preload("res://core/m02_motor/player_motor.gd")
 
 var rate := 60

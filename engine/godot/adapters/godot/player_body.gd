@@ -10,6 +10,7 @@
 extends CharacterBody3D
 
 const Motor := preload("res://core/m02_motor/player_motor.gd")
+const WorldQuery := preload("res://adapters/godot/world_query.gd")
 
 var motor = Motor.new()
 var step_height := 0.35
@@ -25,6 +26,7 @@ var _env_cache = null
 var _t := 0.0
 var _dt := 1.0 / 60.0
 var _env_dict := {}
+var wq = null
 
 func _init() -> void:
 	stand_shape.radius = 0.25
@@ -49,8 +51,10 @@ func _eye_off() -> float:
 func _ray_floor(x: float, z: float) -> Dictionary:
 	var s = motor.swimmer
 	var top: float = (s.pos.y - 1.24 + step_height + 0.01) if s.shore_grounded else s.pos.y
-	var rq := PhysicsRayQueryParameters3D.create(Vector3(x, top, z), Vector3(x, top - 80.0, z), collision_mask, [get_rid()])
-	return get_world_3d().direct_space_state.intersect_ray(rq)
+	if wq == null:
+		wq = WorldQuery.new(get_world_3d(), collision_mask)
+		wq.exclude = [get_rid()]
+	return wq.ray_down(x, z, top, 80.0)
 
 ## Standing on dry land, a surface too steep to walk (Thalassa: normal.y < 0.56) is a wall, not a reason to start
 ## swimming: the floor stays where the feet are and the standing capsule meets the slope. In water the core's own

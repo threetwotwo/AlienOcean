@@ -7,9 +7,11 @@
 extends Camera3D
 
 const Cam := preload("res://core/m03_camera/nocut_camera.gd")
+const WorldQuery := preload("res://adapters/godot/world_query.gd")
 
 var core = Cam.new()
-var exclude: Array[RID] = []
+var exclude: Array[RID] = []    # bodies the spring arm ignores (the player); handed to the world query
+var wq = null
 var body = null                 # adapters/godot/player_body.gd (actor frame source)
 var shot := "explore"
 var yaw := 0.0
@@ -26,17 +28,20 @@ var water_spring = Cam.Spring1.new()
 func request(name: String) -> void:
 	shot = name
 
+func _query():
+	if wq == null:
+		wq = WorldQuery.new(get_world_3d(), 1)
+	wq.exclude = exclude
+	return wq
+
 func _floor_height(x: float, z: float) -> float:
-	var top: float = last_frame.pos.y if not last_frame.is_empty() else 0.0
-	var rq := PhysicsRayQueryParameters3D.create(Vector3(x, top, z), Vector3(x, top - 60.0, z), 1, exclude)
-	var h := get_world_3d().direct_space_state.intersect_ray(rq)
-	return h.position.y if not h.is_empty() else -INF
+	var q = _query()
+	q.top = last_frame.pos.y if not last_frame.is_empty() else 0.0
+	q.depth = 60.0
+	return q.floor_height(x, z)
 
 func _nearest_surface(p: Vector3, r: float) -> Dictionary:
-	var q := PhysicsShapeQueryParameters3D.new()
-	var sp := SphereShape3D.new(); sp.radius = r
-	q.shape = sp; q.transform = Transform3D(Basis(), p); q.collision_mask = 1; q.exclude = exclude
-	return {"dist": 0.0} if get_world_3d().direct_space_state.intersect_shape(q, 1).size() > 0 else {}
+	return _query().nearest_surface(p, r)
 
 ## Once per physics tick after the player moved. look: rad/s (x = turn right, y = up). Returns the frame plus
 ## body_alpha (0 when the lens is inside the head) and blend (1 = settled in the requested shot).
