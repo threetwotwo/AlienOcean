@@ -81,7 +81,7 @@ func _initialize() -> void:
 	if scene == "cave":
 		e.fog_enabled = true; e.fog_light_color = Color(0.08, 0.35, 0.45); e.fog_density = 0.02
 	we.environment = e; world.add_child(we)
-	var sun := DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-55, 35, 0); sun.light_energy = 1.4; sun.shadow_enabled = true; world.add_child(sun)
+	var sun := DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-55, 35, 0); sun.light_energy = 1.4; sun.light_intensity_lux = PI * 1.2; sun.shadow_enabled = true; world.add_child(sun)
 	if scene.begins_with("cam_"):
 		rig = Rig.new(); world.add_child(rig); rig.exclude.append(body.get_rid()); rig.body = body; rig.current = true
 	else:
