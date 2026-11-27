@@ -17,6 +17,7 @@ render_mode unshaded, cull_back, world_vertex_coords, fog_disabled, shadows_disa
 #include "res://look/sea_waves.gdshaderinc"
 global uniform vec3 water_sun_air;
 global uniform float water_sun_lux;
+#include "res://look/sea_foam_shade.gdshaderinc"   // the whitecaps' look (after the lines above: it uses them)
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 uniform float nq = 32.0;
@@ -47,6 +48,9 @@ void fragment() {
 	vec3 S = sea_slope(wi.xy, still, wi, cam, 0.0);
 	vec3 V = normalize(cam - wi);                          // toward the eye (island)
 	vec3 N = normalize(vec3(-S.x, -S.y, 1.0));
+	// the whitecaps (tank v374 foam look): the foam map drawn as lace and streaks; its 2 cm relief tilts the normal
+	SeaFoam fo = sea_foam_read(still, wi, cam, nq, TIME);
+	N = sea_foam_bump(N, fo.foam, still);
 	N = normalize(N + vec3(0.0, 0.0, 2.0 * clamp((0.05 - dot(N, V)) / 0.05, 0.0, 1.0)));   // open water v144
 	float ci = clamp(dot(N, V), 1e-3, 1.0);
 	float R = fresnel_air(ci);
@@ -85,5 +89,8 @@ void fragment() {
 	float Lp = min(h / max(-T.z, 0.05), 400.0);
 	vec3 c = water_a + water_b;
 	vec3 under = scene * exp(-c * Lp) + w_glow(sea_gdt(T), 0.0, Lp) * water_exposure;
-	ALBEDO = R * refl * water_exposure + (1.0 - R) * under;
+	// the foam lies opaque over the water (the mirror and the view through both give way to it); the bubble cloud
+	// under and behind a whitecap adds its turquoise to the water
+	ALBEDO = (R * refl * water_exposure + (1.0 - R) * under) * (1.0 - fo.foam)
+		+ (sea_foam_top_nits(fo, N) + sea_foam_plume_nits(fo, R)) * water_exposure;
 }

@@ -35,6 +35,8 @@ func _init() -> void:
 	mesh_instance.layers = 1 << (SeaFloorMap.SEA_LAYER - 1)   # never in the floor map's captures
 	add_child(mesh_instance)
 	floor_map = SeaFloorMap.new(); add_child(floor_map)
+	# the tank's spray and spume off the breaking crests (SeaSpray: the sprite kit; drawn after the sea's top side)
+	add_child(SeaSpray.new())
 
 func _process(_dt: float) -> void:
 	var cam := get_viewport().get_camera_3d()
