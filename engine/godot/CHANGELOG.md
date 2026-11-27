@@ -1,5 +1,16 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (27 Nov 2026, night): the Unreal AgX tonemapper
+- Engine: AgX post 0.1.0 (`look/agx_post.glsl`, `adapters/godot/agx_effect.gd`): sun_v184 M_PP_AgX ported line for
+  line as a CompositorEffect after the transparent pass (Wrensch AgX fit, Punch 0.4, white balance following the light
+  (SkyClock.white_now), SkyBlue on the sky, the under-water daylight white point 1.0713/0.9914/0.8748 faded over 0.2 m,
+  night look, NightDeep, night sky, StarKeep, EmitKeep, HueKeep). Godot's tonemapper goes LINEAR (sRGB encoding only)
+  and its glow is off; Unreal bloom is not ported yet. Measured: Godot's buffer at that point is already exposed
+  (1000 nits -> 0.2035 at EV 12) and nothing multiplies after the effect. WorldRoot.set_agx(false) / AO_AGX=0 = before.
+  Noon: the sky is blue instead of grey; under water reef far water L* 57.0 -> 54.8, near sand 75.5 -> 70.6 (Unreal's
+  numbers were taken under this curve: 58-59 / 74-76, so the scene is about a third of a stop dark; to trace).
+  Night and twilight need the stars and the twilight sky dome first (the dome is black with the sun below the horizon).
+
 ## 0.6.0-dev (27 Nov 2026, late): one world root
 - Engine: architecture cleanup agreed with gameplay. core/world/ holds the engine-free world state: SkyClock (was
   core/m30_world_clock), WaterOptics and LagoonWaterField (were in look/). adapters/godot/world_root.gd (WorldRoot) is
