@@ -1,6 +1,7 @@
 ## M02 motor + M23 harness, headless run on real Jolt physics.
-## Run (one tick rate per process, uncapped):
-##   godot --headless --fixed-fps 60 --path . --script res://tests/test_motor.gd -- --rate 60 --out /tmp/m02_60.json [--monkey 3] [--fault]
+## Run (one frame rate per process, uncapped; the simulation tick stays fixed at 60 Hz):
+##   godot --headless --fixed-fps 30 --path . --script res://tests/test_motor.gd -- --rate 30 --out /tmp/m02_30.json [--tick 60] [--monkey 3] [--fault] [--only T5]
+## Without --fixed-fps Godot runs in real time (a full run then takes minutes): always pass it (tests/run_motor.sh does).
 ## Scripted cases from plans/gameplay_v2/STRESS_MATRIX.md (T1-T6) + monkey runs; invariants I1 I2 I5 I9 I10 every tick.
 ## --fault plants a known bug (swim sphere too small: radius 0.30 lets the 0.8 m cave through) and the run must FAIL.
 extends SceneTree
@@ -10,7 +11,8 @@ const Body := preload("res://adapters/godot/player_body.gd")
 const Env := preload("res://core/m23_harness/test_env.gd")
 const Motor := preload("res://core/m02_motor/player_motor.gd")
 
-var rate := 60
+var rate := 60     # frames per second (pass the same number to --fixed-fps)
+var tick := 60     # physics ticks per second: the fixed simulation step (project setting)
 var out_path := ""
 var monkey_runs := 0
 var monkey_secs := 300.0
@@ -33,15 +35,16 @@ func _initialize() -> void:
 	for i in a.size():
 		match a[i]:
 			"--rate": rate = int(a[i + 1])
+			"--tick": tick = int(a[i + 1])
 			"--out": out_path = a[i + 1]
 			"--monkey": monkey_runs = int(a[i + 1])
 			"--monkey-secs": monkey_secs = float(a[i + 1])
 			"--fault": fault = true
 			"--only": only = a[i + 1]
-	Engine.physics_ticks_per_second = rate
-	Engine.max_physics_steps_per_frame = 1
+	Engine.physics_ticks_per_second = tick
+	Engine.max_physics_steps_per_frame = 8
 	_define_cases()
-	print("M02 harness: physics=%s rate=%d cases=%d" % [ProjectSettings.get_setting("physics/3d/physics_engine"), rate, cases.size()])
+	print("M02 harness: physics=%s fps=%d tick=%d cases=%d" % [ProjectSettings.get_setting("physics/3d/physics_engine"), rate, tick, cases.size()])
 
 # ---------------------------------------------------------------- worlds
 func _box(parent: Node3D, center: Vector3, size: Vector3, rot_x_deg: float = 0.0) -> void:
@@ -216,7 +219,7 @@ func _start_next() -> bool:
 	t = 0.0
 	warm = 2
 	rec = {"name": cur.name, "visited": [], "fail": [], "pen_run": 0, "max_pen_run": 0, "min_y": 1e9,
-		"speed_at": {}, "trans_times": [], "tread_ticks": 0, "ticks": 0, "max_trans_per_s": 0, "last_mode": ""}
+		"speed_at": {}, "trans_times": [], "tread_ticks": 0, "ticks": 0, "max_trans_per_s": 0, "last_mode": "", "ring": [], "dumped": false}
 	return true
 
 func _physics_process(delta: float) -> bool:
@@ -250,6 +253,10 @@ func _invariants(dt: float) -> void:
 			if t - tt <= 1.0: n += 1
 		rec.max_trans_per_s = maxi(rec.max_trans_per_s, n)
 	rec.last_mode = m
+	var sd: Dictionary = body.last_sense
+	if not sd.is_empty():
+		rec.ring.append("t=%.2f %s d=%.2f floor=%s blocked=%s y=%.2f vy=%.2f" % [t, m, sd.water_y - sd.feet.y, sd.on_floor, sd.get("stand_blocked", false), p.y, v.y])
+		if rec.ring.size() > 40: rec.ring.pop_front()
 	if m == "TREAD": rec.tread_ticks += 1
 	rec.min_y = minf(rec.min_y, p.y)
 	for mark in [5.5, 11.5]:
@@ -283,6 +290,9 @@ func _invariants(dt: float) -> void:
 		_fail("I5 mode flicker %d/s at t=%.2f" % [rec.max_trans_per_s, t])
 
 func _fail(msg: String) -> void:
+	if not rec.dumped:
+		rec.dumped = true
+		print("  first failure in %s: %s\n    " % [rec.name, msg] + "\n    ".join(rec.ring.slice(-24)))
 	if rec.fail.size() < 5 and not rec.fail.has(msg):
 		rec.fail.append(msg)
 
@@ -312,5 +322,5 @@ func _finish() -> bool:
 	print("M02 harness rate %d: %d/%d PASS%s" % [rate, npass, results.size(), "  (planted fault run)" if fault else ""])
 	if out_path != "":
 		var f := FileAccess.open(out_path, FileAccess.WRITE)
-		f.store_string(JSON.stringify({"rate": rate, "fault": fault, "results": results}, "  "))
+		f.store_string(JSON.stringify({"rate": rate, "tick": tick, "fault": fault, "results": results}, "  "))
 	return true

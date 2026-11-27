@@ -27,9 +27,12 @@ var wade_enter := 0.55         # water depth over the feet (m) where walking bec
 var wade_exit := 0.45
 var swim_enter := 1.14         # depth where wading becomes swimming
 var swim_exit := 1.04
+var airborne_swim_depth := 0.7   # no ground + water over this depth = floating (chest band of a 1.38 m child)
 var tread_band := 0.25         # eye within this of the surface counts as treading
 var surface_hold_k := 6.0      # how firmly treading holds the eye at the surface
 var buoyancy_rise := 0.25      # m/s gentle rise when idle in water (neutral-plus)
+var float_time := 0.5         # s afloat (no ground) before wading turns into swimming
+var coyote_time := 0.15        # s off the ground still counted as grounded (slopes, wave bob, small hops)
 var max_speed := {Mode.WALK: 3.0, Mode.WADE: 2.6, Mode.SWIM: 6.0, Mode.TREAD: 3.0, Mode.FALL: 30.0}
 
 var mode: int = Mode.WALK
@@ -37,6 +40,7 @@ var velocity := Vector3.ZERO
 var facing_yaw := 0.0
 var mode_time := 0.0
 var transitions := 0
+var air_time := 0.0
 
 func configure(rec: Dictionary) -> void:
 	for k in rec:
@@ -53,24 +57,30 @@ func depth(s: Dictionary) -> float:
 
 func _next_mode(s: Dictionary, inp) -> int:
 	var d := depth(s)
+	var g: bool = s.on_floor or (air_time < coyote_time and velocity.y < 0.5)
 	var eye_depth: float = s.water_y - (s.feet.y + eye_height)
 	match mode:
 		Mode.WALK, Mode.FALL:
-			if d > swim_enter or (not s.on_floor and d > swim_exit):
+			# airborne in water past the chest band: she is floating, not wading (wading needs ground under her)
+			if d > swim_enter or (not g and d > airborne_swim_depth):
 				return Mode.SWIM
+			if not g:
+				return Mode.FALL
 			if d > wade_enter:
 				return Mode.WADE
-			return Mode.WALK if s.on_floor else Mode.FALL
+			return Mode.WALK if g else Mode.FALL
 		Mode.WADE:
-			if d > swim_enter or (not s.on_floor and d > swim_exit):
+			# wading only becomes swimming past swim_enter, or after floating off the ground for float_time above
+			# swim_exit (keeps the 1.04/1.14 hysteresis intact while bobbing in chest-deep water)
+			if d > swim_enter or (air_time > float_time and d > swim_exit + 0.05):
 				return Mode.SWIM
 			if d < wade_exit:
-				return Mode.WALK if s.on_floor else Mode.FALL
+				return Mode.WALK if g else Mode.FALL
 			return Mode.WADE
 		Mode.SWIM, Mode.TREAD:
 			if s.get("stand_blocked", false):
 				pass   # no room for the standing body here (cave, overhang): keep swimming
-			elif s.on_floor and d < swim_exit:
+			elif g and d < swim_exit:
 				return Mode.WADE if d > wade_exit else Mode.WALK
 			elif d < 0.0:
 				return Mode.FALL   # left the water (e.g. wave dropped away)
@@ -87,6 +97,7 @@ static func _exp_blend(cur: Vector3, target: Vector3, k: float, dt: float) -> Ve
 
 ## One tick. Returns the velocity the adapter should apply this tick.
 func step(dt: float, inp, s: Dictionary) -> Vector3:
+	air_time = 0.0 if s.on_floor else air_time + dt
 	var nm := _next_mode(s, inp)
 	if nm != mode:
 		mode = nm; mode_time = 0.0; transitions += 1

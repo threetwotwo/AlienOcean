@@ -37,3 +37,16 @@ Clock: update() takes plain values; dt comes from whatever drives it. Frame budg
 ## Portability note
 Core modules are GDScript on RefCounted with no Node/scene types: portable at the logic level (the design and tests
 carry to another engine), not at the language level (another engine means rewriting the code).
+
+## Gameplay modules (owner: gameplay thread "Build the core gameplay modules")
+Plan: gameplay study https://claude.ai/artifact/WYe9FpSjX1fJcJXzrePV1z (M01-M28). Stress matrix: plans/gameplay_v2/STRESS_MATRIX.md
+in the project files (invariants I1-I10, cases T/V/C/A/X/S). Physics: Jolt (project setting), fixed 60 Hz simulation tick.
+| Module | Version | What | Test |
+|---|---|---|---|
+| M01 input | core 0.1.0 | `core/m01_input/input_packet.gd`: one packet per tick, radial deadzone + curve, camera yaw/pitch ride along | via M02 |
+| M02 player motor | core 0.1.0, adapter 0.1.0 | `core/m02_motor/player_motor.gd` modes WALK/WADE/SWIM/TREAD/FALL with hysteresis, coyote and float times; `adapters/godot/player_body.gd` CharacterBody3D on Jolt, stand capsule / swim sphere swap only when the capsule fits, step-up to 35 cm | `tests/test_motor.gd` |
+| M23 harness | 0.1.0 | scripted cases + seeded monkey runs, invariants every tick, last-24-tick dump on first failure, planted fault | `tests/run_motor.sh` |
+Run everything: `GODOT=<godot 4.7> tests/run_motor.sh [monkey_runs] [monkey_secs]` (exit 0 = all pass, fault caught, 30/60/120 fps identical).
+Always pass `--fixed-fps` when running a harness script by hand: without it Godot runs in real time.
+Known: Jolt prints "job system exceeded the maximum number of jobs" once while the body pushes a wall for seconds (step 50 cm case);
+it waits and continues, no result changes. Watch it when real scenes load.
