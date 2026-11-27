@@ -26,7 +26,7 @@ const SHADER := preload("res://fish/school_fish.gdshader")
 @export var lod_dist := Vector2(12.0, 30.0)   # metres to the camera: LOD0 within x, LOD1 within y, LOD2 beyond
 @export var look := {}                  # shader overrides (back_colour, stripe, ...)
 @export var collision_mask := 1
-@export var bank_gain := 3.0            # art direction: banks read at school scale (physics alone gives ~1 deg)
+@export var bank_gain := 1.0            # art multiplier on Thalassa's roll law (wildlife-ecosystem.js: 0.22 x yaw rate, cap 0.40 rad)
 
 var sim
 var params: Dictionary
@@ -158,7 +158,9 @@ func _threaded_step() -> void:
 	step_ms = (Time.get_ticks_usec() - t0) / 1000.0
 
 ## Advance by delta seconds (called from _process; tests call it directly with a fixed delta).
+var _draw_dt := 1.0 / 60.0
 func advance(delta: float) -> void:
+	_draw_dt = delta
 	main_ms = 0.0
 	if paused: _draw(1.0); return
 	_update_actors(delta)
@@ -228,10 +230,12 @@ func _draw(alpha: float) -> void:
 		if not inside: continue
 		var dcam := pos.distance_to(cp)
 		var lod := 0 if dcam < lod_dist.x else (1 if dcam < lod_dist.y else 2)
-		# bank into the turn from the sim's signed yaw rate: atan(v w / g) with an art gain (Abzu-like readable turns)
+		# bank into the turn: Thalassa v20.19 wildlife-ecosystem.js (roll = 0.22 x yaw rate, cap 0.40 rad, eased at 5.5/s),
+		# the tuning Gary saw in the prototype; replaces the earlier atan(v w / g) x 3 guess
 		var v: float = _d_v[i]
 		var yaw: float = _d_yaw[i]
-		var bank := clampf(atan(v * bl * yaw / 9.81) * bank_gain, -0.7, 0.7)
+		_bank[i] = lerpf(_bank[i], clampf(yaw * 0.22 * bank_gain, -0.40, 0.40), 1.0 - exp(-5.5 * _draw_dt))
+		var bank: float = _bank[i]
 		var side := Vector3.UP.cross(fwd)
 		if side.length() < 1e-4: side = Vector3.FORWARD
 		side = side.normalized()

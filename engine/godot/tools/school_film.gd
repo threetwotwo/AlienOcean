@@ -91,11 +91,29 @@ func _setup():
 		"rush":
 			var s2 := _school("trevally", 0, 11, home + Vector3(2.0, 0.6, -2.0), false, {"back_colour": Color(0.16, 0.26, 0.30), "flank_colour": Color(0.80, 0.84, 0.86)})
 			s2.sim.p.R_home = 6.0; s2.sim.p.home = Vector3.ZERO
-			# she darts at the school (2.2 m/s) after it has settled
+			# she darts (2.4 m/s) straight at where the school is when she sets off, and on through it; the camera
+			# watches from the side, 7 m off her line
+			var st := {"a": Vector3.ZERO, "dir": Vector3.RIGHT, "set": false}
 			path = func(tt: float) -> Vector3:
-				return home + Vector3(-9.0, 0.4, 3.0) + Vector3(1, 0, -0.33).normalized() * (2.2 * maxf(tt - 4.0, 0.0))
-			cam_path = func(tt: float) -> Array: return [home + Vector3(-2.0, 1.6, 9.0), home + Vector3(1.0, 0.0, -2.0)]
-			dur = 12.0
+				var c: Vector3 = s2.sim.metrics().centre_m if not st.set else st.a
+				var start := c + Vector3(-7.0, 0.0, 0.0)
+				if tt < 4.0: return start
+				if not st.set: st.a = c; st.set = true; st.dir = Vector3.RIGHT
+				return st.a + Vector3(-7.0, 0.0, 0.0) + st.dir * (2.4 * (tt - 4.0))
+			cam_path = func(tt: float) -> Array:
+				var c: Vector3 = st.a if st.set else s2.sim.metrics().centre_m
+				return [c + Vector3(-1.0, 1.2, 7.0), c + Vector3(-0.5, 0.0, 0.0)]
+			dur = 10.0
+		"circle":
+			var s3 := _school("trevally", 0, 4, home + Vector3(0.0, 0.8, 0.0), true, {"back_colour": Color(0.16, 0.26, 0.30), "flank_colour": Color(0.80, 0.84, 0.86)})
+			# she drifts in slowly and hovers: curious trevally circle her (Thalassa calm-diver behaviour)
+			path = func(tt: float) -> Vector3: return home + Vector3(-6.0 + 0.5 * clampf(tt, 0.0, 6.0), 1.0, 2.0)
+			cam_path = func(tt: float) -> Array:
+				var g: Vector3 = home + Vector3(-6.0 + 0.5 * clampf(tt, 0.0, 6.0), 1.0, 2.0)
+				var cp: Vector3 = g + Vector3(-3.0, 0.5, 6.5)
+				cp.y = minf(cp.y, wr.water.water_y.call(cp.x, cp.z, 0.0) - 0.8)   # stay under the surface
+				return [cp, g + Vector3(2.0, -0.4, -1.5)]
+			dur = 20.0
 	girl.position = path.call(0.0)
 
 func _rock(key: String) -> AABB:

@@ -273,6 +273,44 @@ func _run() -> void:
 		var med: float = srt[2]
 		_add("S9", "rush (2.5 m/s), 5 seeds: startle wave reaches the school (median), all regroup within 15 s", med >= 0.3 and groups.min() >= 0.85 and inv_ok,
 			{"startled_share": shares, "median": med, "largest_group_15s": groups, "nnd_min": snappedf(nmin, 0.001)})
+	# S11: Thalassa calm-diver circling: a trevally school near a girl hovering still circles her at a respectful distance
+	if _want("S11"):
+		_new_world(); await _settle_physics()
+		var s := _school("trevally", 160, 4, Vector3(0, -10, 0), true)
+		await _run_school(s, 8.0, 1.0 / 30.0)
+		var c: Vector3 = s.sim.metrics().centre_m
+		var gp := c + Vector3(6.0, 0, 0)
+		var still := func(_tt: float) -> Array: return [{"pos": gp, "vel": Vector3.ZERO, "radius": 0.25, "axis": Vector3.RIGHT, "half_len": 0.55}]
+		var rec := await _run_school(s, 25.0, 1.0 / 30.0, still)
+		var sim = s.sim
+		var mill := 0.0; var band := 0; var dmin := INF
+		for i in sim.N:
+			var wp: Vector3 = sim.origin + sim.x[i] * sim.bl
+			var r := Vector3(wp.x - gp.x, 0, wp.z - gp.z)
+			var dd := r.length(); dmin = minf(dmin, (wp - gp).length())
+			if dd > 2.6 and dd < 12.5: band += 1
+			mill += r.normalized().cross(Vector3(sim.e[i].x, 0, sim.e[i].z).normalized()).y
+		mill = absf(mill) / sim.N
+		var inv := _invariants(rec, sim.p)
+		_add("S11", "calm girl hovering (Thalassa circling): trevally circle her in the 2.6-12.5 m band, nobody startled or inside her", mill >= 0.5 and float(band) / sim.N >= 0.7 and rec.startled_max <= int(0.05 * sim.N) and dmin >= 0.6 and inv.S4 and inv.S5,
+			{"mill": snappedf(mill, 0.01), "in_band": snappedf(float(band) / sim.N, 0.01), "min_dist_m": snappedf(dmin, 0.01), "startled_max": rec.startled_max})
+	# S12: Thalassa silent observation: the school gathers on a viewing ring round the observing girl
+	if _want("S12"):
+		_new_world(); await _settle_physics()
+		var s := _school("trevally", 160, 6, Vector3(0, -10, 0), true)
+		await _run_school(s, 5.0, 1.0 / 30.0)
+		var gp: Vector3 = s.sim.metrics().centre_m + Vector3(10.0, 0, 0)
+		var obs := func(_tt: float) -> Array: return [{"pos": gp, "vel": Vector3.ZERO, "radius": 0.25, "kind": "observer", "ring_m": 4.8}]
+		var rec := await _run_school(s, 30.0, 1.0 / 30.0, obs)
+		var sim = s.sim
+		var on_ring := 0
+		for i in sim.N:
+			var wp: Vector3 = sim.origin + sim.x[i] * sim.bl
+			var dd := Vector2(wp.x - gp.x, wp.z - gp.z).length()
+			if dd > 4.8 * 0.6 and dd < 4.8 * 1.4: on_ring += 1
+		var inv := _invariants(rec, sim.p)
+		_add("S12", "silent observation (Thalassa): the school gathers on the viewing ring (4.8 m) round her", float(on_ring) / sim.N >= 0.7 and inv.S4 and inv.S5,
+			{"on_ring": snappedf(float(on_ring) / sim.N, 0.01), "nnd_min": snappedf(rec.nnd_min, 0.001), "close_max": rec.close_max})
 	# S10: cost (cloud CPU; the Mac's P-cores are faster)
 	if _want("S10"):
 		_new_world(); await _settle_physics()

@@ -11,6 +11,8 @@ day the milestone was reached.
   rock guard, calm reaction to the girl, startle wave on a rush. Pass checks S1-S10 in PASS.md, stress harness with
   random monkey runs and a planted fault (tests/run_school.sh). Stand-in fish mesh and swim law until the maker's
   trevally lands. Supersedes the parked Unreal school lab (schools/, schoollab v1-v87) as the live school system.
+  Thalassa v20.19's social behaviours ported on top (calm-diver circling, silent-observation ring, ride escort,
+  roll law); checks S11-S12.
 - Creature maker moves into the repo as stage modules (creatures/maker/, tool version 0.3.0-dev): record, form, chart,
   cage features (template, eye, mouth, gill, finish), UV, maps, fins, Blender export, checks, board. Output is
   byte-identical to the last fish-restart proof script. Real openings: mouth, throat and both gill passages are topology

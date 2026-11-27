@@ -31,6 +31,7 @@ const DEFAULTS := {
 	"pred_R": 10.0,          # BL: predator detection radius (school.py experiments)
 	"burst_v": 8.0, "burst_turn_deg": 900.0, "startle_k": 1.0,
 	"pitch_max_deg": 50.0,   # schoollab v46
+	"curious": 0.0, "calm_diver_v_m": 1.85, "curious_r0_m": 2.6, "curious_r1_m": 12.5, "curious_ring_m": 5.0,   # Thalassa calm-diver circling
 	"no_overlap": true, "overlap": 0.36,   # BL; above the 0.3 BL clump line of PASS S5 so a pressed crowd sits outside it
 	"school_size": 120, "bl_m_standin": 0.2,
 }

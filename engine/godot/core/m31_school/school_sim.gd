@@ -21,6 +21,9 @@
 ##      inside the flight zone startles (behaviour v18 senseThreat), as does a short time to contact
 ##   D7 the overlap guard separates every close pair after the move, not only each fish's nearest (overlap_pairs;
 ##      golden traces turn it off to match school.py)
+##   D8 Thalassa v20.19 social behaviours (wildlife-ecosystem.js section 1): calm-diver circling (species `curious`),
+##      silent-observation viewing ring (actor kind "observer"), escort of a ridden creature (kind "ride"); its m/s2
+##      accelerations go through the Katz split
 extends RefCounted
 
 const Rng := preload("res://core/m31_school/school_rng.gd")
@@ -337,12 +340,19 @@ func step(env: Dictionary = {}) -> void:
 			zlo = p.abs_depth[0]; zhi = p.abs_depth[1]
 		var up := maxf((zlo + 2.0 - y) / 2.0, 0.0) - maxf((y - (zhi - 2.0)) / 2.0, 0.0)
 		Si.y += 1.5 * up - 0.8 * ei.y
+		# silent observation (Thalassa wildlife-ecosystem.js B): an observing girl draws the school onto a viewing ring and
+		# the home pull gives way (no tug-of-war)
+		var obs_attr := 0.0
+		for a in actors:
+			if a.get("kind", "") == "observer":
+				var d_m: float = (origin + xi * bl).distance_to(a.pos)
+				obs_attr = maxf(obs_attr, smoothstep(66.0, 26.0, d_m) * clampf(a.get("strength", 1.0), 0.0, 1.0))
 		# home tether
-		if p.R_home > 0.0:
+		if p.R_home > 0.0 and obs_attr < 0.99:
 			var hv: Vector3 = p.home - xi
 			hv.y *= 0.3
 			var dh := Vector2(hv.x, hv.z).length()
-			var pull := hv.normalized() * clampf((dh - p.R_home) / p.R_home, 0.0, 3.0)
+			var pull := hv.normalized() * clampf((dh - p.R_home) / p.R_home, 0.0, 3.0) * (1.0 - 0.92 * obs_attr)
 			Si += (pull - ei * pull.dot(ei)) * 0.9
 		# test spheres (school.py) and the world's rocks (D4): a push that fades over 1 BL from the surface
 		for sph in spheres:
@@ -374,8 +384,46 @@ func step(env: Dictionary = {}) -> void:
 			var av: Vector3 = a.vel / bl
 			var pv := xi - ap
 			var dp := pv.length()
-			var is_pred: bool = a.get("kind", "player") == "predator"
+			var kind: String = a.get("kind", "player")
+			var is_pred: bool = kind == "predator"
 			var R: float = p.pred_R if is_pred else p.fid + a.get("radius", 0.0) / bl
+			# Thalassa v20.19 social behaviours (wildlife-ecosystem.js section 1 B and D), its accelerations in m/s2
+			# applied through the Katz split: sideways part / (v x k_turn) turns, along-heading part / bl changes speed
+			var acc_m := Vector3.ZERO
+			var d_m := dp * bl
+			var off_m := pv * bl
+			var sp_m: float = a.vel.length()
+			if kind == "observer":
+				# viewing ring: each fish on its own radius, gliding round tangentially, gently bobbing
+				var ring_m: float = a.get("ring_m", 4.8) * (0.72 + float((i * 19) % 7) * 0.08)
+				var hz := Vector3(off_m.x, 0.0, off_m.z)
+				var hl := maxf(hz.length(), 1e-6)
+				var tang := Vector3(-hz.z, 0.0, hz.x) / hl
+				var bob: float = sin(t * 0.44 + i * 0.65) * 1.55
+				acc_m = (hz / hl * (ring_m - hl) * 0.92 + (tang * 1.55 - ei * v[i] * bl) * 0.68) * obs_attr
+				acc_m.y += ((a.pos.y + bob) - (origin.y + xi.y * bl)) * 0.85 * obs_attr
+			elif kind == "ride":
+				# the ridden manta / turtle: part calmly round it, escort it in its slipstream further out
+				var part_m: float = a.get("part_m", 3.8)
+				if d_m >= part_m and d_m < 14.5:
+					var cv: Vector3 = a.vel
+					var ring_pull := clampf((7.0 - d_m) * 0.14, -0.35, 0.35)
+					acc_m = (cv - ei * v[i] * bl) * 0.38 + off_m / d_m * ring_pull
+					acc_m.y = (a.pos.y + 0.35 - (origin.y + xi.y * bl)) * 0.28
+			elif not is_pred and p.curious > 0.0 and sp_m < p.calm_diver_v_m and t - maxf(t_on[i], t_alert[i]) > p.alert_T * 0.7:   # not while alarmed
+				# a calm diver: curious fish circle her at a respectful distance (ring 5 m, between 2.6 and 12.5 m)
+				if d_m > p.curious_r0_m and d_m < p.curious_r1_m:
+					var hz2 := Vector3(off_m.x, 0.0, off_m.z)
+					var hl2 := maxf(hz2.length(), 1e-6)
+					var tang2 := Vector3(-hz2.z, 0.0, hz2.x) / hl2
+					acc_m = (tang2 * 1.05 + hz2 / hl2 * ((p.curious_ring_m - hl2) * 0.28)) * p.curious
+					acc_m.y = (a.pos.y + 0.25 - (origin.y + xi.y * bl)) * 0.25 * p.curious
+			if acc_m != Vector3.ZERO:
+				var a_bl := acc_m / bl
+				var apar := a_bl.dot(ei)
+				Si += (a_bl - ei * apar) / maxf(v[i] * p.k_turn, 0.3)
+				dvv[i] += apar
+			if kind == "observer": continue          # silent observation: no flight from her (Thalassa: no scatter)
 			if dp >= R: continue
 			var ph := av.normalized() if av.length() > 1e-6 else -pv.normalized()
 			var side := pv - ph * pv.dot(ph)

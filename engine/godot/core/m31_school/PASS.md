@@ -16,6 +16,8 @@ school lab schoollab v1-v87 (schools/). Run: `tests/run_school.sh` (all) or the 
 | S8 | Calm girl (no-harm tone) | she swims through at 0.6 m/s: startled fish, gap to her body, cohesion 10 s later | <= 5 % startled; gap >= 0.9 x keep-out; >= 85 % one group | S8 |
 | S9 | Rush | she darts in at 2.5 m/s, 5 seeds: startle share; cohesion 15 s later | median >= 30 % startled (the wave), every seed >= 85 % regrouped | S9 |
 | S10 | Cost (cloud CPU) | worker step, main-thread ms a frame, 120 fish | step <= 6 ms (a 30 Hz step has 33 ms on its worker); main mean <= 0.8 ms, p95 <= 1.5 ms | S10 |
+| S11 | Calm-diver circling (Thalassa) | girl hovering 6 m from a trevally school, 25 s: mill about her, share in the 2.6-12.5 m band, startles, closest fish | mill >= 0.5; >= 70 % in band; <= 5 % startled; closest >= 0.6 m | S11 |
+| S12 | Silent observation ring (Thalassa) | observer kind, ring 4.8 m, 30 s: share of fish within 0.6-1.4 x ring | >= 70 %, S4-S5 hold | S12 |
 | Planted fault | swept guard and rock push off | S3 must FAIL | caught | --fault |
 | Monkeys | random reefs, species, sizes, actor paths, 30/60/120 fps, threaded or not | S3-S5 every step | all pass | --monkey N |
 
