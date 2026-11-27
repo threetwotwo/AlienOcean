@@ -1,5 +1,10 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): one sky dome
+- Engine: look/sky.gdshader takes its dome from look/sky_dome.gdshaderinc (the water surface's copy), so the sky overhead
+  and the sky in the water can't drift apart. The old look/water_surface.gdshader is removed (SeaSurface replaced it,
+  PR #37). Shot tool: the sea is pinned at its mean level by default (WorldRoot.tide_on false); AO_TIDE=1 follows the moons.
+
 ## 0.6.0-dev (28 Nov 2026): the Unreal god rays
 - Engine: god rays 0.1.0 (`look/god_rays.gdshaderinc`, drawn by underwater view 0.2.0): the lagoon's light shafts as
   they ran at lagoonwater v98 (GodPhys 1, GodUnits 1, GodPick 1). Source: the god-ray node as built

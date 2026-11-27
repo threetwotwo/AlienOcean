@@ -1,8 +1,8 @@
 // Sky dome for water shaders 0.1.0 (water surface thread): the clear-air dome's radiance in nits along any direction,
 // for the sky seen through Snell's window from below and the sky mirrored on the sea from above.
-// dome() is a copy of look/sky.gdshader dome() (Godot's PhysicalSkyMaterial shape; WorldRoot.dome() mirrors it on the
+// dome(): look/sky.gdshader includes this file for its dome (one copy) (Godot's PhysicalSkyMaterial shape; WorldRoot.dome() mirrors it on the
 // CPU); WorldRoot pushes the same shape sun and scale the sky uses (water_dome_sun, water_sky_norm), so the sky in
-// the water is the sky overhead. TO MERGE: sky.gdshader should include this file instead of its own copy (engine thread).
+// the water is the sky overhead.
 global uniform vec3 water_dome_sun;
 global uniform float water_sky_norm;
 vec3 sky_dome_shape(vec3 v, vec3 s) {
