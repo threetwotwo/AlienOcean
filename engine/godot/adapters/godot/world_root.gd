@@ -20,6 +20,8 @@ extends Node3D
 @export var noon_yaw := 0.0
 @export var floor_y := 0.0            # the lagoon's sand (floor tiles sit at y -0.3..0.1 under a 4 m surface)
 @export var z_ref := 2.0              # depth the key light is pre-attenuated to (eye / fish depth)
+const UNDER_WHITE := {"calm_lagoon": Vector3(1.0713, 0.9914, 0.8748)}   # v183: under water the white point is daylight (6500 K)
+const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0.2 m of depth
 
 var clock: GDScript = SkyClock
 var optics: GDScript = WaterOptics
@@ -34,6 +36,7 @@ var sky_mat: ShaderMaterial
 var key := ""
 var last := {}
 var _dome_sun := Vector3.INF
+var agx_fx: AgxEffect
 var _dome_g := 0.0
 
 static func to_godot(v: Vector3) -> Vector3:
@@ -65,8 +68,17 @@ func _init() -> void:
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	env.glow_enabled = true; env.glow_intensity = 0.3
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
+	agx_fx = AgxEffect.new(); var comp := Compositor.new(); comp.compositor_effects = [agx_fx]; we.compositor = comp
+	set_agx(true)
 	cam_attr = CameraAttributesPhysical.new(); cam_attr.auto_exposure_enabled = false
 	cam_attr.frustum_near = 0.02; cam_attr.frustum_far = 400.0
+
+func set_agx(on: bool) -> void:
+	## on: the Unreal AgX tonemapper (look/agx_post.glsl) replaces Godot's; LINEAR leaves only the sRGB encoding and
+	## Godot's glow is off (Unreal bloom not ported yet). off: Godot's built-in AgX with its glow, as before 27 Nov.
+	agx_fx.enabled = on
+	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR if on else Environment.TONE_MAPPER_AGX
+	env.glow_enabled = not on
 
 func attach_camera(cam: Camera3D) -> void:
 	## physical exposure on the camera, plus the water between the eye and every pixel (look/underwater_view)
@@ -113,6 +125,14 @@ func apply(cam_y: float) -> Dictionary:
 	exposure = pow(2.0, bias) / (1.2 * pow(2.0, ev))  # buffer units per nit (Godot's normalisation)
 	_push_water(water_y, up_air, beam_h, st.skylux)
 	_push_sky(st)
+	if agx_fx.enabled:
+		agx_fx.exposure = exposure; agx_fx.buf_scale = exposure   # Godot's buffer arrives already exposed (measured 27 Nov)
+		agx_fx.white_now = SkyClock.white_now(st)
+		agx_fx.sun_dir = to_godot(st.sun.dir); agx_fx.under = under
+		agx_fx.moon_a = _moon_view(st.A.dir, SkyClock.MOONS[0].drawn_deg)
+		agx_fx.moon_b = _moon_view(st.B.dir, SkyClock.MOONS[1].drawn_deg)
+		var kw := clampf((water_y - cam_y) / UNDER_WHITE_FADE_M, 0.0, 1.0)
+		agx_fx.depth_gain = Vector3.ONE.lerp(UNDER_WHITE.get(place, Vector3.ONE), kw)
 	var a := WaterOptics.absorb(); var b := WaterOptics.scatter()
 	if under:
 		var tr := WaterOptics.refract_sun(up_air)
@@ -146,6 +166,10 @@ func apply(cam_y: float) -> Dictionary:
 	last = {"key": key, "elev": body.elev, "total_lux": st.total, "sky_lux": st.skylux, "beam_h": beam_h,
 		"ev100": ev, "bias": bias, "under": under}
 	return last
+
+static func _moon_view(d: Vector3, drawn_deg: float) -> Vector4:
+	var g := to_godot(d)
+	return Vector4(g.x, g.y, g.z, deg_to_rad(drawn_deg) * 0.5)
 
 # ---- water uniforms (shared by every water-aware shader: look/water_physics.gdshaderinc) ----
 

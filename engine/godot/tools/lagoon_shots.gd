@@ -5,7 +5,7 @@
 ## Cdom 0.03, ScatK 0.40, GlowK 2.50) in the seabed, surface and underwater-view shaders. Env: AO_HOUR (default 12).
 ## 0.3.0: the world (light, sky, exposure, water) comes from adapters/godot/world_root.gd, the same node the game uses.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/lagoon_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
-## Env: AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
+## Env: AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
 ## Still to port: stars, AgX extras, the surface's waves and tide, caustics, god rays.
 extends SceneTree
 
@@ -63,6 +63,7 @@ func _setup():
 	wr = WorldRoot.new()
 	wr.hours = float(OS.get_environment("AO_HOUR")) if OS.get_environment("AO_HOUR") != "" else 12.0
 	world.add_child(wr)
+	if OS.get_environment("AO_AGX") == "0": wr.set_agx(false)   # Godot's built-in AgX, for before/after
 	world.add_child(wr.make_surface())
 	# hero fish, hovering near the coral heads
 	fish = _load(args[1]) as Node3D

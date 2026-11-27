@@ -154,6 +154,15 @@ static func sky_state(hours: float, noon_yaw := 0.0, day_hours := 24.0, months :
 	st["skylux"] = st.sun.sky + st.A.sky + st.B.sky + NIGHT_SKY_LUX
 	return st
 
+static func white_now(st: Dictionary) -> float:
+	## white balance that follows the light: illuminance-weighted mean in mireds (sun_v184 white_now)
+	var w: float = st.sun.horiz + st.A.horiz + st.B.horiz
+	if w <= 0.0: return STAR.kelvin
+	var mired := 0.0
+	for n in ["sun", "A", "B"]:
+		mired += st[n].horiz * 1e6 / st[n].kelvin
+	return 1e6 / (mired / w)
+
 static func pick_key(st: Dictionary, current := "") -> String:
 	## the one key light carries whichever body lights the site most (25% hysteresis)
 	if st.sun.elev > 0.0:
