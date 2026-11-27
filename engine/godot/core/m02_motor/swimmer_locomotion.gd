@@ -26,8 +26,9 @@ var config := {
 	"has_surface": true, "surface_y": 0.0, "sway_scale": 0.85, "classic_drag": false, "pitch_limit": 1.42,
 	"base_fov": 74.0, "sprint_fov": 80.5,
 	"walk_speed": 1.38, "jog_speed": 2.45, "crouch_speed": 0.82, "wade_min_speed_scale": 0.64,
-	"eye_height": 1.24, "crouch_eye_drop": 0.30, "jump_gravity": 9.81, "jump_speed": 3.15,
+	"step_lag": 0.04, "walk_off_drop": 0.36, "eye_height": 1.24, "crouch_eye_drop": 0.30, "jump_gravity": 9.81, "jump_speed": 3.15,
 	"wade_enter_depth": 1.04, "wade_exit_depth": 1.14,
+	"thalassa_exact": false,   # true: the JS exactly (golden test); false: the FIX lines below run
 }
 
 var pos := Vector3(0, -6.5, 16.5)
@@ -66,6 +67,7 @@ var shore_vel_xz := Vector2.ZERO
 var shore_accel_xz := Vector2.ZERO
 var shore_desired_vel_xz := Vector2.ZERO
 var shore_jump_offset := 0.0
+var shore_air_lag := 0.0
 var shore_jump_vel_y := 0.0
 var shore_is_airborne := false
 var shore_jump_queued := false
@@ -249,6 +251,7 @@ func _update_shore(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, 
 	# anticipation-coiled jump / running dive-in
 	shore_just_landed = false
 	shore_landing_impact = maxf(0.0, shore_landing_impact - sdt * 4.5)
+	var was_air := shore_is_airborne
 	if jump_just_pressed and not shore_is_airborne and not shore_jump_queued:
 		var ahead_floor := _floor_y(env, pos.x + fwd_h.x * 3.0, pos.z + fwd_h.z * 3.0) if env.has("floor_height") else raw_floor_y
 		var diving_into_sea := in_boost and in_fwd > 0.1 and (water_depth > 0.22 or (is_finite(ahead_floor) and ahead_floor < surf_y - 0.55))
@@ -268,7 +271,9 @@ func _update_shore(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, 
 				_splash(env, pos, 2.2, false)
 			else:
 				shore_jump_vel_y = c.jump_speed * v_jit * lerpf(1.0, 0.78, wade_blend) * (1.0 - shore_crouch_blend * 0.15)
-				shore_crouch_blend *= 0.4
+				# FIX: Thalassa cut the crouch to 40% at take-off, an 18 cm eye pop in one tick from a crouch; it now
+				# unwinds at its own 10.5/s while airborne (stress monkey runs: pelvis 0.21 m against the eye)
+				if c.thalassa_exact: shore_crouch_blend *= 0.4
 			shore_jump_pending_dive = false
 	else:
 		shore_jump_anticip = lerpf(shore_jump_anticip, 0.0, exp_k(18.0, sdt))
@@ -286,17 +291,43 @@ func _update_shore(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, 
 	pos.z += shore_vel_xz.y * sdt
 	var new_floor := _floor_y(env, pos.x, pos.z) if env.has("floor_height") else raw_floor_y
 	var eff_floor := new_floor if is_finite(new_floor) else raw_floor_y
+	# FIX: in the air the jump offset is height above the floor under her; when that floor changes (off a ledge, over
+	# a step) re-base it so the eye stays on its arc (Thalassa's height-field had no ledges: the eye dropped/rose by
+	# the floor step in one tick, 0.32 m off a 30 cm step)
+	if shore_is_airborne and not c.thalassa_exact and is_finite(eff_floor) and is_finite(shore_floor_y):
+		shore_jump_offset += shore_floor_y - eff_floor
+		if shore_jump_offset <= 0.0:
+			var imp2 := absf(shore_jump_vel_y)
+			shore_jump_offset = 0.0; shore_jump_vel_y = 0.0; shore_is_airborne = false; shore_just_landed = true
+			shore_landing_impact = clampf(imp2 / 3.4, 0.28, 1.0)
 	shore_floor_y = eff_floor
 	if env.has("terrain_normal"):
 		shore_floor_normal = env.terrain_normal.call(pos.x, pos.z)
 	var ant_dip := shore_jump_anticip * 0.052
+	if not shore_is_airborne and not c.thalassa_exact and is_finite(eff_floor):
+		# walking off a drop deeper than a step falls under gravity (Thalassa eased the eye down at 18/s, 13 cm in the
+		# first tick off a 50 cm ledge, faster than a fall, and the body never left the ground)
+		var drop: float = pos.y - (eff_floor + c.eye_height - shore_crouch_blend * c.crouch_eye_drop)
+		if drop > c.walk_off_drop:
+			shore_is_airborne = true; shore_jump_vel_y = 0.0; shore_jump_offset = drop
 	var target_eye_y: float = eff_floor + c.eye_height - shore_crouch_blend * c.crouch_eye_drop + shore_jump_offset - ant_dip
-	pos.y = maxf(eff_floor + c.eye_height - 0.1, target_eye_y) if shore_is_airborne else lerpf(pos.y, target_eye_y, exp_k(18.0, sdt))
+	if shore_is_airborne:
+		# FIX: on the ground the eye trails its target at 18/s, in the air Thalassa set it outright: at take-off the
+		# trail (up to 16 cm rising out of a crouch) vanished in one tick. The trail now keeps closing at the same rate.
+		if c.thalassa_exact: shore_air_lag = 0.0
+		elif not was_air: shore_air_lag = maxf(0.0, target_eye_y - pos.y)
+		else: shore_air_lag *= 1.0 - exp_k(18.0, sdt)
+		pos.y = maxf(eff_floor + c.eye_height - 0.1, target_eye_y - shore_air_lag)
+	else:
+		shore_air_lag = 0.0
+		pos.y = lerpf(pos.y, target_eye_y, exp_k(18.0, sdt))
 	vel = Vector3(shore_vel_xz.x, shore_jump_vel_y if shore_is_airborne else 0.0, shore_vel_xz.y)
 	# slide against rocks and hulls without overriding the standing eye height
 	var saved_y := pos.y
 	_resolve(env, c.radius * 0.72, true)
-	pos.y = maxf(saved_y, eff_floor + c.eye_height - shore_crouch_blend * c.crouch_eye_drop + shore_jump_offset - 0.04)
+	# step_lag: how far the eye may trail the standing height (Thalassa 0.04 m; the Godot adapter raises it so a
+	# 30 cm ledge is climbed over ~0.15 s by the 18/s follow above instead of snapping up in one tick)
+	pos.y = maxf(saved_y, eff_floor + c.eye_height - shore_crouch_blend * c.crouch_eye_drop + shore_jump_offset - c.step_lag)
 	shore_vel_xz = Vector2(vel.x, vel.z)
 	if sdt > 1e-4:
 		var raw_a := ((shore_vel_xz - prev_v) / sdt).clamp(Vector2(-18, -18), Vector2(18, 18))

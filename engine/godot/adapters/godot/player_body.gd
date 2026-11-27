@@ -39,6 +39,7 @@ func _init() -> void:
 	safe_margin = 0.01
 	collision_layer = 2
 	collision_mask = 1
+	motor.swimmer.config.step_lag = 0.37        # stress J5: climb a ledge over ~0.15 s, not one tick (< step_height + 2 cm)
 	_env_dict = {"floor_height": _floor_height, "terrain_normal": _terrain_normal, "local_surface": _local_surface,
 		"water_current": _water_current, "resolve_collisions": _resolve, "stand_blocked": _stand_blocked}
 
@@ -141,7 +142,7 @@ func tick(dt: float, inp, env, t: float) -> void:
 		col.position = Vector3(0, swim_shape.radius, 0) if swim_start else Vector3(0, _stand_center(), 0)
 		s.set_pose(global_position + Vector3(0, _eye_off(), 0), inp.cam_yaw, inp.cam_pitch)
 		if env.level > -999.0:
-			motor.enable_current(func(p, tt): return env.current(p, t))
+			motor.enable_current(func(p, tt): return env.current(p, tt))   # tt, not t: a lambda keeps the spawn-time t forever
 	var wy: float = env.water_y(s.pos.x, s.pos.z, t) if env.level > -999.0 else -1000.0
 	motor.step(dt, inp, _env_dict, wy)
 	# swim branch moved the eye but its collision callback already placed the body; keep them in step

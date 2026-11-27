@@ -28,6 +28,7 @@ func _initialize() -> void:
 	var ok := true
 	for name in ["shore", "dive"]:
 		var s = Swimmer.new()
+		s.config.thalassa_exact = true
 		s.set_pose(starts[name][0], starts[name][1], starts[name][2])
 		var tr: Array = gold[name]
 		var k := 0

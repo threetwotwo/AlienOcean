@@ -153,6 +153,22 @@
   loads the 19 world textures (AO_WORLDTEX for the shot tool).
 
 ## 0.6.0-dev (27 Nov 2026, evening): gameplay now built on Gary's Thalassa v20.19
+- M04 body 0.2.0: stress test tests/test_body_stress.gd (Gary 27 Nov: "every case, every limb, every body part
+  interaction, constraints, IK"). 45 cases (walk, turn, jump, crouch, walls, low ceiling, steps, ramps, ledges, stairs,
+  beach, waves, swimming, caves, sea floor, current, ceilings, hits, frame hitches, teleport) plus random monkey runs,
+  checked every tick: bone lengths, elbow/knee direction and limits, joint pops, limbs in rock, soles on and not sunk
+  into the ground, planted-foot slide <= 3 cm, legs/arms not through each other or the body. Planted faults (bone
+  length, no-clip off, flipped elbow) must fail. --film renders the clips on the proof page. Result: 60 Hz 40/45 + 5
+  known open (step down, 30 deg slope walked across x2, stairs), gating in run_all; 30 Hz 40/45, 120 Hz 38/45 and
+  monkeys 1/4 reported, not yet gating. FIX lines (all off under thalassa_exact, both goldens still MATCH):
+  rig sub-steps dt > 1/55 s; feet keep a 7-point sole plate on the ground (toe/heel pivot, slope-aware tread
+  centring, lateral reach limits); a planted foot past the leg's reach or clamp steps at once (foot_placer forced,
+  FORCED_HARD 7 cm overrides waiting for the other foot); the pelvis yields to a planted foot it would lift; walls
+  push the foot with a lip rule; swim legs stay on the hip's side of rock (hip-to-ankle ray), buried points are pushed
+  out, the clearance push grows at up to 9 m/s; non-finite floor fallbacks (chest went NaN off the world edge).
+  M02 motor FIXes (config thalassa_exact): walking off a drop > 0.36 m falls under gravity; the mid-air jump offset is
+  re-based when the floor under her changes (eye dropped 32 cm in one tick off a step); no 60% crouch cut and no loss
+  of the eye's trail at take-off (18 cm camera pop jumping from a crouch). WorldQuery rays ignore back faces.
 - M04 body 0.1.0 = Thalassa core/ik-rig.js DiverBodyRig (swim pose, shore walk/wade pose, swim-walk blend, head
   look, no-clip arms and legs) + ik-solvers.js (two-bone IK, leg with fin), procedural-locomotion.js
   (BalanceFootPlacer incl. jumps), physics-control.js (PhysicsControlRig profiles, hit reactions), crit springs and
