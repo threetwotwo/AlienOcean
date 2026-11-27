@@ -13,6 +13,7 @@ const Motor := preload("res://core/m02_motor/player_motor.gd")
 const Rig := preload("res://adapters/godot/camera_rig.gd")
 var rig
 var suit_mats := []
+var envr: Environment
 
 var out := "/tmp/film"
 var scene := "shore"
@@ -75,12 +76,12 @@ func _initialize() -> void:
 		sfm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; sf.material_override = sfm
 		sf.position = Vector3(0, env.level, -40); world.add_child(sf)
 	var we := WorldEnvironment.new(); var e := Environment.new()
-	e.background_mode = Environment.BG_COLOR; e.background_color = Color(0.55, 0.75, 0.88) if scene != "cave" else Color(0.05, 0.25, 0.35)
+	e.background_mode = Environment.BG_COLOR; e.background_color = Color(0.55, 0.75, 0.88) if scene != "cave" else Color(0.05, 0.25, 0.35); e.background_intensity = 1.2   # nits under physical light units
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR; e.ambient_light_color = Color(0.6, 0.7, 0.75); e.ambient_light_energy = 0.6
 	e.tonemap_mode = Environment.TONE_MAPPER_AGX
 	if scene == "cave":
 		e.fog_enabled = true; e.fog_light_color = Color(0.08, 0.35, 0.45); e.fog_density = 0.02
-	we.environment = e; world.add_child(we)
+	we.environment = e; world.add_child(we); envr = e
 	var sun := DirectionalLight3D.new(); sun.rotation_degrees = Vector3(-55, 35, 0); sun.light_energy = 1.4; sun.light_intensity_lux = PI * 1.2; sun.shadow_enabled = true; world.add_child(sun)
 	if scene.begins_with("cam_"):
 		rig = Rig.new(); world.add_child(rig); rig.exclude.append(body.get_rid()); rig.body = body; rig.current = true
@@ -129,6 +130,8 @@ func _physics_process(dt: float) -> bool:
 		var wy: float = env.water_y(p.x, p.z, t) if env.level > -999.0 else -INF
 		var f: Dictionary = rig.tick(dt, body.eye_point(), c[0], wy)
 		for mt in suit_mats: mt.albedo_color.a = f.body_alpha
+		# lens under the surface: blue water fog (the water box can't tint from inside)
+		envr.fog_enabled = rig.global_position.y < wy; envr.fog_light_color = Color(0.05, 0.32, 0.45); envr.fog_density = 0.09
 	match scene:
 		"cam_shore", "cam_wall": pass
 		"cave": cam.global_position = p + Vector3(5.5, 1.5, 0); cam.look_at(p + Vector3(0, 0.3, 0))
