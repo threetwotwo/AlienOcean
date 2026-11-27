@@ -32,10 +32,14 @@ var initialized := false
 var last_vessel_id = null
 var feet := {"L": Foot.new(), "R": Foot.new()}
 ## Set by the body rig when a planted foot is held back by its reach limits (it would be dragged): step it now.
-var forced := {"L": false, "R": false}
+const FORCED_MIN := 0.0     # any request counts; the rig discounts a just-landed foot so the other goes first
+var forced := {"L": 0.0, "R": 0.0}     # set by the rig: how far (m) a planted foot is from where the leg can hold it
 ## Optional world check set by the body rig: filter(body_ground: Vector3, to: Vector3, yaw: float) -> Vector3 returns
 ## a landing spot the foot can really stand on (Thalassa's placer only knew a flat deck).
 var target_filter = null
+## Off (null) reproduces Thalassa. Vector3(hip half width, inward reach, outward reach), set by the rig: landing spots
+## are kept inside the band the leg can reach sideways, so a strafe doesn't plant a foot the rig then has to drag.
+var lat_reach = null
 var last_stepped := "R"
 var step_count := 0
 var support_cooldown := 0.0
@@ -80,6 +84,7 @@ static func trajectory(pos: Vector2, v: Vector2, dv: Vector2, halflife := 0.14, 
 	return out
 
 func reset(lp: Vector3, yaw: float, vessel_id = null) -> void:
+	forced = {"L": 0.0, "R": 0.0}
 	var rx := cos(yaw); var rz := -sin(yaw)
 	var fx := -sin(yaw); var fz := -cos(yaw)
 	var hw: float = config.stanceHalfWidth
@@ -195,7 +200,15 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var ll := Vector2(lx, lz).length()
 		if ll > max_reach and ll > 1e-4:
 			lx = lx / ll * max_reach; lz = lz / ll * max_reach
-		return Vector3(ppx + lx + rgt_x * (sg * hw) + fwd_x * idle_stag, lp.y, ppz + lz + rgt_z * (sg * hw) + fwd_z * idle_stag)
+		var ox := lx + rgt_x * (sg * hw) + fwd_x * idle_stag
+		var oz := lz + rgt_z * (sg * hw) + fwd_z * idle_stag
+		if lat_reach != null:
+			# FIX (stress J7, strafe skate): the lateral offset from her own hip, outward positive, is kept in the reach band
+			var lr: Vector3 = lat_reach
+			var lat := (ox * rgt_x + oz * rgt_z) * sg - lr.x
+			var cl := clampf(lat, -lr.y, lr.z)
+			ox += rgt_x * sg * (cl - lat); oz += rgt_z * sg * (cl - lat)
+		return Vector3(ppx + ox, lp.y, ppz + oz)
 
 	var ideal_l: Vector3 = target_at.call("L", 0.0)
 	var ideal_r: Vector3 = target_at.call("R", 0.0)
@@ -439,7 +452,7 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 
 	var trigger := func(key: String, urgent := false) -> void:
 		var f: Foot = feet[key]
-		forced[key] = false
+		forced[key] = 0.0
 		f.from = f.cur
 		f.dur = clampf(planned * 0.88 if urgent else planned, 0.25, 0.46)
 		f.to = target_at.call(key, f.dur)
@@ -454,6 +467,8 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		if rb > 0.25:
 			com_vel_y = maxf(com_vel_y, rb * 0.29)
 
+	if is_air:
+		forced = {"L": 0.0, "R": 0.0}     # a request from before take-off must not fire on the landing tick
 	if not (step_l and step_r) and not is_air:
 		var err_l := Vector2(feet.L.planted.x - ideal_l.x, feet.L.planted.z - ideal_l.z).length()
 		var err_r := Vector2(feet.R.planted.x - ideal_r.x, feet.R.planted.z - ideal_r.z).length()
@@ -462,10 +477,14 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var idle := speed < 0.06 and des_speed < 0.06 and absf(yaw_rate) < 0.22
 		var trig := 0.22 if idle else lerpf(config.baseTriggerDist, config.maxTriggerDist, speed_norm)
 		var emerg := lerpf(config.emergencyTrailDist, 0.48, rb)
-		if not step_l and forced.L and (not step_r or feet.R.t >= 0.25):
-			trigger.call("L", true)
-		elif not step_r and forced.R and (not step_l or feet.L.t >= 0.25):
-			trigger.call("R", true)
+		# the foot further from where it should be goes first (L always won before: the right foot could wait)
+		var f_first := "L" if forced.L >= forced.R else "R"
+		var f_other := "R" if f_first == "L" else "L"
+		var ft_ok := 0.25     # waiting for the other foot to land (0.85) left the forced foot dragging: 28 of 45, not 35
+		if forced[f_first] > FORCED_MIN and not feet[f_first].stepping and (not feet[f_other].stepping or feet[f_other].t >= ft_ok):
+			trigger.call(f_first, true)
+		elif forced[f_other] > FORCED_MIN and not feet[f_other].stepping and (not feet[f_first].stepping or feet[f_first].t >= ft_ok):
+			trigger.call(f_other, true)
 		elif not step_l and trail_l > emerg and (not step_r or feet.R.t >= 0.72):
 			trigger.call("L", true)
 		elif not step_r and trail_r > emerg and (not step_l or feet.L.t >= 0.72):

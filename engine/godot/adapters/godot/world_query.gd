@@ -69,6 +69,7 @@ func point_solid(p: Vector3) -> bool:
 ## ray(from, to) -> {position, normal} or {}
 func ray(from: Vector3, to: Vector3) -> Dictionary:
 	var rq := PhysicsRayQueryParameters3D.create(from, to, mask, exclude)
+	rq.hit_back_faces = false     # a ray starting inside trimesh or heightmap rock must not hit the far side and push the wrong way
 	return world.direct_space_state.intersect_ray(rq)
 
 ## The dictionary of Callables the ported cores take as env.

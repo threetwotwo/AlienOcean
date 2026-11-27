@@ -48,8 +48,9 @@ const PEN_RUN := 3
 const PEN_MARGIN := 0.02
 const SOLE_UNDER := 0.02
 const STAND_GAP := 0.03
-const SKATE_V := 0.35
-const SKATE_RUN := 6
+const SLIDE_MAX := 0.03       # a planted foot: heel or ball may drift at most 3 cm over the whole stance (the other rolls)
+const HOVER_GAP := 0.03       # a planted foot: lowest sole point at most 3 cm above the ground...
+const HOVER_RUN := 6          # ...for more than this many ticks
 const TORSO_R := 0.085
 const TORSO_SINK := 0.03
 
@@ -171,6 +172,24 @@ func _define_cases() -> void:
 	_case("B32 hits while walking", "wall", flat, 10.0, func(tt): return _pk(Vector2(0, 1) if fmod(tt, 3.0) < 2.0 else Vector2.ZERO), {"hits": 0.6})
 	_case("B33 hits while swimming", "pool", swim, 10.0, func(tt): return _pk(Vector2(0, 1), tt * 0.6), {"hits": 0.6})
 	_case("B34 hits while wading", "shore", {"start": Vector3(0, 1.05, 4)}, 14.0, func(tt): return _pk(Vector2(0, 1) if tt < 4.0 else Vector2.ZERO), {"hits": 0.5})
+	# cases the rig review asked for
+	_case("B35 ramp 30 deg diagonally, up and down", "ramp", {"angle": 30.0, "start": Vector3(-2, 0.05, 4)}, 12.0,
+		func(tt): return _pk(Vector2(0.6, 0.8), _turn(tt, 6.0)))
+	_case("B36 standing on a 30 deg ramp, turning", "ramp", {"angle": 30.0, "start": Vector3(0, 1.6, -2.6)}, 10.0,
+		func(tt): return _pk(Vector2.ZERO if tt < 4.0 else Vector2(0.2, 0) , tt * 0.5 if tt < 4.0 else 2.0))
+	_case("B37 stairs up and back down", "stairs", {"start": Vector3(0, 0.05, 3)}, 12.0,
+		func(tt): return _pk(Vector2(0, 1), _turn(tt, 5.0)))
+	_case("B38 jump off a 30 cm step", "step", {"h": 0.3, "start": Vector3(0, 0.35, -5)}, 6.0, func(tt):
+		var k = _pk(Vector2(0, 1), PI); k.jump_pressed = tt > 1.1 and tt < 1.13; return k)
+	_case("B39 sprint off a 50 cm ledge", "step", {"h": 0.5, "start": Vector3(0, 0.55, -6)}, 6.0, func(_t):
+		var k = _pk(Vector2(0, 1), PI); k.thrust = 1.0; return k)
+	_case("B40 frame hitches while walking", "wall", flat, 10.0,
+		func(tt): return _pk(Vector2(0, 1) if fmod(tt, 4.0) < 2.5 else Vector2.ZERO, tt * 0.4), {"hitch": true})
+	_case("B41 teleport mid-walk", "wall", flat, 8.0, func(_t): return _pk(Vector2(0, 1)), {"teleport": 4.0})
+	_case("B42 swim up into a ceiling", "ceiling", {"start": Vector3(0, -9, 0), "mode": Motor.Mode.SWIM}, 10.0,
+		func(tt): var k = _pk(Vector2(0, 0.3), 0.0, 1.2); k.ascend = true; k.thrust = 1.0 if tt > 5.0 else 0.0; return k)
+	_case("B43 sprint-swim into a wall", "cave", {"s": 1.0, "start": Vector3(6, -10, 2), "mode": Motor.Mode.SWIM}, 8.0,
+		func(_t): var k = _pk(Vector2(0, 1)); k.thrust = 1.0; return k, {"tight": true})
 	for m in monkey_runs:
 		var seed := 2000 + m
 		_case("BM monkey seed %d (%ds)" % [seed, int(monkey_secs)], "shore", {"start": Vector3(0, 1.05, 4), "waves": 0.5 if m % 2 == 1 else 0.0},
@@ -226,7 +245,7 @@ func _start_next() -> bool:
 	t = 0.0
 	warm = 2
 	prev = {}
-	rec = {"name": cur.name, "fail": [], "ticks": 0, "modes": [], "pen": {}, "skate": {"L": 0, "R": 0},
+	rec = {"name": cur.name, "fail": [], "ticks": 0, "modes": [], "pen": {}, "stance": {}, "count": {},
 		"worst": {"bone_mm": 0.0, "span": 0.0, "elbow": 0.0, "knee": 0.0, "knee_back": 0.0, "neck": 0.0, "head_chest": 0.0,
 			"pop": 0.0, "pelvis_jump": 0.0, "pen_run": 0, "sole_under": 0.0, "stand_gap": 0.0, "skate": 0.0, "leg_overlap": 0.0,
 			"torso_sink": 0.0, "flips": 0}}
@@ -253,12 +272,30 @@ func _physics_process(dt: float) -> bool:
 		var kinds := ["bump", "bump", "burst", "splash"]
 		rig.apply_impact_impulse(Vector3(g.randf_range(-1, 1), g.randf_range(-1, 1), g.randf_range(-1, 1)), g.randf_range(0.2, 1.0), kinds[g.randi() % 4])
 		rec.next_hit = t + cur.opts.hits * g.randf_range(0.5, 1.5)
-	var pose: Dictionary = rig.update_swim(dt, s, null, t, renv)
+	if cur.opts.has("teleport") and t >= cur.opts.teleport and not rec.has("teleported"):
+		rec.teleported = true                         # moved 9 m sideways by the game (respawn, fast travel)
+		var np: Vector3 = s.pos + Vector3(-9, 0, 0)
+		s.set_pose(np, s.yaw, s.pitch)
+		body.global_position += Vector3(-9, 0, 0)
+		prev = {}
+		rec.stance = {}
+	var rdt := dt
+	if cur.opts.get("hitch", false):
+		# the rig drawn per frame: every 23 ticks it misses 1-5 frames, then catches up in one long step
+		rec.hitch_acc = float(rec.get("hitch_acc", 0.0)) + dt
+		var ph: int = int(rec.ticks) % 23
+		if ph > 0 and ph <= 1 + (int(rec.ticks) / 23) % 5:
+			t += dt
+			rec.ticks += 1
+			return false
+		rdt = rec.hitch_acc
+		rec.hitch_acc = 0.0
+	var pose: Dictionary = rig.update_swim(rdt, s, null, t, renv)
 	if fault == "flip" and rec.ticks == 120:
 		var a: Dictionary = pose.armL
 		a.mid = a.root + (a.root - a.mid)             # planted: elbow mirrored through the shoulder for one tick
 	t += dt
-	_check(pose, dt)
+	_check(pose, rdt)
 	if t >= cur.dur - 1e-6:
 		_end_case()
 		if not _start_next():
@@ -268,8 +305,9 @@ func _physics_process(dt: float) -> bool:
 # ---------------------------------------------------------------- invariants
 func _fail(code: String, msg: String) -> void:
 	var line := "%s %s at t=%.2f" % [code, msg, t]
+	rec.count[code] = rec.count.get(code, 0) + 1     # how often, not just whether: reported beside the first failure
 	for f in rec.fail:
-		if f.begins_with(code): return       # first failure per invariant is enough
+		if f.begins_with(code): return
 	rec.fail.append(line)
 
 func _w(key: String, v: float) -> void:
@@ -304,6 +342,19 @@ func _seg_dist(a0: Vector3, a1: Vector3, b0: Vector3, b1: Vector3) -> float:
 
 func _sole_points(fin: Transform3D) -> Array:
 	return [fin * Vector3(0, 0.0, -0.046), fin * Vector3(0, 0.08, -0.046), fin * Vector3(0, 0.16, -0.046)]
+
+## What J7 tests: the four corners and the toe and heel ends of the mannequin's sole plate (adapters/godot/mannequin.gd:
+## box centre (0, 0.058, -0.046), size 0.056 x 0.168), not just the centreline points the rig's toe lift uses (the review's
+## point: a fix must not be graded only on its own samples). z -0.046 is 6 mm above the plate's underside.
+const SOLE_X := 0.028
+const SOLE_HEEL := -0.026
+const SOLE_TOE := 0.142
+func _sole_points_full(fin: Transform3D) -> Array:
+	var pts := []
+	for e in [Vector3(0, SOLE_HEEL, -0.046), Vector3(0, 0.058, -0.046), Vector3(0, SOLE_TOE, -0.046),
+			Vector3(SOLE_X, SOLE_HEEL, -0.046), Vector3(-SOLE_X, SOLE_HEEL, -0.046), Vector3(SOLE_X, SOLE_TOE, -0.046), Vector3(-SOLE_X, SOLE_TOE, -0.046)]:
+		pts.append(fin * e)
+	return pts
 
 func _check(p: Dictionary, dt: float) -> void:
 	rec.ticks += 1
@@ -436,7 +487,7 @@ func _check(p: Dictionary, dt: float) -> void:
 	var walking := mode.begins_with("shore")
 	for side in ["L", "R"]:
 		var fin: Transform3D = p["leg" + side].finMat
-		var soles := _sole_points(fin)
+		var soles := _sole_points_full(fin)
 		var lowest_gap := INF
 		for sp_ in soles:
 			var h: Dictionary = wq.ray_down(sp_.x, sp_.z, sp_.y + 0.6, 2.0)
@@ -450,23 +501,33 @@ func _check(p: Dictionary, dt: float) -> void:
 				if world.get_world_3d().direct_space_state.intersect_point(pq, 1).size() > 0:
 					_w("sole_under", -gap)
 					_fail("J7", "sole%s %.0f mm under the floor" % [side, -gap * 1000.0])
+					if OS.has_environment("BS_SOLE"): print("    sole t=%.2f %s pt %d %s gap %.3f" % [t, side, soles.find(sp_), sp_.snappedf(0.001), gap])
 		if cur.opts.get("stand", false) and t > 1.0 and is_finite(lowest_gap):
 			_w("stand_gap", absf(lowest_gap))
 			if absf(lowest_gap) > STAND_GAP: _fail("J7", "standing sole%s %.0f mm off the floor" % [side, lowest_gap * 1000.0])
 		var ankle: Vector3 = p["leg" + side].ik.eff
 		var planted: bool = not rig.world_foot_placer.feet[side].stepping and not body.motor.swimmer.shore_is_airborne
-		if mode == "shore_walk" and prev.has("ankle" + side) and planted and is_finite(lowest_gap) and lowest_gap < 0.03:
-			var hv: Vector3 = ankle - prev["ankle" + side]; hv.y = 0.0
-			var v2: float = hv.length() / dt
-			if v2 > SKATE_V:
-				rec.skate[side] += 1
-				if rec.skate[side] >= SKATE_RUN:
-					_w("skate", v2)
-					if rec.skate[side] == SKATE_RUN: _fail("J7", "foot%s skating %.2f m/s on the ground" % [side, v2])
-			else:
-				rec.skate[side] = 0
+		if walking and planted and is_finite(lowest_gap):
+			# slide: from touchdown, how far the heel and the ball have each moved; she slides if both have
+			var heel: Vector3 = fin * Vector3(0, SOLE_HEEL, -0.046)
+			var ball: Vector3 = fin * Vector3(0, 0.11, -0.046)
+			if not rec.stance.has(side):
+				rec.stance[side] = {"heel": heel, "ball": ball, "hover": 0}
+			var st: Dictionary = rec.stance[side]
+			var dh := Vector2(heel.x - st.heel.x, heel.z - st.heel.z).length()
+			var db := Vector2(ball.x - st.ball.x, ball.z - st.ball.z).length()
+			var slide := minf(dh, db)
+			if OS.has_environment("BS_SLIDE") and slide > 0.008:
+				var fpf = rig.world_foot_placer.feet[side]
+				print("    slide t=%.2f %s heel %.0f ball %.0f mm  ank=%s fp=%s forced=%s otherStep=%s gap=%.3f" % [t, side, dh * 1000, db * 1000, ankle.snappedf(0.001), fpf.cur.snappedf(0.001), rig.world_foot_placer.forced[side], rig.world_foot_placer.feet["R" if side == "L" else "L"].stepping, lowest_gap])
+			_w("skate", slide)
+			if slide > SLIDE_MAX: _fail("J7", "foot%s slid %.0f mm while planted" % [side, slide * 1000.0])
+			# hover: a planted foot must be on the ground
+			st.hover = st.hover + 1 if lowest_gap > HOVER_GAP else 0
+			if st.hover > 0: _w("stand_gap", lowest_gap)
+			if st.hover >= HOVER_RUN: _fail("J7", "planted foot%s floating %.0f mm above the ground" % [side, lowest_gap * 1000.0])
 		else:
-			rec.skate[side] = 0
+			rec.stance.erase(side)
 		prev["ankle" + side] = ankle
 	# J8 self contact
 	var L: Dictionary = p.legL.ik
@@ -488,12 +549,13 @@ func _check(p: Dictionary, dt: float) -> void:
 func _end_case() -> void:
 	var ok: bool = rec.fail.is_empty()
 	var w: Dictionary = rec.worst
-	var summary := "bone %.2f mm, span %.0f%%, elbow %.0f, knee %.0f, knee back %.0f mm, neck +%.2f, head/chest %.0f, pop %.1f m/s, pelvis %.2f m, rock %d ticks, sole under %.0f mm, stand gap %.0f mm, skate %.2f, legs %.0f mm, torso %.0f mm" % [
+	var summary := "bone %.2f mm, span %.0f%%, elbow %.0f, knee %.0f, knee back %.0f mm, neck +%.2f, head/chest %.0f, pop %.1f m/s, pelvis %.2f m, rock %d ticks, sole under %.0f mm, stand gap %.0f mm, slide %.0f mm, legs %.0f mm, torso %.0f mm" % [
 		w.bone_mm, w.span * 100.0, w.elbow, w.knee, w.knee_back * 1000.0, w.neck, w.head_chest, w.pop, w.pelvis_jump, w.pen_run,
-		w.sole_under * 1000.0, w.stand_gap * 1000.0, w.skate, w.leg_overlap * 1000.0, w.torso_sink * 1000.0]
+		w.sole_under * 1000.0, w.stand_gap * 1000.0, w.skate * 1000.0, w.leg_overlap * 1000.0, w.torso_sink * 1000.0]
+	var fails: Array = rec.fail.map(func(f): return "%s  (%d ticks)" % [f, rec.count.get(f.substr(0, f.find(" ")), 1)])
 	print("%s  %s  [%s]  %s%s" % ["PASS" if ok else "FAIL", cur.name, ",".join(rec.modes), summary,
-		"" if ok else "\n      " + "\n      ".join(rec.fail)])
-	results.append({"name": cur.name, "ok": ok, "fail": rec.fail, "modes": rec.modes, "worst": w})
+		"" if ok else "\n      " + "\n      ".join(fails)])
+	results.append({"name": cur.name, "ok": ok, "fail": rec.fail, "counts": rec.count, "modes": rec.modes, "worst": w})
 	world.queue_free()
 	world = null
 	cur = {}
