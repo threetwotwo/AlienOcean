@@ -1,13 +1,23 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): the sky's handedness
+- Engine: WorldRoot.to_godot is now Unreal (x, y, z) -> Godot (x, z, y) (was (x, z, -y), the island frame's map), and
+  sky_stars s_zup is its inverse. Evidence: the lagoon GLBs are written (x, z, -y) from island metres, and Unreal
+  holds them at X = x, Y = -y (slice_common.py write_glb, manifest `axes`, check P4 in Unreal), so Unreal = (g.x, g.z,
+  g.y). Before, the sun's path, the moons and the star figures were mirrored along Unreal's Y (Godot z) against the
+  reefs: at noon_yaw 0 that is the rise-set line, so the sun now sets toward Godot -z (was +z) and rises at +z; its
+  lean toward the noon side (Godot -x) is as before.
+  Unchanged on purpose: the stars turn about north by +2 pi (days - 0.5) as Unreal's Stars actor did, which is against
+  the sun (in Unreal too; sun_v184 apply_fast). Still Godot's own, not Unreal's: the moon faces' and the corona
+  streaks' roll (built on Godot axes in sky.gdshader).
+
 ## 0.6.0-dev (28 Nov 2026): the Unreal night eye
 - Engine: WorldRoot.apply now has sun_v184's night eye (exposure()): night_weight (0 at 1000 lux, 1 at 1 lux), the
   exposure limits (NIGHT_SHUT -3.25, NIGHT_OPEN -4.75, BRIGHTEN_STOPS 1.5), night_key_stops (Krawczyk key) plus
   NIGHT_LIFT 0.5 on the compensation, dawn_dim, the steady under-water step fading out at night and NIGHT_EYE_UNDER 1.
   Before, a moonless night was exposed about 8.7 stops over Unreal's. Now EV100 -4.75 moonless (hour 22), -3.48 under
   two moons (hour 94), -3.69 at dusk (18.6), noon unchanged (15.5 air / 14.75 under water). Not ported: sunset_shut.
-  Open: the moon face clips white (Unreal's MoonCap not ported), and the sky is mirrored left-right against Unreal
-  (to_godot keeps handedness; being checked).
+  Open: the moon face clips white (Unreal's MoonCap not ported). (The mirrored sky: fixed, see above.)
 
 ## 0.6.0-dev (28 Nov 2026): Gary's brightness pick
 - Engine: under water +1 stop (WorldRoot.under_exposure_art 1.0) and haze GlowK 1.0 (was 2.5) by default: Gary picked
