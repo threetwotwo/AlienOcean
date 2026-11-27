@@ -93,6 +93,14 @@ func _measure() -> void:
 	var fc := 0.0; var fr := 0.0; var nf := 0
 	for k in range(0, fm.size(), 4 * 7):
 		fc += 1.0 if fm[k] > 0.5 else 0.0; fr += 1.0 if fm[k + 1] > 0.5 else 0.0; nf += 1
+	var png := OS.get_environment("AO_FOAM_PNG")      # a directory: save each case's foam map (r) as a grey picture
+	if png != "":
+		var im := Image.create(1024, 1024, false, Image.FORMAT_L8)
+		for y in 1024:
+			for x in 1024:
+				var v: float = fm[(y * 1024 + x) * 4]
+				im.set_pixel(x, 1023 - y, Color(v, v, v))
+		im.save_png(png.path_join("map_%s.png" % nm))
 	var wb := minf(7.38e-4 * pow(maxf(U - 4.23, 0.0), 1.42), 0.1)
 	var row := {"case": nm, "foam_cover": fc / nf, "fresh_cover": fr / nf, "brumer_wb": wb, "U": U, "hs": hs, "hs_spec": hs_spec, "wmo": wmo, "crest": hi, "trough": lo, "peak_m": lam,
 		"fold": float(fold) / NPT, "breaking": float(brk) / NPT, "brumer_pb": pb, "jt": jt, "largest_cascade": L[0]}
