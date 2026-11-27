@@ -48,7 +48,7 @@ def caudal_outline(rnd):
     return [[float(a), float(b)] for a, b in zip(ty, f)]
 
 
-def adapt(path):
+def adapt(path, style=None):
     D = json.load(open(path)); R = D['record']; prov = []; DEFAULTS.clear()
     SL = float(get(R, 'outline.end')); f = 1.0 / SL
     def P(name, src): prov.append(dict(input=name, source=src))
@@ -86,6 +86,10 @@ def adapt(path):
     else:
         top_ = max(preop, key=lambda p: p[1]); out['opercle_hinge'] = [float(top_[0]), float(top_[1])]
         DEFAULTS.append(dict(input='skeleton.gills.opercle.hinge', source='DEFAULT', value='top of the preopercle margin'))
+    gp = get(R, 'jaw.linkage.gape', None, need=False)
+    if gp is not None: out['gape_deg'] = float(gp); P('real gape (deg)', 'record.jaw.linkage.gape')
+    else:
+        out['gape_deg'] = 30.0; DEFAULTS.append(dict(input='jaw.linkage.gape', source='DEFAULT', value=30))
     M = R['skeleton']['median']; fins = {}
     med = []
     for key, top in (('d1', True), ('d2', True), ('an', False)):
@@ -132,6 +136,7 @@ def adapt(path):
                         line=float(dget(G0, 'line', -0.3, 'paint.ground')), fin_alpha=float(get(R, 'paint.fins.all.alpha', 0.85, need=False)))
     P('coat (STAND-IN)', 'record.paint.ground back/belly cells + shade L*; fins.all.cells.ic; grown layer not yet ported')
     out['bones'] = int(min(get(D, 'body.motion.bones', 8, need=False), 10)) if get(D, 'body.motion.bones', None, need=False) else 8
+    if style: stylize(out, style, P)
     _u = {}
     for d in DEFAULTS: _u.setdefault(d['input'], d)
     out['provenance'] = prov + list(_u.values())
@@ -142,6 +147,30 @@ def adapt(path):
     if not (0.02 < out['eye']['d'] < 0.25): chk.append('eye size out of range')
     out['input_faults'] = chk
     return out
+
+
+STYLE_KNOBS = ('eye', 'mouth', 'girth')
+
+
+def stylize(out, style, P):
+    """art-direction deviations from the record, as plain multipliers (1 = the record): eye = eye and orbit diameter,
+    mouth = mouth line, maxilla and jaw joint scaled about the mouth tip (a longer gape), girth = half-width of the whole
+    body. They act on the adapted record, so every later stage and check sees one consistent fish."""
+    bad = set(style) - set(STYLE_KNOBS)
+    if bad: raise ValueError(f'unknown style knob(s) {sorted(bad)}; known: {STYLE_KNOBS}')
+    k = float(style.get('eye', 1.0)); out['eye']['d'] *= k; out['eye']['orbit'] *= k
+    k = float(style.get('mouth', 1.0))
+    ml = np.array(out['mouth']['line']); tip = ml[np.argmin(ml[:, 0])]
+    out['mouth']['line'] = (tip + k * (ml - tip)).tolist(); out['mouth']['maxilla_h'] *= k
+    out['jaw_joint'] = (tip + k * (np.array(out['jaw_joint']) - tip)).tolist()
+    k = float(style.get('girth', 1.0)); out['outline']['hw'] = [[a, b * k] for a, b in out['outline']['hw']]
+    out['style'] = {k_: float(v) for k_, v in style.items()}
+    P('style deviation', 'command line --style ' + ','.join(f'{k_}={v}' for k_, v in sorted(style.items())))
+
+
+def parse_style(s):
+    """'eye=1.4,mouth=1.2' -> {'eye': 1.4, 'mouth': 1.2}"""
+    return {a.strip(): float(b) for a, b in (kv.split('=') for kv in s.split(',') if kv.strip())} if s else {}
 
 if __name__ == '__main__':
     import sys; a = adapt(sys.argv[1]); print(json.dumps({k: (v if k in ('eye', 'cover', 'paint', 'input_faults', 'bones') else '...') for k, v in a.items()}, indent=1)[:3000])
