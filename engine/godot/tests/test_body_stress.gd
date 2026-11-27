@@ -58,9 +58,7 @@ const TORSO_SINK := 0.03
 ## the exit code); every other case must pass, and a KNOWN case that starts passing is reported so it can come off.
 ## Each entry says what fails and why, as found; fix one, then delete its line.
 const KNOWN := {
-	"B35": "toe of the swing foot scuffs 3 cm into a 30 deg slope walked across: the pelvis is low and the uphill knee is folded",
-	"B36": "as B35, standing across the slope",
-	"B37": "stairs: the eye climbs each riser as her centre crosses it, faster than the steps, so the trailing foot is left stretched and slides",
+	# empty since 27 Nov round 3: B35/B36 (30 deg slope across) and B37 (stairs) pass at 30/60/120 Hz
 }
 
 var tick := 60

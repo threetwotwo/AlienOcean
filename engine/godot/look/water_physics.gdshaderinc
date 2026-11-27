@@ -52,6 +52,12 @@ vec3 w_fill(float z, float up) {
 }
 // Godot's ambient is one colour (water_amb_ref), so the fill's own colour and depth ride in the albedo as a ratio; the direct light
 // divides it back out (light()), so the sun and the net are unchanged while SSAO / SSIL / AO now occlude the fill
+// Under water with SDFGI on, Godot's ambient is the water's light field at water_zref (look/sky.gdshader under_*), already w_fill(z_ref, up) for
+// this normal, so only the depth's own change rides in the albedo (a ratio near 1). Root cause it stands in for: Godot's sky light
+// is one field for the whole scene, with no water between it and a point deeper or shallower than z_ref.
+global uniform float water_amb_sky;
+global uniform float water_zref;
 vec3 w_fill_ratio(float z, float up) {
+	if (water_amb_sky > 0.5) return w_fill(z, up) / max(w_fill(water_zref, up), vec3(1e-9));
 	return w_fill(z, up) / max(water_amb_ref, vec3(1e-9));
 }

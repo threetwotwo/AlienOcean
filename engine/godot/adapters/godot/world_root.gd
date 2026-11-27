@@ -39,6 +39,7 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 @export var fill_occluded := true          # the water's fill light goes through Godot's ambient, so SSAO / SSIL occlude it (false = as before, unoccluded)
 @export var cdom := 0.03                   # art lever (a real condition): yellow substance in the water, Unreal LOOK_SET 0.03; less = bluer haze
 @export var scat_k := 0.40                 # art lever (a real condition): particles in the water, Unreal LOOK_SET 0.40; less = clearer
+@export var gi_k := 1.0                    # art lever: GI strength (SDFGI energy). 1 = physical (the water's fill + the sand's real bounce)
 @export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
 @export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
 ## The god rays under the water (Unreal GodK): the light net's map summed along each view ray. false = off (checks).
@@ -138,6 +139,9 @@ func _init() -> void:
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
 	env.ssao_enabled = true; env.ssao_radius = 1.2; env.ssao_intensity = 1.6
 	env.ssil_enabled = true; env.ssil_radius = 4.0
+	# GI (28 Nov, look thread): SDFGI on by default. Its escaping rays read the water's light field under water (look/sky.gdshader
+	# under_*), so the fill is occluded by the real shapes (arch, table coral) and the sun's bounce off the sand comes for free.
+	env.sdfgi_enabled = true
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	env.glow_enabled = true; env.glow_intensity = 0.3
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
@@ -160,6 +164,7 @@ func attach_camera(cam: Camera3D) -> void:
 	var qm := QuadMesh.new(); qm.size = Vector2(2, 2); q.mesh = qm
 	var qmat := ShaderMaterial.new(); qmat.shader = load("res://look/underwater_view.gdshader"); q.material_override = qmat
 	under_mat = qmat; qmat.set_shader_parameter("god_k", 1.0 if god_rays else 0.0)
+	q.gi_mode = GeometryInstance3D.GI_MODE_DISABLED   # a screen pass, not a solid: never in SDFGI / VoxelGI
 	q.extra_cull_margin = 16384.0; q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; q.layers = 1 << 3   # layer 4: the eye's own quads (the sea floor map's captures skip it)
 	cam.add_child(q)
 
@@ -216,6 +221,7 @@ func apply(cam_y: float) -> Dictionary:
 	cam_attr.exposure_shutter_speed = pow(2.0, ev) / (22.0 * 22.0)
 	cam_attr.exposure_multiplier = pow(2.0, bias)
 	exposure = pow(2.0, bias) / (1.2 * pow(2.0, ev))  # buffer units per nit (Godot's normalisation)
+	env.sdfgi_energy = gi_k
 	_push_water(water_y, up_air, beam_h, st.skylux)
 	_push_sky(st)
 	# the sea surface's sky and sun (look/sky_dome.gdshaderinc, look/sea_*.gdshader): the dome the sky draws, the key body
@@ -250,13 +256,23 @@ func apply(cam_y: float) -> Dictionary:
 			+ Vector3(exp(-ku.x * H), exp(-ku.y * H), exp(-ku.z * H)) * st.skylux * WaterOptics.FRESNEL_SKY)
 		var sand := Vector3(WaterOptics.SAND.r, WaterOptics.SAND.g, WaterOptics.SAND.b)
 		var eu: Vector3 = eh * sand * Vector3(exp(-ku.x * (H - z_ref)), exp(-ku.y * (H - z_ref)), exp(-ku.z * (H - z_ref)))
+		# Godot's sky light under water is this light field (look/sky.gdshader under_*): the ambient, SDFGI's escaping rays and
+		# every material read the same two hemispheres, so a fish's belly gets the sand's light and its back the sky's
+		sky_mat.set_shader_parameter("under_k", 1.0)
+		sky_mat.set_shader_parameter("under_down", ek / PI)
+		sky_mat.set_shader_parameter("under_up", eu / PI)
+		# Without GI, the ambient stays one colour (the field's mean); Godot's sky-sourced ambient read black in the 28 Nov
+		# check (cubemap ambient path, open question), and SDFGI replaces the ambient anyway.
 		var amb: Vector3 = (ek + eu) * 0.5 / PI * exposure            # ambient is in buffer units (measured 27 Nov)
 		var mx := maxf(amb.x, maxf(amb.y, amb.z))
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		env.ambient_light_color = Color(amb.x / mx, amb.y / mx, amb.z / mx) if mx > 0.0 else Color.BLACK
 		env.ambient_light_energy = mx
 		RenderingServer.global_shader_parameter_set("water_amb_ref", amb / maxf(exposure, 1e-12))
+		RenderingServer.global_shader_parameter_set("water_amb_sky", 1.0 if env.sdfgi_enabled else 0.0)
 	else:
+		sky_mat.set_shader_parameter("under_k", 0.0)
+		RenderingServer.global_shader_parameter_set("water_amb_sky", 0.0)
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		var dz := dome(Vector3.UP, _dome_sun); var dm := maxf(dz.x, maxf(dz.y, dz.z))
 		env.ambient_light_color = Color(dz.x / dm, dz.y / dm, dz.z / dm) if dm > 0.0 else Color.WHITE
@@ -294,7 +310,7 @@ static func declare_globals() -> void:
 		"water_caus_map": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()],
 		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)],
 		# the sea surface (water surface thread): the sky dome's shape sun and scale, the key body in air and its beam lux
-		"water_amb_ref": [V, Vector3.ONE], "water_fill_ao": [F, 1.0],
+		"water_amb_ref": [V, Vector3.ONE], "water_fill_ao": [F, 1.0], "water_amb_sky": [F, 0.0],
 		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])

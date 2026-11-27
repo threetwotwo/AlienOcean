@@ -8,7 +8,6 @@ shader_type spatial;
 render_mode blend_mix, cull_back, diffuse_lambert, specular_disabled;
 
 #include "res://look/water_physics.gdshaderinc"
-global uniform float water_zref;
 #include "res://look/caustics.gdshaderinc"
 
 // Better sand colour lock (SD2, Gary-approved design 14 Nov; passed in Unreal: #cbc8c2 vs lock #cdcac4): bare sand takes the

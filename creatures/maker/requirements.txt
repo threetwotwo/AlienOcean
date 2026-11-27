@@ -5,3 +5,8 @@ scikit-image>=0.22
 libigl>=2.5
 # export stage only: Blender as a Python module
 bpy>=4.2
+# export stage: LODs (zeux/meshoptimizer via its PyPI wrapper; the attribute simplifier is called with our own ctypes signature),
+# collision coverage check
+meshoptimizer>=0.2.30a0
+trimesh>=4
+rtree>=1.2
