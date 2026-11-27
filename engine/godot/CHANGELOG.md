@@ -13,6 +13,14 @@
   on the island is not known (0 = toward +x). Cost: about 1000 sin/cos a lit pixel; the map route (one 512 px
   target a frame, as Unreal) is the next step when the FFT sea comes. `caustic_strength` is now Unreal's NetK.
 
+## 0.6.0-dev (27 Nov 2026, midnight): first art-direction levers
+- Gary 16:45Z/16:50Z: art direction trumps realism; physics stays the base. WorldRoot.light_neutral (0..1): sunlight and
+  skylight keep their colour on the way down to the floor (the per-band loss pulled to its luminance mean; the haze along
+  the view is untouched). Noon near sand saturation 0.65 -> 0.53 (0.5) -> 0.32 (1.0), key frame 0.06; corals regain their
+  warm colour. WorldRoot.depth_colour / depth_colour_share: Unreal v168 depth colour give-back (sun_v184 depth_gain,
+  matches the Python to 4 decimals); weak at the camera's depth (0.65 -> 0.58 at 4x share). light_neutral defaults to 1.0 (Gary
+  picked "Full" 16:53Z); depth colour stays off. Shot tool: AO_LIGHT_NEUTRAL, AO_DEPTH_COLOUR, AO_DEPTH_SHARE.
+
 ## 0.6.0-dev (27 Nov 2026, night): the Unreal AgX tonemapper
 - Engine: AgX post 0.1.0 (`look/agx_post.glsl`, `adapters/godot/agx_effect.gd`): sun_v184 M_PP_AgX ported line for
   line as a CompositorEffect after the transparent pass (Wrensch AgX fit, Punch 0.4, white balance following the light
