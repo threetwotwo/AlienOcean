@@ -76,7 +76,7 @@ func _settle_physics() -> void:
 ## Advances the school(s) for secs at frame delta dt; actor_fn(t) -> Array of actors (or null). Returns the run record.
 func _run_school(s: FishSchool, secs: float, dt: float, actor_fn = null, watch := {}) -> Dictionary:
 	var rec := {"inside": 0, "max_speed": 0.0, "nan": 0, "nnd_min": INF, "close_max": 0.0, "max_extent": 0.0,
-		"main_ms_max": 0.0, "main_list": [], "step_ms_sum": 0.0, "steps": 0, "startled_max": 0, "series": []}
+		"main_ms_max": 0.0, "main_list": [], "wait_sum": 0.0, "frames": 0, "step_ms_sum": 0.0, "steps": 0, "startled_max": 0, "series": []}
 	var bl: float = s.sim.bl
 	var frames := int(round(secs / dt))
 	var t0: float = s.sim.t
@@ -87,6 +87,7 @@ func _run_school(s: FishSchool, secs: float, dt: float, actor_fn = null, watch :
 		if s.threaded: s.sync()
 		rec.main_ms_max = maxf(rec.main_ms_max, s.main_ms)
 		rec.main_list.append(s.main_ms)
+		rec.wait_sum += s.wait_ms; rec.frames += 1
 		if s.sim.steps == st0: continue
 		rec.steps += 1; rec.step_ms_sum += s.step_ms
 		var sim = s.sim
@@ -339,7 +340,7 @@ func _run() -> void:
 		var cam := Camera3D.new(); world.add_child(cam); cam.position = Vector3(0, -6, 6)
 		var rec := await _run_school(s, 10.0, 1.0 / 60.0)
 		_add("S10", "cost, 120 fish (cloud CPU): worker step <= 6 ms, main thread mean <= 0.8 ms, p95 <= 1.5 ms a frame", rec.step_ms <= 6.0 and rec.main_ms_mean <= 0.8 and rec.main_ms_p95 <= 1.5,
-			{"step_ms_mean": snappedf(rec.step_ms, 0.01), "main_ms_mean": snappedf(rec.main_ms_mean, 0.01), "main_ms_p95": snappedf(rec.main_ms_p95, 0.01), "main_ms_max": snappedf(rec.main_ms_max, 0.01)})
+			{"step_ms_mean": snappedf(rec.step_ms, 0.01), "main_ms_mean": snappedf(rec.main_ms_mean, 0.01), "main_ms_p95": snappedf(rec.main_ms_p95, 0.01), "main_ms_max": snappedf(rec.main_ms_max, 0.01), "wait_ms_mean_headless": snappedf(rec.wait_sum / maxf(rec.frames, 1), 0.01)})
 	# monkey runs: random reefs, species, actor paths, frame rates; invariants S3-S5 throughout
 	for mrun in range(monkey_from, monkey_from + monkey_runs):
 		rng.seed = 1000 + mrun
