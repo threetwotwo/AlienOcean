@@ -65,6 +65,7 @@ class Form:
         _xs = np.linspace(0, self.XEND, 400); self.ORBIT_LIFT = float(np.max(self.TOP(_xs) - self._TOP0(_xs)))
         # bone plates: (name, outline, thickness, free (stepped) edge curve or None, buried-side fade width, provenance)
         self.rear, self.preop = smooth_curve(CV['rear']), smooth_curve(CV['preop'])
+        self.ring_x = float(np.mean([p[0] for p in smooth_curve(CV['edge_all'])]))      # where the slit's ring goes (see record.py)
         OPERCLE = self.rear + self.preop[::-1]                                         # between preopercle margin and cover rear edge
         PREOPERCLE = self.preop + [[p[0] - 0.07, p[1]] for p in self.preop[::-1]]      # strip in front of the margin
         self.ml = ml = np.array(MO['line']); mh = MO['maxilla_h']

@@ -19,7 +19,7 @@ def plan(B):
     T, form = B.T, B.form; NT, XS, TH = T.NT, T.XS, T.TH; rear = form.rear
     G = B.gill = Gill()
     rr = np.array(rear); ylo, yhi = rr[:, 1].min(), rr[:, 1].max()
-    i_g = int(np.argmin(np.abs(XS - np.mean(rr[:, 0]))))
+    i_g = int(np.argmin(np.abs(XS - form.ring_x)))
     yj = form.loft_point(np.full(NT, XS[i_g]), TH)[:, 1]
     cols = [j for j in range(1, NT // 2) if ylo <= yj[j] <= yhi]
     G.info = None; G.ring_dx = G.col_dth = lambda i, j: 0.0

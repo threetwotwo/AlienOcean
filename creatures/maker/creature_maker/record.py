@@ -77,6 +77,9 @@ def adapt(path, style=None):
     rear = sorted(margin + [p for p in sub[:k + 1] if p[1] < margin[-1][1]], key=lambda p: -p[1])
     preop = [[p[0] * f, p[1] * f] for p in G['preopercle']]
     out['cover'] = dict(rear=rear, preop=preop, step=float(get(R, 'skeleton.gills.step', 0.006 * SL, need=False)) * f)
+    # the slit's ring is taken from the whole free edge, ventral margin too: from the side part alone it fell one ring
+    # further back on deep bodies, where the flap crossed the body skin
+    out['cover']['edge_all'] = sorted(margin + [p for p in sub if p[1] < margin[-1][1]], key=lambda p: -p[1])
     P('opercle plate', 'record.skeleton.gills.opercle.margin + subopercle (to the lower corner)'); P('preopercle plate', 'record.skeleton.gills.preopercle')
     # under the head the free edge runs on forward (subopercle, interopercle, branchiostegal membrane) and ends on the
     # isthmus at the interopercle's front end: the apex of the gill V
