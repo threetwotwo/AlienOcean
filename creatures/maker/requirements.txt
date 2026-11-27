@@ -1,0 +1,7 @@
+numpy>=2.0
+scipy>=1.12
+pillow>=10
+scikit-image>=0.22
+libigl>=2.5
+# export stage only: Blender as a Python module
+bpy>=4.2
