@@ -21,6 +21,7 @@ class Foot:
 	var yaw := 0.0
 	var from_yaw := 0.0
 	var to_yaw := 0.0
+	var to_raw := Vector3(0, -0.85, 0)     # the planner's own landing spot before the foothold check
 	var stepping := false
 	var t := 1.0
 	var dur := 0.32
@@ -35,7 +36,7 @@ var feet := {"L": Foot.new(), "R": Foot.new()}
 const FORCED_MIN := 0.0
 const FORCED_HARD := 0.03     # any request counts; the rig discounts a just-landed foot so the other goes first
 var forced := {"L": 0.0, "R": 0.0}     # set by the rig: how far (m) a planted foot is from where the leg can hold it
-## Optional world check set by the body rig: filter(body_ground: Vector3, to: Vector3, yaw: float) -> Vector3 returns
+## Optional world check set by the body rig: filter(take_off: Vector3, to: Vector3, yaw: float) -> Vector3 returns
 ## a landing spot the foot can really stand on (Thalassa's placer only knew a flat deck).
 var target_filter = null
 ## Off (null) reproduces Thalassa. Vector3(hip half width, inward reach, outward reach), set by the rig: landing spots
@@ -96,6 +97,7 @@ func reset(lp: Vector3, yaw: float, vessel_id = null) -> void:
 		f.planted = pts[k]; f.from = pts[k]; f.to = pts[k]; f.cur = pts[k]
 		f.yaw = yaw; f.from_yaw = yaw; f.to_yaw = yaw
 		f.stepping = false; f.t = 1.0; f.toe_pitch = 0.0; f.heel_kick = 0.0
+		f.to_raw = pts[k]
 	com_y = 0.0; com_vel_y = 0.0; run_blend = 0.0
 	pelvis_offset_spring.reset(); pelvis_yaw_spring.reset(); pelvis_roll_spring.reset()
 	spine_lean_fwd_spring.reset(); spine_lean_lat_spring.reset(); spine_twist_spring.reset()
@@ -227,11 +229,26 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var rem_t := maxf(0.0, (1.0 - f.t) * f.dur)
 		if f.t < 0.80:
 			var tg: Vector3 = target_at.call(key, rem_t)
-			if target_filter != null: tg = target_filter.call(lp, tg, f.to_yaw)
 			var rk := BM.expk(16.0, sdt)
-			f.to.x = lerpf(f.to.x, tg.x, rk)
+			if target_filter == null:
+				f.to.x = lerpf(f.to.x, tg.x, rk)
+				f.to.z = lerpf(f.to.z, tg.z, rk)
+			else:
+				# ROOT (stress B37): a foothold is committed at take-off. The planner's drifting spot is followed raw;
+				# the committed spot follows its foothold only by small moves (blending between two treads stood a
+				# foot across the edge), and jumps to a new one only while the old became unusable early in the swing
+				f.to_raw = Vector3(lerpf(f.to_raw.x, tg.x, rk), lp.y, lerpf(f.to_raw.z, tg.z, rk))
+				var cand: Vector3 = target_filter.call(f.from, f.to_raw, f.to_yaw)
+				var dxz := Vector2(cand.x - f.to.x, cand.z - f.to.z).length()
+				if dxz < 0.05:
+					f.to.x = cand.x; f.to.z = cand.z     # (the raw spot is already smoothed; on open ground cand is it)
+				else:
+					# early in the swing (the foot has covered < 10 % of its way, so the jump moves it < 3 cm) or when the
+					# committed spot is no longer a foothold
+					var chk: Vector3 = target_filter.call(f.from, f.to, f.to_yaw)
+					if f.t < 0.35 or Vector2(chk.x - f.to.x, chk.z - f.to.z).length() > 0.005:
+						f.to.x = cand.x; f.to.z = cand.z
 			f.to.y = lp.y
-			f.to.z = lerpf(f.to.z, tg.z, rk)
 			f.to_yaw = BM.wrap_pi(f.to_yaw + BM.wrap_pi(yaw - f.to_yaw) * rk)
 		else:
 			f.to.y = lp.y
@@ -457,7 +474,8 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		f.from = f.cur
 		f.dur = clampf(planned * 0.88 if urgent else planned, 0.25, 0.46)
 		f.to = target_at.call(key, f.dur)
-		if target_filter != null: f.to = target_filter.call(lp, f.to, yaw)
+		f.to_raw = f.to
+		if target_filter != null: f.to = target_filter.call(f.from, f.to, yaw)
 		f.from_yaw = f.yaw
 		f.to_yaw = yaw
 		f.stepping = true
@@ -482,11 +500,18 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var f_first := "L" if forced.L >= forced.R else "R"
 		var f_other := "R" if f_first == "L" else "L"
 		var ft_ok := 0.25     # waiting for the other foot to land (0.85) left the forced foot dragging: 28 of 45, not 35
+		var hard := FORCED_HARD
+		if lat_reach != null and rb < 0.45:
+			# ROOT (stress B14/B37 crouch): walking has no flight phase. Lifting the forced foot with the other a quarter
+			# into its swing left both in the air, and the CoM, with no leg under it, fell at g (-0.275 m crouch per step
+			# down a 30 deg ramp). Walking, a forced foot waits for the other to be nearly down unless far out of reach.
+			ft_ok = 0.70
+			hard = 0.08
 		# a foot the leg can't hold at all (> FORCED_HARD) goes now, even with the other in the air (a running hop);
 		# after a dropped-frame catch-up both feet can be out of reach at once (stress B40)
-		if forced[f_first] > FORCED_MIN and not feet[f_first].stepping and (not feet[f_other].stepping or feet[f_other].t >= ft_ok or forced[f_first] > FORCED_HARD):
+		if forced[f_first] > FORCED_MIN and not feet[f_first].stepping and (not feet[f_other].stepping or feet[f_other].t >= ft_ok or forced[f_first] > hard):
 			trigger.call(f_first, true)
-		elif forced[f_other] > FORCED_MIN and not feet[f_other].stepping and (not feet[f_first].stepping or feet[f_first].t >= ft_ok or forced[f_other] > FORCED_HARD):
+		elif forced[f_other] > FORCED_MIN and not feet[f_other].stepping and (not feet[f_first].stepping or feet[f_first].t >= ft_ok or forced[f_other] > hard):
 			trigger.call(f_other, true)
 		elif not step_l and trail_l > emerg and (not step_r or feet.R.t >= 0.72):
 			trigger.call("L", true)
@@ -522,10 +547,14 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 	var walk_vault := (1.0 - rb) * swing_bell * 0.011 * move_w
 	var target_com := jump_offset if is_air else (walk_vault - rb * 0.024 - crouch * 0.225 - braking * 0.014 - anticip_dip - geom_drop)
 	var g: float = config.gravity
+	if OS.has_environment("BS_COM"): print("      com dmax=%.3f geom=%.3f tgt=%.3f comy=%.3f vy=%.3f tl=%.3f tr=%.3f" % [dmax, geom_drop, target_com, com_y, com_vel_y, trail_l, trail_r])
 	if is_air:
 		com_y = lerpf(com_y, jump_offset, BM.expk(24.0, sdt))
 		com_vel_y = jump_vel_y
-	elif grounded_feet > 0:
+	# ROOT (stress B12/B14 crouch): with both feet in swing the CoM fell at g, right for a run's flight but not for
+	# a walk, where the motor still has her on the ground (a forced step overlapping the other's swing): -0.275 m
+	# crouch in 0.2 s. Walking, the legs' spring keeps carrying her.
+	elif grounded_feet > 0 or (lat_reach != null and rb < 0.45 and OS.has_environment("WALK_SPRING")):
 		var k_leg := lerpf(102.0, 128.0, rb)
 		var c_leg := lerpf(24.0, 22.0, rb)
 		var grf := (target_com - com_y) * k_leg - com_vel_y * c_leg + g
