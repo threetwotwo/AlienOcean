@@ -164,22 +164,22 @@
   },
   {
    "path": "engine/godot/assets/creatures/caranx_melampygus/fish.glb",
-   "md5": "2e121d1a981907cf73159f30be5c71b1",
-   "bytes": 4791196,
+   "md5": "7fa31ae74ffc54a1e100359e3ff9dc7e",
+   "bytes": 4930980,
    "store": "project files assets/creatures/caranx_melampygus/",
    "built_by": "creatures/maker: python -m creature_maker glb"
   },
   {
    "path": "engine/godot/assets/creatures/caranx_melampygus/fish_LOD1.glb",
-   "md5": "2b54932c55d4a4b1d4947fa9ef07b258",
-   "bytes": 4580976,
+   "md5": "042bd144a4fe6865501afd8e08e9b6ff",
+   "bytes": 4718012,
    "store": "project files assets/creatures/caranx_melampygus/",
    "built_by": "creatures/maker: python -m creature_maker glb"
   },
   {
    "path": "engine/godot/assets/creatures/caranx_melampygus/fish_LOD2.glb",
-   "md5": "4babd061621f52642d3f6fd72c1b8240",
-   "bytes": 4398196,
+   "md5": "cc4ac7bc111557b02ea757ed15872efe",
+   "bytes": 4537204,
    "store": "project files assets/creatures/caranx_melampygus/",
    "built_by": "creatures/maker: python -m creature_maker glb"
   }
