@@ -311,6 +311,27 @@ func _run() -> void:
 		var inv := _invariants(rec, sim.p)
 		_add("S12", "silent observation (Thalassa): the school gathers on the viewing ring (4.8 m) round her", float(on_ring) / sim.N >= 0.7 and inv.S4 and inv.S5,
 			{"on_ring": snappedf(float(on_ring) / sim.N, 0.01), "nnd_min": snappedf(rec.nnd_min, 0.001), "close_max": rec.close_max})
+	# S13: Thalassa ride escort: a ridden manta cruising past; nearby fish part round it and swim along in its slipstream
+	if _want("S13"):
+		_new_world(); await _settle_physics()
+		var s := _school("trevally", 160, 8, Vector3(0, -10, 0), false)
+		await _run_school(s, 5.0, 1.0 / 30.0)
+		var c0: Vector3 = s.sim.metrics().centre_m
+		var mv := Vector3(1.2, 0, 0)
+		var ride := func(tt: float) -> Array: return [{"pos": c0 + Vector3(-3.0, 0.5, 0) + mv * tt, "vel": mv, "radius": 1.2, "kind": "ride", "part_m": 3.8}]
+		var rec := await _run_school(s, 20.0, 1.0 / 30.0, ride)
+		var sim = s.sim
+		var mp: Vector3 = c0 + Vector3(-3.0, 0.5, 0) + mv * 20.0
+		var near := 0; var follow := 0.0; var dmin := INF
+		for i in sim.N:
+			var wp: Vector3 = sim.origin + sim.x[i] * sim.bl
+			var dd := wp.distance_to(mp); dmin = minf(dmin, dd)
+			if dd < 14.5:
+				near += 1; follow += sim.e[i].dot(mv.normalized())
+		follow = follow / maxf(near, 1)
+		var inv := _invariants(rec, sim.p)
+		_add("S13", "ride escort (Thalassa): fish keep with the ridden manta (within 14.5 m, heading its way), none inside its body or startled", float(near) / sim.N >= 0.7 and follow >= 0.7 and dmin >= 1.2 and rec.startled_max <= int(0.05 * sim.N) and inv.S4 and inv.S5,
+			{"near": snappedf(float(near) / sim.N, 0.01), "heading_with_it": snappedf(follow, 0.01), "min_dist_m": snappedf(dmin, 0.01), "startled_max": rec.startled_max})
 	# S10: cost (cloud CPU; the Mac's P-cores are faster)
 	if _want("S10"):
 		_new_world(); await _settle_physics()
