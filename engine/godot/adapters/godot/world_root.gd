@@ -28,7 +28,7 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 ## Art direction (27 Nov, Gary: 'art direction trumps'): how much of its colour sunlight and skylight keep on the way
 ## down to the floor. 0 = the physics (red lost over 4 m); 1 = the light arrives as white as it entered, with the same
 ## overall loss. The haze along the view (absorption + scattering between eye and object) is untouched.
-@export var light_neutral := 0.0
+@export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
 @export var depth_colour_share := DEPTH_WB   # art direction lever (27 Nov: Gary 'art direction trumps'); Unreal 0.25
 const DEPTH_WB := 0.25                # the share given back
 const DEPTH_WB_PATH := 1.2            # m of water per m of depth (sky light)
