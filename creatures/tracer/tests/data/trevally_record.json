@@ -1,0 +1,2709 @@
+{
+ "schema": "alien-ocean/sculptor-record/1",
+ "plan": "trevally",
+ "species": "caranx_melampygus",
+ "source": "plans/species_system/draft/records/make_stress.py",
+ "body": {
+  "label": "Bluefin trevally (Caranx melampygus)",
+  "family": "jack",
+  "L": 600,
+  "nx": 320,
+  "ny": 200,
+  "nz": 110,
+  "padL": 1.2,
+  "padHD": 0.5,
+  "species": "trevally",
+  "info": "A bluefin trevally: a fast, side-flattened oval with a steep forehead, sickle-shaped pectoral fins, tall front lobes on the soft dorsal and anal fins, a row of bony scutes along the rear of the lateral line, a very thin tail stalk and a deeply forked tail.",
+  "prop": {
+   "head": 0.237,
+   "jut": 0,
+   "depth": 0.309,
+   "width": 0.105,
+   "dorsal": 0.333,
+   "anal": 0.519,
+   "fin": 0,
+   "kit": "tel"
+  },
+  "kit": "tel",
+  "rec": {
+   "depth": [
+    0.287,
+    0.34
+   ]
+  },
+  "marks": [
+   {
+    "id": "snout",
+    "label": "Snout tip",
+    "short": "Snout",
+    "s": 0,
+    "find": "end",
+    "tip": "The snout tip."
+   },
+   {
+    "id": "eye",
+    "label": "Eye",
+    "short": "Eye",
+    "s": 0.103,
+    "win": [
+     0.063,
+     0.143
+    ],
+    "find": "bump",
+    "place": "side",
+    "yRel": 0.2,
+    "tip": "The eye.",
+    "brush": "add",
+    "mm": 1
+   },
+   {
+    "id": "gill",
+    "label": "Gill opening",
+    "short": "Gill",
+    "s": 0.237,
+    "win": [
+     0.19699999999999998,
+     0.27699999999999997
+    ],
+    "find": "neck",
+    "place": "side",
+    "yRel": -0.05,
+    "tip": "The gill opening at the rear of the head.",
+    "brush": "carve",
+    "mm": 0.3
+   },
+   {
+    "id": "pect",
+    "label": "Pectoral fin base",
+    "short": "Pectoral",
+    "s": 0.249,
+    "win": [
+     0.209,
+     0.289
+    ],
+    "find": "bump",
+    "place": "side",
+    "yRel": -0.05,
+    "tip": "The pectoral fin base.",
+    "brush": "add",
+    "mm": 1
+   },
+   {
+    "id": "dorsal",
+    "label": "Dorsal fin origin",
+    "short": "Dorsal",
+    "s": 0.333,
+    "win": [
+     0.29300000000000004,
+     0.373
+    ],
+    "find": "finTop",
+    "place": "top",
+    "tip": "The dorsal fin's origin."
+   },
+   {
+    "id": "anal",
+    "label": "Anal fin origin",
+    "short": "Anal",
+    "s": 0.519,
+    "win": [
+     0.47900000000000004,
+     0.559
+    ],
+    "find": "finBot",
+    "place": "bottom",
+    "tip": "The anal fin's origin."
+   },
+   {
+    "id": "vent",
+    "label": "Vent",
+    "short": "Vent",
+    "s": 0.499,
+    "find": "beforeAnal",
+    "place": "bottom",
+    "tip": "The vent, just ahead of the anal fin.",
+    "brush": "carve",
+    "mm": 0.3
+   },
+   {
+    "id": "tail",
+    "label": "Tail tip",
+    "short": "Tail",
+    "s": 1,
+    "find": "end",
+    "tip": "The tail tip."
+   }
+  ],
+  "motion": {
+   "A": 0.1,
+   "alpha": 3.4,
+   "lam": 1.0,
+   "slip": 0.7,
+   "St": 0.3,
+   "U": 1.5,
+   "f": 3.0,
+   "bones": 24,
+   "alphaSlope": 0.6,
+   "alphaMin": 2.8,
+   "alphaMax": 4.4,
+   "windup": 0.3,
+   "coast": 0.4,
+   "coast_s": 1.0,
+   "pivot": 0.4,
+   "src": "ESTIMATE: the snapper reference's numbers, not this fish's gait; to be set from footage"
+  }
+ },
+ "record": {
+  "name": "Bluefin trevally (Caranx melampygus), adult",
+  "origin": {
+   "kind": "matched",
+   "to": "FishBase morphometrics picture Camel_u3.jpg (id 1906) and species summary, Caranx melampygus; species thread estimates for width, outline course, eye height, fin heights, mouth and teeth sizes, jaw linkage",
+   "status": "DRAFT for the maker stress test of 11 Nov 2026; not gated",
+   "measured": {
+    "pic": "Camel_u3.jpg",
+    "id": 1906,
+    "SL": 85.4,
+    "preanal": 51.9,
+    "predorsal": 33.3,
+    "prepelvic": 25.3,
+    "prepectoral": 24.9,
+    "depth": 30.9,
+    "HL": 23.7,
+    "eye_HL": 16.4,
+    "preorb_HL": 35.2,
+    "counts": "Dorsal spines (total): 9; Dorsal soft rays (total): 21 - 24; Anal spines : 3; Anal soft rays : 17 - 21; Vertebrae : 24. This species is distinguished by the following characters: gill rakers (including rudiments) 5-9 + 17-21 = 25-29 (usually 26-27); breast completely scaly; straight part of lateral line with 0-10 anterior scales followed by 27-42 strong scutes; adipose eyelid weakly developed, sma"
+   },
+   "measured_units": "FishBase: lengths in % TL, eye and pre-orbital in % HL; record units = % TL x 2",
+   "estimates": [
+    "half width and cross-section roundness",
+    "outline between the measured stations",
+    "eye height and distance out",
+    "fin ray heights and tail shape numbers",
+    "mouth length (rictus) and all mouth parts (the snapper reference scaled)",
+    "teeth counts and sizes",
+    "jaw linkage",
+    "inner head parts (perch family derives)",
+    "fin shape fields web, flag, trail, stout, fingerTip, caudal.outline, caudal.filaments: ESTIMATE (Fins thread 11 Nov, from fins_real.json; not checked on photos yet)"
+   ],
+   "not_built": [
+    "scutes: a row of 27-42 bony keeled plates along the rear of the lateral line (skeleton.scutes)",
+    "two separate spines ahead of the anal fin",
+    "the adipose eyelid (weak in this species)",
+    "the sickle shape of the pectoral fin (length is written; the outline is the generic one)"
+   ]
+  },
+  "Lref": 200.0,
+  "SL": 170.8,
+  "refs": "FishBase morphometrics picture Camel_u3.jpg (id 1906) and species summary, Caranx melampygus; species thread estimates for width, outline course, eye height, fin heights, mouth and teeth sizes, jaw linkage",
+  "outline": {
+   "nose": 1.2,
+   "end": 170.8,
+   "tailEnd": 174.8,
+   "top": [
+    [
+     0.0,
+     1.24
+    ],
+    [
+     1.4,
+     2.73
+    ],
+    [
+     3.5,
+     4.71
+    ],
+    [
+     7.0,
+     7.01
+    ],
+    [
+     11.2,
+     9.61
+    ],
+    [
+     16.8,
+     12.71
+    ],
+    [
+     27.8,
+     19.05
+    ],
+    [
+     38.8,
+     24.16
+    ],
+    [
+     49.8,
+     27.95
+    ],
+    [
+     60.8,
+     30.48
+    ],
+    [
+     71.8,
+     31.0
+    ],
+    [
+     82.8,
+     31.0
+    ],
+    [
+     93.8,
+     29.94
+    ],
+    [
+     104.8,
+     27.05
+    ],
+    [
+     115.8,
+     23.05
+    ],
+    [
+     126.8,
+     18.22
+    ],
+    [
+     137.8,
+     13.14
+    ],
+    [
+     148.8,
+     8.37
+    ],
+    [
+     162.2,
+     5.9
+    ],
+    [
+     165.8,
+     4.7
+    ],
+    [
+     167.7,
+     3.9
+    ],
+    [
+     169.7,
+     3.1
+    ],
+    [
+     171.7,
+     3.9
+    ]
+   ],
+   "bot": [
+    [
+     0.0,
+     -2.85
+    ],
+    [
+     1.4,
+     -4.09
+    ],
+    [
+     3.5,
+     -5.52
+    ],
+    [
+     7.0,
+     -7.32
+    ],
+    [
+     11.2,
+     -9.3
+    ],
+    [
+     16.8,
+     -12.09
+    ],
+    [
+     27.8,
+     -16.84
+    ],
+    [
+     38.8,
+     -22.29
+    ],
+    [
+     49.8,
+     -26.78
+    ],
+    [
+     60.8,
+     -29.47
+    ],
+    [
+     71.8,
+     -30.5
+    ],
+    [
+     82.8,
+     -30.29
+    ],
+    [
+     93.8,
+     -29.56
+    ],
+    [
+     104.8,
+     -26.71
+    ],
+    [
+     115.8,
+     -22.27
+    ],
+    [
+     126.8,
+     -17.2
+    ],
+    [
+     137.8,
+     -11.99
+    ],
+    [
+     148.8,
+     -7.62
+    ],
+    [
+     162.2,
+     -3.9
+    ],
+    [
+     165.8,
+     -3.5
+    ],
+    [
+     167.7,
+     -3.1
+    ],
+    [
+     169.7,
+     -3.1
+    ],
+    [
+     171.7,
+     -3.9
+    ]
+   ],
+   "hw": [
+    [
+     0,
+     1.2
+    ],
+    [
+     4,
+     3
+    ],
+    [
+     10,
+     5
+    ],
+    [
+     20,
+     7.5
+    ],
+    [
+     35,
+     9.5
+    ],
+    [
+     55,
+     10.5
+    ],
+    [
+     80,
+     10.2
+    ],
+    [
+     110,
+     8.5
+    ],
+    [
+     135,
+     5.5
+    ],
+    [
+     155,
+     3
+    ],
+    [
+     169.7,
+     1.79
+    ],
+    [
+     172.2,
+     1.29
+    ],
+    [
+     174.8,
+     0.54
+    ]
+   ],
+   "nUp": [
+    [
+     0,
+     2.0
+    ],
+    [
+     170.8,
+     2.0
+    ]
+   ],
+   "nLo": [
+    [
+     0,
+     2.1
+    ],
+    [
+     170.8,
+     2.0
+    ]
+   ],
+   "_origin_hw": "ESTIMATE: written by hand from the family's body form (draft/records/make_stress2.py); no top view, scan or cross-section read yet. Owed: width / depth per station from a top-view picture or a scan (MEASURING_METHOD section 2). From u 169.7 on = tail.rootHw (row 8a step 2): the measured stalk depth times a family width / depth ratio, ESTIMATE."
+  },
+  "jaw": {
+   "maxilla": [
+    [
+     1.96,
+     -0.56,
+     2.23
+    ],
+    [
+     4.9,
+     -0.87,
+     3.47
+    ],
+    [
+     8.12,
+     -1.55,
+     4.28
+    ],
+    [
+     11.41,
+     -2.67,
+     4.65
+    ],
+    [
+     14.14,
+     -3.84,
+     4.71
+    ]
+   ],
+   "maxKnob": [
+    1.75,
+    -0.5,
+    2.05
+   ],
+   "premax": [
+    [
+     0.42,
+     -0.68,
+     0.0
+    ],
+    [
+     0.63,
+     -0.74,
+     1.3
+    ],
+    [
+     1.54,
+     -0.87,
+     2.42
+    ],
+    [
+     3.29,
+     -1.24,
+     3.35
+    ],
+    [
+     5.95,
+     -1.92,
+     4.09
+    ],
+    [
+     9.24,
+     -2.85,
+     4.53
+    ]
+   ],
+   "dentary": [
+    [
+     0.14,
+     -1.98,
+     1.12
+    ],
+    [
+     3.22,
+     -2.54,
+     2.54
+    ],
+    [
+     6.51,
+     -3.29,
+     3.72
+    ],
+    [
+     9.8,
+     -4.09,
+     4.46
+    ],
+    [
+     13.02,
+     -4.71,
+     4.84
+    ]
+   ],
+   "dentDepth": [
+    [
+     0.28,
+     0.19
+    ],
+    [
+     3.22,
+     0.5
+    ],
+    [
+     6.51,
+     0.74
+    ],
+    [
+     9.8,
+     0.81
+    ],
+    [
+     13.02,
+     0.5
+    ]
+   ],
+   "articular": [
+    [
+     11.9,
+     -4.96,
+     4.9
+    ],
+    [
+     14.7,
+     -5.89,
+     5.46
+    ],
+    [
+     16.8,
+     -6.82,
+     5.89
+    ]
+   ],
+   "quadrate": [
+    [
+     16.8,
+     -6.63,
+     5.89
+    ],
+    [
+     18.2,
+     -4.96,
+     5.95
+    ],
+    [
+     19.6,
+     -3.29,
+     5.95
+    ]
+   ],
+   "teeth": null,
+   "mandibleLow": [
+    [
+     0.14,
+     -2.67,
+     0.0
+    ],
+    [
+     2.64,
+     -4.58,
+     0.88
+    ],
+    [
+     5.14,
+     -5.88,
+     1.3
+    ],
+    [
+     7.64,
+     -7.02,
+     1.62
+    ],
+    [
+     11.02,
+     -7.6,
+     2.84
+    ],
+    [
+     14.4,
+     -8.17,
+     3.81
+    ],
+    [
+     17.3,
+     -8.66,
+     4.54
+    ]
+   ],
+   "mandibleWidth": [
+    [
+     0.14,
+     0.25
+    ],
+    [
+     2.64,
+     0.51
+    ],
+    [
+     5.14,
+     0.52
+    ],
+    [
+     7.64,
+     0.62
+    ],
+    [
+     11.02,
+     0.59
+    ],
+    [
+     14.4,
+     0.6
+    ],
+    [
+     17.3,
+     0.59
+    ]
+   ],
+   "symphysis": {
+    "len": 1.17,
+    "h": 0.69
+   },
+   "innerTop": [
+    [
+     0.14,
+     -2.27
+    ],
+    [
+     2.92,
+     -3.05
+    ],
+    [
+     5.69,
+     -3.88
+    ],
+    [
+     8.47,
+     -4.65
+    ],
+    [
+     11.25,
+     -5.14
+    ],
+    [
+     14.02,
+     -5.77
+    ],
+    [
+     16.8,
+     -6.92
+    ]
+   ],
+   "premaxAsc": {
+    "len": 3.89,
+    "angle": 65
+   },
+   "premaxDepth": [
+    [
+     0,
+     0.63
+    ],
+    [
+     0.5,
+     0.64
+    ],
+    [
+     1,
+     0.27
+    ]
+   ],
+   "maxDepth": [
+    [
+     0,
+     0.76
+    ],
+    [
+     0.5,
+     1.14
+    ],
+    [
+     1,
+     2.03
+    ]
+   ],
+   "maxCover": 0.8,
+   "linkage": {
+    "swing": 30,
+    "protrusion": 4.0,
+    "gape": 35,
+    "_origin": "ESTIMATE from the family's feeding type; not measured for this species"
+   },
+   "hyomandibula": [
+    [
+     25.8,
+     -1.7,
+     6.7
+    ],
+    [
+     27.8,
+     3.3,
+     6.8
+    ],
+    [
+     29.8,
+     6.3,
+     6.1
+    ]
+   ],
+   "hyoHeads": [
+    [
+     28.4,
+     7.3,
+     5.4
+    ],
+    [
+     31.9,
+     6.8,
+     5.7
+    ]
+   ],
+   "hyoProcess": [
+    [
+     30.9,
+     4.3,
+     7.2
+    ],
+    [
+     34.4,
+     2.3,
+     8.3
+    ]
+   ],
+   "quadrateBrace": [
+    [
+     20.6,
+     -4.5,
+     5.7
+    ],
+    [
+     23.8,
+     -3.2,
+     6.4
+    ]
+   ],
+   "pterygoid": [
+    [
+     18.2,
+     -4.5,
+     4.8
+    ],
+    [
+     13.4,
+     -1.9,
+     3.6
+    ],
+    [
+     9.4,
+     0.5,
+     2.6
+    ],
+    [
+     5.5,
+     1.5,
+     1.5
+    ]
+   ],
+   "coronoid": [
+    [
+     10.4,
+     -3.6,
+     3.1
+    ],
+    [
+     12.3,
+     -2.7,
+     3.8
+    ],
+    [
+     13.9,
+     -4.4,
+     4.1
+    ]
+   ],
+   "_origin_headbones": "ESTIMATE: every line placed by rule from this record's landmarks (tools/head_bones_into_record.py); none measured; this fish's own head bones: NOT READ YET (no scan or skeleton source found yet)"
+  },
+  "skeleton": {
+   "skull": {
+    "front": 1,
+    "occiput": 40.3,
+    "h": 0.3,
+    "box": [
+     [
+      42.7,
+      -13.7,
+      -12
+     ],
+     [
+      -0.5,
+      15.5,
+      12
+     ]
+    ],
+    "bits": [],
+    "braincase": [
+     [
+      6.0,
+      1.1,
+      5.4,
+      2.5
+     ],
+     [
+      10.3,
+      1.9,
+      8.1,
+      2.6
+     ],
+     [
+      14.6,
+      2.7,
+      10.5,
+      2.9
+     ],
+     [
+      18.9,
+      3.6,
+      12.9,
+      3.4
+     ],
+     [
+      23.2,
+      4.5,
+      15.4,
+      3.9
+     ],
+     [
+      27.5,
+      5.3,
+      17.8,
+      4.4
+     ],
+     [
+      31.7,
+      5.6,
+      19.7,
+      5.1
+     ],
+     [
+      36.0,
+      5.6,
+      21.6,
+      5.8
+     ],
+     [
+      40.3,
+      3.9,
+      20.7,
+      6.6
+     ]
+    ],
+    "_origin_braincase": "ESTIMATE by rule (roof under the top line, floor from below the orbit to the first vertebra, width a share of the head's)"
+   },
+   "eye": {
+    "u": 20.59,
+    "y": 6.0,
+    "z": 5.9,
+    "R": 3.11,
+    "orbitR": 3.89,
+    "gaze": [
+     0.15,
+     0.1,
+     0.98
+    ],
+    "_origin": "u and orbitR MEASURED (FishBase pre-orbital length and eye diameter = bony orbit); R = 0.8 orbitR (eye rule); y an ESTIMATE; z = 0.85 x the skin's half width at the eye by the outline rule",
+    "axial": 0.8,
+    "proud": 0.2,
+    "_origin_u": "MEASURED on FishBase's measured picture Camel_u3.jpg (id 1906): pre-orbital length 35.2 % of HL on the head scale (HL = gill.u 47.4), plus orbitR (eye diameter 16.4 % HL / 2): eye.u is the eye's centre, its front = eye.u - orbitR. Checked against the record: within 0.15."
+   },
+   "jawJoint": [
+    16.8,
+    -6.82,
+    5.89
+   ],
+   "spine": {
+    "count": 24,
+    "precaudal": 10,
+    "end": 0.715,
+    "precaudalLen": 1,
+    "taperN": 4,
+    "taper": 0.15,
+    "ribsFrom": 99,
+    "interTail": 18,
+    "epipleuralFrom": 0,
+    "spineK": [
+     3,
+     3
+    ],
+    "hypL": 5,
+    "hypY": 0.5,
+    "colY": 0.12,
+    "rcK": 0.055
+   },
+   "gills": {
+    "opercle": {
+     "tri": [
+      [
+       35.3,
+       2.9
+      ],
+      [
+       45.0,
+       10.8
+      ],
+      [
+       44.2,
+       -5.8
+      ]
+     ],
+     "z": [
+      8.7,
+      8.5,
+      8.9
+     ],
+     "hinge": [
+      34.8,
+      1.4,
+      7.1
+     ],
+     "margin": [
+      [
+       45.0,
+       10.8
+      ],
+      [
+       46.3,
+       8.7
+      ],
+      [
+       46.2,
+       6.7
+      ],
+      [
+       46.5,
+       4.6
+      ],
+      [
+       46.6,
+       2.5
+      ],
+      [
+       46.3,
+       0.4
+      ],
+      [
+       45.8,
+       -1.7
+      ],
+      [
+       45.1,
+       -3.7
+      ],
+      [
+       44.2,
+       -5.8
+      ]
+     ]
+    },
+    "subopercle": [
+     [
+      34.9,
+      -15.2,
+      5.9
+     ],
+     [
+      39.0,
+      -16.8,
+      6.0
+     ],
+     [
+      43.0,
+      -17.6,
+      6.3
+     ],
+     [
+      45.4,
+      -15.8,
+      7.2
+     ],
+     [
+      46.2,
+      -10.9,
+      8.4
+     ],
+     [
+      44.2,
+      -5.8,
+      8.9
+     ]
+    ],
+    "preopercle": [
+     [
+      25.5,
+      6.0,
+      7.2
+     ],
+     [
+      26.4,
+      -1.3,
+      7.6
+     ],
+     [
+      26.3,
+      -6.9,
+      6.9
+     ],
+     [
+      25.8,
+      -8.0,
+      6.5
+     ],
+     [
+      24.6,
+      -8.4,
+      6.2
+     ],
+     [
+      21.5,
+      -8.2,
+      5.8
+     ],
+     [
+      18.0,
+      -7.8,
+      5.1
+     ]
+    ],
+    "interopercle": [
+     [
+      18.0,
+      -9.2,
+      4.5
+     ],
+     [
+      26.2,
+      -10.5,
+      5.8
+     ],
+     [
+      34.9,
+      -15.2,
+      5.9
+     ]
+    ],
+    "hyoid": [
+     [
+      7.2,
+      -5.9,
+      1.0
+     ],
+     [
+      12.3,
+      -8.2,
+      3.0
+     ],
+     [
+      18.4,
+      -10.2,
+      1.6
+     ],
+     [
+      24.5,
+      -11.7,
+      2.2
+     ],
+     [
+      28.6,
+      -12.0,
+      2.6
+     ]
+    ],
+    "urohyal": [
+     [
+      8.2,
+      -6.9,
+      0.0
+     ],
+     [
+      15.3,
+      -10.3,
+      0.0
+     ],
+     [
+      23.5,
+      -13.3,
+      0.0
+     ]
+    ],
+    "basibranchials": [
+     [
+      20.4,
+      -9.9,
+      0.0
+     ],
+     [
+      24.5,
+      -11.0,
+      0.0
+     ],
+     [
+      28.6,
+      -11.8,
+      0.0
+     ],
+     [
+      32.7,
+      -12.5,
+      0.0
+     ]
+    ],
+    "pharyngealLower": [
+     [
+      35.8,
+      -10.1,
+      0.3
+     ],
+     [
+      37.3,
+      -8.1,
+      0.6
+     ],
+     [
+      38.3,
+      -6.1,
+      0.7
+     ]
+    ],
+    "hypohyal": [
+     6.7,
+     -5.5,
+     0.6
+    ],
+    "pharyngealUpper": [
+     37.8,
+     -4.4,
+     0.4
+    ],
+    "branchiostegals": {
+     "n": 6,
+     "t0": 0.4,
+     "dt": 0.11,
+     "u1": 34.9,
+     "du": 1.2,
+     "th0": -70,
+     "dth": 9
+    },
+    "arches": {
+     "n": 4,
+     "u0": 24.5,
+     "du": 3.5,
+     "pts": [
+      [
+       [
+        -3.1,
+        -13.3,
+        0.1
+       ],
+       [
+        -1.2,
+        -13.1,
+        0.5
+       ]
+      ],
+      [
+       [
+        -1.2,
+        -13.1,
+        0.5
+       ],
+       [
+        0.6,
+        -12.0,
+        1.4
+       ],
+       [
+        2.2,
+        -9.7,
+        1.9
+       ],
+       [
+        3.1,
+        -7.1,
+        1.9
+       ]
+      ],
+      [
+       [
+        3.1,
+        -7.1,
+        1.9
+       ],
+       [
+        2.2,
+        -5.8,
+        1.5
+       ],
+       [
+        1.0,
+        -5.0,
+        1.0
+       ],
+       [
+        1.8,
+        -4.9,
+        0.5
+       ]
+      ]
+     ]
+    },
+    "throatTeeth": {
+     "lower": [
+      [
+       36.2,
+       -9.8,
+       0.4
+      ],
+      [
+       37.4,
+       -7.8,
+       0.6
+      ],
+      [
+       38.2,
+       -5.9,
+       0.7
+      ]
+     ],
+     "lowerN": 6,
+     "upper": {
+      "u0": 36.8,
+      "du": 0.5,
+      "y": -4.6,
+      "z0": 0.3,
+      "dz": 0.4
+     },
+     "upperN": 5
+    },
+    "flare": {
+     "lift": 1.0,
+     "abduct": 2.0
+    }
+   },
+   "pectoral": {
+    "base": {
+     "u": 51,
+     "y": -6
+    },
+    "rays": 20,
+    "length": 0.3,
+    "span": [
+     5,
+     -8
+    ],
+    "sweep": [
+     20,
+     -38
+    ],
+    "out": 30,
+    "prof": [
+     [
+      0,
+      1
+     ],
+     [
+      0.2,
+      0.7
+     ],
+     [
+      0.45,
+      0.45
+     ],
+     [
+      0.75,
+      0.3
+     ],
+     [
+      1,
+      0.22
+     ]
+    ],
+    "posttemporal": [
+     [
+      38.3,
+      21.2,
+      2.3
+     ],
+     [
+      41.3,
+      20.0,
+      4.5
+     ],
+     [
+      44.3,
+      15.7,
+      7.1
+     ]
+    ],
+    "supracleithrum": [
+     [
+      44.3,
+      15.7,
+      7.1
+     ],
+     [
+      46.3,
+      11.9,
+      8.2
+     ],
+     [
+      47.4,
+      8.1,
+      8.7
+     ]
+    ],
+    "cleithrum": [
+     [
+      47.4,
+      8.1,
+      8.7
+     ],
+     [
+      49.0,
+      2.0,
+      9.2
+     ],
+     [
+      49.2,
+      -6.1,
+      8.9
+     ],
+     [
+      46.9,
+      -14.1,
+      7.5
+     ],
+     [
+      41.4,
+      -20.8,
+      3.6
+     ],
+     [
+      34.4,
+      -23.5,
+      0.0
+     ],
+     [
+      31.4,
+      -23.5,
+      0.0
+     ]
+    ],
+    "_origin_girdle": "ESTIMATE by rule: along the gill opening's rear wall (gill.u + 1), ending forward under the throat"
+   },
+   "pelvic": {
+    "rays": 6,
+    "spines": 1,
+    "disc": false,
+    "base": {
+     "u": 52,
+     "y": -26.5
+    },
+    "length": 0.1,
+    "tip": "Pelvic fins: a spine and five soft rays each",
+    "out": 30,
+    "sweep": [
+     40,
+     -10
+    ],
+    "tilt": 55,
+    "spineLen": 0.65,
+    "prof": [
+     [
+      0,
+      0.65
+     ],
+     [
+      0.2,
+      1.0
+     ],
+     [
+      0.5,
+      0.9
+     ],
+     [
+      1,
+      0.55
+     ]
+    ]
+   },
+   "median": {
+    "d1": {
+     "u": [
+      66.6,
+      84
+     ],
+     "h": [
+      5.5,
+      8.1,
+      10.7,
+      9.4,
+      7.6,
+      5.8,
+      4.0,
+      2.2
+     ],
+     "lean": [
+      35,
+      55
+     ],
+     "spines": 8,
+     "name": "First dorsal fin",
+     "tip": "Eight slender spines (plus one at the front of the second fin)"
+    },
+    "d2": {
+     "u": [
+      86,
+      160
+     ],
+     "h": [
+      17.6,
+      20.1,
+      21.8,
+      20.8,
+      19.9,
+      18.9,
+      17.9,
+      17.0,
+      16.0,
+      15.1,
+      14.1,
+      13.2,
+      12.2,
+      11.2,
+      10.3,
+      9.3,
+      8.4,
+      7.4,
+      6.5,
+      5.5,
+      4.6,
+      3.6,
+      2.6
+     ],
+     "lean": [
+      35,
+      55
+     ],
+     "spines": 1,
+     "name": "Second dorsal fin",
+     "tip": "One spine and twenty-one to twenty-four soft rays: a tall sickle lobe in front, then low to the tail"
+    },
+    "an": {
+     "u": [
+      103.8,
+      160
+     ],
+     "h": [
+      13.3,
+      17.1,
+      18.5,
+      17.6,
+      16.6,
+      15.7,
+      14.7,
+      13.8,
+      12.8,
+      11.8,
+      10.9,
+      9.9,
+      9.0,
+      8.0,
+      7.1,
+      6.1,
+      5.1,
+      4.2,
+      3.2,
+      2.3
+     ],
+     "lean": [
+      35,
+      55
+     ],
+     "spines": 1,
+     "name": "Anal fin",
+     "tip": "Two separate spines, then one spine and seventeen to twenty-one soft rays, mirroring the second dorsal"
+    },
+    "caudal": {
+     "n": 17,
+     "proc": {
+      "up": 8,
+      "lo": 7,
+      "uUp": 171.7,
+      "uLo": 171.7
+     },
+     "len": 29.8,
+     "spread": 84,
+     "round": -0.9,
+     "flexK": 0.9,
+     "flexEnd": 0.6,
+     "outline": [
+      [
+       -1,
+       1
+      ],
+      [
+       -0.7,
+       0.62
+      ],
+      [
+       -0.4,
+       0.4
+      ],
+      [
+       -0.15,
+       0.3
+      ],
+      [
+       0,
+       0.28
+      ],
+      [
+       0.15,
+       0.3
+      ],
+      [
+       0.4,
+       0.4
+      ],
+      [
+       0.7,
+       0.62
+      ],
+      [
+       1,
+       1
+      ]
+     ],
+     "form": "deep",
+     "_origin_proc": "uUp, uLo MEASURED on Camel_u3.jpg (FishBase painting) with the stalk writer's scale (flesh end at outline.tailEnd): the upper edge leaves the stalk at picture x 503, the lower at x 503 (where the fin's leading edge rises off the stalk outline); read by eye on a gridded crop at 3-10x, quality low, about +-2 px. The upper and lower edge leaves the stalk AT the flesh margin on this picture (no procurrent stretch visible): set to the margin's own end, so the reader tags the edge and grows no membrane. up, lo = 8 / 7 ESTIMATE (generic percomorph; not counted on a picture)."
+    }
+   },
+   "carapace_end_SL": {
+    "top": 0.795,
+    "bottom": 0.824
+   },
+   "scutes": {
+    "u": [
+     112,
+     169
+    ],
+    "y": 0,
+    "count": 35,
+    "h": 2.2,
+    "_origin": "FishBase: 27-42 strong scutes on the straight part of the lateral line; place and height are ESTIMATES"
+   }
+  },
+  "muscles": {
+   "girdle": 48.49,
+   "coverEnd": 48.78,
+   "coverEase": [
+    43.14,
+    54.42
+   ],
+   "girdleGroove": 48.49,
+   "myomereW": {
+    "a": 1.1,
+    "b": 0.7
+   },
+   "myoFrom": 49.4,
+   "jaw": {
+    "a2From": [
+     [
+      "s",
+      23.57,
+      -1.72,
+      0.3
+     ],
+     [
+      "s",
+      27.32,
+      -1.55,
+      0.3
+     ],
+     [
+      "s",
+      31.08,
+      -1.55,
+      0.3
+     ],
+     [
+      31.08,
+      -3.06,
+      7.22
+     ],
+     [
+      29.2,
+      -4.4,
+      6.88
+     ],
+     [
+      26.07,
+      -5.41,
+      6.38
+     ]
+    ],
+    "a2To": [
+     [
+      12.79,
+      -6.65,
+      3.58
+     ],
+     [
+      13.79,
+      -6.72,
+      3.83
+     ],
+     [
+      14.8,
+      -6.79,
+      4.08
+     ],
+     [
+      15.8,
+      -6.85,
+      4.32
+     ]
+    ],
+    "a2Tendon": [
+     [
+      13.04,
+      -6.55,
+      3.69
+     ],
+     [
+      11.79,
+      -6.55,
+      3.33
+     ],
+     [
+      10.54,
+      -6.55,
+      2.96
+     ]
+    ],
+    "a3From": [
+     [
+      18.55,
+      -5.75,
+      3.84
+     ],
+     [
+      21.06,
+      -4.74,
+      4.3
+     ],
+     [
+      23.57,
+      -3.73,
+      4.61
+     ]
+    ],
+    "a3To": [
+     [
+      13.04,
+      -6.42,
+      2.74
+     ],
+     [
+      14.29,
+      -6.55,
+      2.95
+     ]
+    ],
+    "lapFrom": [
+     [
+      "s",
+      31.08,
+      -0.38,
+      0.2
+     ],
+     [
+      "s",
+      33.59,
+      -0.54,
+      0.2
+     ]
+    ],
+    "lapTo": [
+     [
+      31.08,
+      -3.06,
+      7.05
+     ],
+     [
+      33.59,
+      -2.39,
+      7.37
+     ]
+    ],
+    "a2Scale": 0.9
+   },
+   "gills": {
+    "dilatatorFrom": [
+     [
+      "s",
+      28.54,
+      11.79,
+      0.2
+     ],
+     [
+      "s",
+      32.29,
+      11.44,
+      0.2
+     ],
+     [
+      "s",
+      36.05,
+      11.08,
+      0.2
+     ]
+    ],
+    "dilatatorTo": [
+     [
+      35.8,
+      2.54,
+      8.09
+     ],
+     [
+      37.06,
+      2.4,
+      8.15
+     ]
+    ],
+    "levatorFrom": [
+     [
+      "s",
+      37.31,
+      14.64,
+      0.2
+     ],
+     [
+      "s",
+      41.06,
+      13.93,
+      0.2
+     ]
+    ],
+    "levatorTo": [
+     [
+      38.56,
+      3.25,
+      8.18
+     ],
+     [
+      43.57,
+      3.68,
+      8.38
+     ],
+     [
+      47.33,
+      3.96,
+      8.53
+     ]
+    ],
+    "sternohyoideus": [
+     [
+      42.91,
+      -20.83,
+      0.41
+     ],
+     [
+      36.78,
+      -18.36,
+      0.37
+     ],
+     [
+      29.62,
+      -15.11,
+      0.29
+     ],
+     [
+      22.47,
+      -12.22,
+      0.2
+     ],
+     [
+      16.34,
+      -9.88,
+      0.18
+     ]
+    ],
+    "protractor": [
+     [
+      24.52,
+      -12.01,
+      1.99
+     ],
+     [
+      18.39,
+      -10.07,
+      1.42
+     ],
+     [
+      12.26,
+      -6.8,
+      2.75
+     ],
+     [
+      8.17,
+      -4.15,
+      1.97
+     ],
+     [
+      4.09,
+      -1.77,
+      0.64
+     ]
+    ],
+    "intermandibularis": [
+     [
+      2.25,
+      -1.07,
+      0.54
+     ],
+     [
+      2.04,
+      -1.13,
+      0.0
+     ],
+     [
+      2.25,
+      -1.07,
+      -0.54
+     ]
+    ],
+    "hyohyoideusEnd": {
+     "u1": 34.9,
+     "du": 1.2
+    }
+   },
+   "eye": {
+    "rectiFrom": [
+     24.02,
+     3.71,
+     2.29
+    ],
+    "obliquesFrom": [
+     17.16,
+     3.71,
+     2.29
+    ]
+   }
+  },
+  "lips": {
+   "upEdge": [
+    [
+     0.56,
+     -0.62,
+     1.12
+    ],
+    [
+     1.75,
+     -0.81,
+     2.42
+    ],
+    [
+     3.71,
+     -1.18,
+     3.41
+    ],
+    [
+     6.51,
+     -1.86,
+     4.09
+    ],
+    [
+     9.8,
+     -2.73,
+     4.46
+    ],
+    [
+     13.02,
+     -3.66,
+     4.59
+    ]
+   ],
+   "upRoll": {
+    "drop": 0.1,
+    "out": 0.372,
+    "ry": 0.496,
+    "rz": 0.62
+   },
+   "upFront": {
+    "c": [
+     0.63,
+     -0.81,
+     0.0
+    ],
+    "r": [
+     1.05,
+     0.56,
+     1.86
+    ]
+   },
+   "chin": {
+    "c": [
+     0.7,
+     -2.23,
+     0.0
+    ],
+    "r": [
+     1.4,
+     0.87,
+     1.74
+    ]
+   },
+   "lipR": 0.56,
+   "contact": 0.18,
+   "full": 0.26,
+   "front": 0.8,
+   "lowRoll": {
+    "out": 0.32,
+    "ry": 0.42,
+    "rz": 0.56,
+    "drop": 0.1
+   },
+   "thick": {
+    "up": [
+     2.05,
+     1.49
+    ],
+    "lo": [
+     2.24,
+     1.56
+    ]
+   },
+   "_origin_thick": "ESTIMATE, low confidence: the snapper's measured lip widths x lipR / 0.9, at most 0.3 x mouth length (no photo of this fish measured yet)"
+  },
+  "finRays": {
+   "h": 0.5,
+   "w": 0.16,
+   "tipK": 0.15,
+   "spines": {
+    "h": 1.0,
+    "w": 0.3,
+    "tipK": 0.6,
+    "notch": 0.3
+   }
+  },
+  "mouth": {
+   "seam": [
+    [
+     0.35,
+     -1.24
+    ],
+    [
+     2.1,
+     -1.61
+    ],
+    [
+     4.2,
+     -2.05
+    ],
+    [
+     6.3,
+     -2.48
+    ],
+    [
+     8.4,
+     -2.98
+    ],
+    [
+     10.5,
+     -3.47
+    ],
+    [
+     12.6,
+     -3.97
+    ],
+    [
+     14.7,
+     -4.34
+    ]
+   ],
+   "rictus": 14.7,
+   "corner": [
+    15.12,
+    -4.59,
+    4.46
+   ],
+   "_origin": "ESTIMATE: the snapper reference's mouth scaled 0.7 along and 0.62 up and out; rictus 14.0 set from the family's mouth size, not measured",
+   "rictalFold": {
+    "r": 0.5
+   },
+   "open": {
+    "front": 0.72,
+    "half": 0.54,
+    "threeq": 0.4,
+    "rear": 0.3,
+    "len": 0.42,
+    "rearAhead": 0.17,
+    "protrude": 0.25,
+    "shape": "D"
+   },
+   "_origin_open": "ESTIMATE, placeholder: the snapper's measured shape (no usable side view of this fish open yet)",
+   "read": {
+    "agrees": null,
+    "src": "NOT READ YET: no sharp side photo of this fish's closed mouth measured"
+   },
+   "kinds": [
+    "lip"
+   ],
+   "_origin_kinds": "mouth kind from the family description (HEAD_GAPS.md); 'lip' = the lip mouth built today. The mouth PARTS in this record are still the snapper's scaled: ESTIMATE"
+  },
+  "cavity": {
+   "floor": [
+    [
+     0.63,
+     -1.86
+    ],
+    [
+     2.1,
+     -2.29
+    ],
+    [
+     4.9,
+     -2.98
+    ],
+    [
+     7.7,
+     -3.72
+    ],
+    [
+     10.85,
+     -4.46
+    ],
+    [
+     14.0,
+     -5.08
+    ],
+    [
+     17.5,
+     -5.52
+    ],
+    [
+     20.65,
+     -5.64
+    ],
+    [
+     23.1,
+     -5.21
+    ],
+    [
+     25.9,
+     -4.09
+    ]
+   ],
+   "crease": [
+    [
+     15.12,
+     -4.59,
+     4.46
+    ],
+    [
+     16.31,
+     -4.84,
+     3.97
+    ],
+    [
+     17.92,
+     -4.96,
+     3.47
+    ],
+    [
+     20.09,
+     -4.96,
+     2.85
+    ],
+    [
+     22.26,
+     -4.71,
+     2.11
+    ],
+    [
+     24.43,
+     -4.34,
+     1.12
+    ],
+    [
+     25.9,
+     -4.09,
+     0.0
+    ]
+   ],
+   "ring": 20.3,
+   "end": 25.9,
+   "endY": -3.97
+  },
+  "eye": {
+   "over": 0.14,
+   "bulge": 0.12,
+   "groove": 0.1
+  },
+  "nostrilA": {
+   "u": 12.0,
+   "y": 6.4,
+   "r": 0.45,
+   "depth": 0.4,
+   "rim": 0.12
+  },
+  "nostrilP": {
+   "u": 14.4,
+   "y": 6.7,
+   "r": 0.5,
+   "depth": 0.4,
+   "rim": 0.1
+  },
+  "gill": {
+   "u": 47.4,
+   "y0": -19.4,
+   "y1": 10.8,
+   "w": 0.4,
+   "depth": 0.65,
+   "lip": 0.15,
+   "dark": 0.3,
+   "_origin": "u MEASURED (head length); height an ESTIMATE"
+  },
+  "vent": {
+   "before": 0.01,
+   "len": 2.0,
+   "wid": 0.9,
+   "depth": 0.4
+  },
+  "skin": {
+   "thick": 0.5,
+   "fatHead": 0.3,
+   "fatBody": 0.3,
+   "reachHead": 7,
+   "reachBody": 8,
+   "softHead": 1.4,
+   "softBody": 2.2,
+   "grid": [
+    60,
+    70,
+    205,
+    70,
+    70
+   ],
+   "type": "silvery",
+   "_origin_type": "PUBLISHED FishBase (Caranx melampygus, Ref. 9894, 90102): juveniles and young adults 'head and body silvery grey', adults 'head and dorsal half of body brassy, suffused with blue' over a silvery lower half; photo skin_01 belly L* 90 with a mirror highlight (guanine)."
+  },
+  "breathing": {
+   "amp": 0.7,
+   "rate": 1.6
+  },
+  "teeth": {
+   "rows": 0,
+   "lenK": 1,
+   "widK": 1,
+   "countK": 1,
+   "vomRows": 0,
+   "front": null,
+   "premaxK": 1,
+   "jaws": {
+    "up": {
+     "rows": [
+      {
+       "n": 30,
+       "len": 0.7,
+       "wid": 0.2,
+       "lean": 0,
+       "from": 0.04,
+       "to": 0.85,
+       "in": 0.0
+      }
+     ],
+     "canines": []
+    },
+    "lo": {
+     "rows": [
+      {
+       "n": 26,
+       "len": 0.7,
+       "wid": 0.2,
+       "lean": 0,
+       "from": 0.04,
+       "to": 0.85,
+       "in": 0.0
+      }
+     ],
+     "canines": []
+    }
+   },
+   "_origin": "kind: an outer row of strong conical teeth with a band of small teeth inside (upper jaw); one row of conical teeth (lower jaw) (family description); counts and sizes are ESTIMATES"
+  },
+  "variants": {},
+  "defaults": {},
+  "presets": {
+   "adult": {
+    "label": "Adult",
+    "note": "The adult as built",
+    "pieces": {}
+   }
+  },
+  "shape": {
+   "brow": {
+    "h": 1,
+    "r": 1,
+    "len": 1
+   },
+   "cheek": {
+    "h": 1,
+    "r": 1,
+    "len": 1
+   },
+   "jawLine": {
+    "h": 1,
+    "r": 1
+   },
+   "preop": {
+    "h": 0.5,
+    "r": 1
+   },
+   "opercle": {
+    "h": 1,
+    "r": 1
+   },
+   "maxilla": {
+    "h": 1,
+    "r": 1,
+    "len": 1
+   },
+   "nape": {
+    "h": 0,
+    "r": 1,
+    "len": 1
+   },
+   "tailKeel": {
+    "h": 0,
+    "r": 1,
+    "len": 1
+   },
+   "keel": {
+    "h": 1,
+    "r": 1
+   },
+   "_origin_preop": "h 0.5: Carangidae: margin smooth in adults, cheek scaled. ESTIMATE from the family diagnosis; NOT READ YET on this fish's photos"
+  },
+  "paint": {
+   "ground": {
+    "back": {
+     "M": 0.14,
+     "X": 0.9,
+     "E": 0.05,
+     "Lc": 0.35
+    },
+    "belly": {
+     "M": 0.03,
+     "X": 0.65,
+     "Lc": 0.7
+    },
+    "line": -0.55,
+    "soft": 0.35,
+    "shade": {
+     "back_L": 67.1,
+     "belly_L": 90.2,
+     "_origin": "MEASURED, LOW: one strobe-lit live photo, plans/blueprints/images/trevally/skin/skin_01_side.jpg (iNat 21662572, CC BY) back 67.1 / belly 90.2; agrees with FishBase (adults: head and dorsal half brassy suffused with blue; silvery below). Not used: skin_02 (ambient, blue cast: 41.6 / 41.4). Method (Species, 16 Nov, plans/species_system/proposals/coat_fields/): L* = CIE L* (sRGB, D65) median of the pixels in boxes on the back third and the belly third of the flank at mid-body, a lightness (no length scale); look-and-measure only. Only strobe-lit live photos are used (ambient light from above darkens the belly; dead specimens change colour). LOW confidence: photo exposure and light direction move L* by 10-20, so treat |back_L - belly_L| under ~5 as no difference."
+    }
+   },
+   "marks": [
+    {
+     "kind": "spots",
+     "s": [
+      "snout+0.02",
+      "tail"
+     ],
+     "h": [
+      -0.85,
+      1.05
+     ],
+     "r": 0.011,
+     "rj": 0.35,
+     "gap": 0.045,
+     "cover": 0.8,
+     "cells": {
+      "I": 0.95,
+      "ic": "#3c8ef2",
+      "X": 0.08,
+      "M": 0.05,
+      "Lc": 0.15
+     },
+     "seed": 31,
+     "edge": {
+      "soft": 0.3,
+      "_origin_soft": "ESTIMATE: the spots are too small to resolve on plans/blueprints/images/trevally/skin/skin_01 (dark specks, diameter 5 px) and skin_02 (blue flecks, 12 px), ramps at the photo's blur (upper bounds 0.86 and 0.64). FishBase: 'small blue black spots'; the blue flecks read softer than the dark specks by eye, so a little above the crisp marks (0.16-0.18)."
+     }
+    }
+   ],
+   "fins": {
+    "all": {
+     "cells": {
+      "M": 0.02,
+      "X": 0.5,
+      "Lc": 0.25
+     },
+     "alpha": 0.3
+    },
+    "caudal": {
+     "cells": {
+      "M": 0.05,
+      "X": 0.75,
+      "Lc": 0.3
+     },
+     "alpha": 0.6
+    }
+   },
+   "eye": {
+    "ball": "#2a3020",
+    "iris": "#b0a65f",
+    "pupil": "#0a121a",
+    "pupil_r": 0.7,
+    "_about": {
+     "src": "Blueprints eye_colours.json (iNaturalist CC, medium-low confidence)",
+     "shape": "round to slightly angular; possible small rostral aphakic gap, low confidence",
+     "aphakic": null,
+     "note": "thin gold-yellow ring"
+    }
+   },
+   "teeth": "#c9bfa3",
+   "_origin_teeth": "ESTIMATE: generic teleost tooth ivory at Style's ceiling for estimates (#c9bfa3, L* 78; Style 13 Nov 15:58Z: teeth are never the lightest point of the face). No photo of this fish's teeth yet.",
+   "_note_coat_fields": "Species 16 Nov: paint.marks here is still the board placeholder (one generic spots layer, r 0.011); no zone marks. Spot size, count and the grouper's pale rear bars are not yet measured (owed after the reset)."
+  },
+  "scales": {
+   "rows": 100,
+   "_origin": "ESTIMATE of lateral scale rows (0 = none or too small to count)",
+   "grow": {
+    "_about": "Scale block for the grown scale pass (SCALE_FIELDS.md; SCALE_GROW). Read only by the grow pass. Counts are [lo, hi]; seed 0 takes the middle. Built by proposals/scales_grow/make_grow.py 13 Nov 2026.",
+    "type_body": {
+     "value": "cycloid",
+     "_origin": "PUBLISHED FishBase morphology page, Caranx melampygus (fishbase.se MorphDataList ID 1906, fetched 13 Nov 2026)"
+    },
+    "regions": {
+     "flank": "cycloid",
+     "back": "cycloid",
+     "belly": "cycloid",
+     "breast": "cycloid",
+     "stalk": "cycloid",
+     "cheek": "scaled (upper)",
+     "opercle": "scaled (upper)",
+     "nape": "scaled",
+     "interorbital": "naked",
+     "snout": "naked",
+     "preorbital": "naked",
+     "jaws": "naked",
+     "_origin": "ESTIMATE family jack (plans/species_system/proposals/scales_grow/families.json)"
+    },
+    "lateral_line": {
+     "pored_scales": [
+      70,
+      90
+     ],
+     "path_SL": null,
+     "ll_frac": 0.35,
+     "_origin": "ESTIMATE: PUBLISHED FishBase morphology page, Caranx melampygus (fishbase.se MorphDataList ID 1906, fetched 13 Nov 2026) gives only the straight part ('0-10 anterior scales followed by 27-42 strong scutes'); curved-part count not found; whole line taken as 70-90 from the scute run over the rear ~45 % of the line; ESTIMATE family path (line mid-flank); grow pass draws it at ll_frac of depth"
+    },
+    "lateral_series": {
+     "value": null,
+     "_origin": "count not found; along size from lateral_line.pored_scales (line taken as complete)"
+    },
+    "rows_above": {
+     "value": [
+      6,
+      11
+     ],
+     "_origin": "ESTIMATE from geometry: depth 61.5 x line share 0.35 (family) / along step 1.49; x 0.58 calibrated on 6 board fish with published rows (spread 0.43-0.73)",
+     "at": "dorsal fin origin"
+    },
+    "rows_below": {
+     "value": [
+      12,
+      20
+     ],
+     "_origin": "ESTIMATE from geometry: depth 61.5 x 0.65 / along step 1.49; x 0.58 calibrated on 6 board fish with published rows (spread 0.43-0.73)",
+     "at": "anal fin origin"
+    },
+    "row_rise_above_deg": {
+     "value": 0,
+     "_origin": "ESTIMATE family jack (plans/species_system/proposals/scales_grow/families.json)"
+    },
+    "row_offset": {
+     "value": 0.5,
+     "_origin": "ANATOMY (starting hint only: the grow pass seats each scale between two of the row before by construction)"
+    },
+    "predorsal": {
+     "value": [
+      14,
+      31
+     ],
+     "_origin": "ESTIMATE from geometry: nape path 43.8 (dorsal origin u 56.9 to above the orbit front) / nape scale 0.7 x 1.49 x 0.58 (row calibration; LOW confidence: cave cardinalfish published 5 vs 8 by this rule, as nape scales often stop short of the eye)"
+    },
+    "cheek_rows": {
+     "value": null,
+     "_origin": "count not found in reachable sources; grow pass sizes the cheek by size_ratio.cheek"
+    },
+    "circumpeduncular": {
+     "value": [
+      6,
+      10
+     ],
+     "_origin": "ESTIMATE from geometry: stalk girth 15.6 at u 169.7 (depth 6.2) / stalk scale 0.8 x 1.49 x 0.58 (row calibration; cave cardinalfish published 12 vs 10 by this rule)"
+    },
+    "size_ratio": {
+     "_def": "scale size in the region / mid-flank scale size",
+     "belly": {
+      "value": 0.85,
+      "_origin": "ESTIMATE family (smaller off the mid flank); the grow pass replaces it with count-derived sizes where counts exist"
+     },
+     "nape": {
+      "value": 0.7,
+      "_origin": "ESTIMATE family (smaller off the mid flank); the grow pass replaces it with count-derived sizes where counts exist"
+     },
+     "breast": {
+      "value": 0.7,
+      "_origin": "ESTIMATE family (smaller off the mid flank); the grow pass replaces it with count-derived sizes where counts exist"
+     },
+     "stalk": {
+      "value": 0.8,
+      "_origin": "ESTIMATE family (smaller off the mid flank); the grow pass replaces it with count-derived sizes where counts exist"
+     },
+     "cheek": {
+      "value": 0.6,
+      "_origin": "ESTIMATE family (smaller off the mid flank); the grow pass replaces it with count-derived sizes where counts exist"
+     },
+     "fin_sheath": {
+      "value": 0.5,
+      "_origin": "ESTIMATE family (smaller off the mid flank); the grow pass replaces it with count-derived sizes where counts exist"
+     }
+    },
+    "sheaths": {
+     "dorsal_soft": {
+      "reach": 0.15
+     },
+     "anal_soft": {
+      "reach": 0.15
+     },
+     "dorsal_spiny": {
+      "reach": 0.0
+     },
+     "caudal_root": {
+      "reach": 0.1
+     },
+     "pectoral_root": {
+      "reach": 0.0
+     },
+     "_def": "reach = share of local fin height covered by body scales from the base",
+     "_origin": "ESTIMATE family jack (plans/species_system/proposals/scales_grow/families.json)"
+    },
+    "modified": [
+     {
+      "kind": "scute row",
+      "where": "straight rear part of the lateral line",
+      "_origin": "ESTIMATE family jack (plans/species_system/proposals/scales_grow/families.json)"
+     },
+     {
+      "kind": "scute row",
+      "n": [
+       27,
+       42
+      ],
+      "where": "straight rear part of the lateral line",
+      "_origin": "PUBLISHED FishBase morphology page, Caranx melampygus (fishbase.se MorphDataList ID 1906, fetched 13 Nov 2026): '27-42 strong scutes'"
+     }
+    ],
+    "touch": {
+     "value": "slick (cycloid)",
+     "_origin": "Creature design SCALES.md 4E (FE1), from type_body"
+    },
+    "_geometry": {
+     "SL": 170.8,
+     "D": 61.5,
+     "stalk_u": 169.7,
+     "stalk_dep": 6.2,
+     "girth": 15.6,
+     "nape_path": 43.8,
+     "dorsal_u": 56.9
+    }
+   }
+  },
+  "soft": [
+   {
+    "id": "belly",
+    "s0": 0.28,
+    "s1": 0.49,
+    "side": "belly",
+    "build": "normal",
+    "thickness": 0.2,
+    "_note": "ESTIMATE: behind the pelvic base to the vent"
+   }
+  ],
+  "tail": {
+   "fleshEnd": [
+    [
+     171.7,
+     3.9
+    ],
+    [
+     173.2,
+     2.7
+    ],
+    [
+     174.4,
+     1.6
+    ],
+    [
+     174.8,
+     0.4
+    ],
+    [
+     174.4,
+     -1.2
+    ],
+    [
+     173.2,
+     -2.4
+    ],
+    [
+     171.7,
+     -3.5
+    ]
+   ],
+   "rootHw": [
+    [
+     169.7,
+     1.79
+    ],
+    [
+     172.2,
+     1.29
+    ],
+    [
+     174.8,
+     0.54
+    ],
+    [
+     178.4,
+     0.27
+    ],
+    [
+     183.7,
+     0.14
+    ]
+   ],
+   "_origin": "fleshEnd: its SHAPE MEASURED on Camel_u3.jpg (FishBase painting) (side view, read by eye on a pixel grid at 4x; quality fair): the rear margin of the scaled flesh on the tail fin, from the stalk's upper edge to its lower; the picture is scaled so that the margin's rear-most point lies at outline.tailEnd. How far the flesh runs past the hypural end (tailEnd - end = 4.0) is NOT measured: ESTIMATE, a side picture does not show the hypural end. rootHw ESTIMATE: a side view cannot show thickness; width / depth 0.57 at the stalk's thinnest station (u 169.7, measured depth 6.3), then a wedge: 72 % half way, 30 % at the flesh end, 15 % and 8 % on the fin. Replace from a top view or a scan.",
+   "features": [
+    {
+     "kind": "scutes",
+     "u": [
+      130.8,
+      170.9
+     ],
+     "y": -0.04,
+     "h": 0.3,
+     "n": 34,
+     "side": "both"
+    }
+   ],
+   "_origin_features": "MEASURED on Camel_u3.jpg (FishBase painting) (side view, look-and-measure only; quality fair): u span on the flesh-end-at-tailEnd scale (apply_stalk_reads.py), y = height above the stalk's centre line as a share of its half depth at picture x 480 (+ up). n 34 = middle of the published 27-42 strong scutes (FishBase, Caranx melampygus): ESTIMATE until counted on a picture; h ESTIMATE. Note on picture: the row of scutes along the straight lateral line to the tail fin's base.",
+   "_outline_before": {
+    "top": [
+     [
+      159.8,
+      4.53
+     ],
+     [
+      170.8,
+      3.5
+     ]
+    ],
+    "bot": [
+     [
+      159.8,
+      -4.53
+     ],
+     [
+      170.8,
+      -3.5
+     ]
+    ],
+    "hw": [
+     [
+      165,
+      2.2
+     ],
+     [
+      170.8,
+      2.0
+     ]
+    ]
+   },
+   "_origin_outline": "outline.top / bot from u 162.2 on MEASURED on the same picture (5 stations from behind the dorsal and anal fin to the flesh end, ending at the flesh margin's upper and lower end; scaled so that the picture's flesh end lies at outline.tailEnd, which is as it was); outline.hw from u 169.7 on = tail.rootHw (ESTIMATE). Before: tail._outline_before. outline.end and the fins are as they were"
+  },
+  "role": {
+   "place": "Open water over the lagoon and outer slope, passing by",
+   "job": "A strong silver passer in the middle distance: scale and motion",
+   "temper": "tame",
+   "complements": [
+    "open water",
+    "the reef edge"
+   ],
+   "_origin": "ESTIMATE: place from each species' habitat as published (FishBase / FAO habitat notes, from memory, not re-read today); job, temper and complements from the guide's creature role block. Only the hero is wild; Gary names any other hero. Table: plans/species_system/roles/roles_v1.json."
+  },
+  "uv": {
+   "aspect": 2,
+   "_origin": "EXPORT SETTING, not a measurement: pinned at 2:1, the value uv-v24's shape rule (body length over girth) chose on the 31-fish board at seed 0 (cage/uv/BOARD_v24.md, 13 Nov), so a later outline change cannot flip the coat map (UV F53)."
+  }
+ },
+ "stages": {
+  "adult_female": {
+   "label": "Adult (600 mm)",
+   "origin": {
+    "kind": "matched",
+    "to": "FishBase morphometrics picture Camel_u3.jpg (id 1906) and species summary, Caranx melampygus; species thread estimates for width, outline course, eye height, fin heights, mouth and teeth sizes, jaw linkage"
+   }
+  },
+  "adult_male": {
+   "label": "Adult male (600 mm)",
+   "like": "adult_female",
+   "origin": {
+    "kind": "derived",
+    "derived_from": "adult_female",
+    "rules": [
+     "same shape as the female: ESTIMATE"
+    ]
+   }
+  }
+ }
+}
