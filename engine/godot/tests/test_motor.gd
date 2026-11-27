@@ -74,7 +74,8 @@ func _case(name: String, kind: String, p: Dictionary, dur: float, input: Callabl
 func _define_cases() -> void:
 	var fwd := func(_t): return _pk(Vector2(0, 1))
 	for ang in [15.0, 30.0]:
-		_case("T1 ramp %d deg climbs" % ang, "ramp", {"angle": ang, "start": Vector3(0, 0.05, 4)}, 8.0, fwd,
+		# 14 s: since the climb-rate limit (0.40 m/s of rise walking) a 30 deg ramp is walked up at 0.69 m/s
+		_case("T1 ramp %d deg climbs" % ang, "ramp", {"angle": ang, "start": Vector3(0, 0.05, 4)}, 14.0, fwd,
 			func(r): return [r.end.y > 6.0 * sin(deg_to_rad(ang)) - 0.3, "end y %.2f" % r.end.y])
 	_case("T1 ramp 60 deg refuses (Thalassa walks up to 56 deg)", "ramp", {"angle": 60.0, "start": Vector3(0, 0.05, 4)}, 8.0, fwd,
 		func(r): return [r.end.y < 1.0, "end y %.2f" % r.end.y])
