@@ -34,7 +34,7 @@ float floor_top(vec2 xy) {            // island z of the floor's top (the still 
 	vec2 uv = floor_uv(xy);
 	if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return water_floor_y;
 	vec4 h = textureLod(water_floor_height, uv, 0.0);
-	return h.a > 0.5 ? h.r / max(h.g, 1e-4) * 100.0 - 50.0 : water_floor_y;
+	return h.a > 0.5 ? h.r / max(h.g, 1e-4) : water_floor_y;
 }
 vec3 floor_light(vec2 xy) {          // the floor's radiance seen from above (nits), or -1 where the map has nothing
 	vec2 uv = floor_uv(xy);

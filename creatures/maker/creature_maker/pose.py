@@ -252,16 +252,9 @@ def tri_pairs(T):
     return np.array([p[:2] for p in E.values() if len(p) >= 2], int)
 
 
-def range_sweep(C, V, rec, jaw_w=None, only=None):
-    """per pose: the largest clean amplitude (no new crossing pair, no new fold), the first failing step and what failed,
-    and the worst skin squash (smallest triangle area ratio) inside the clean range. A new fold is two neighbouring
-    triangles turning past 90 deg that were within 60 deg at rest; it is rotation-free, so a whole bent tail is not a fault."""
-    T = triangles(C['faces']); _, p0 = self_intersections(V, T); rest = set(map(tuple, p0))
-    hair = set(v for ch in C.get('commissures', []) for v in ch)
-    tfree = np.array([not (set(t) & hair) for t in T.tolist()]); PR = tri_pairs(T); PR = PR[tfree[PR[:, 0]] & tfree[PR[:, 1]]]
-    def nrm(P):
-        n = np.cross(P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]]); a = np.linalg.norm(n, axis=1); return n / (a[:, None] + 1e-15), a
-    N0, A0 = nrm(V); ok0 = (N0[PR[:, 0]] * N0[PR[:, 1]]).sum(1) > 0.5; big = A0 > np.median(A0) * 0.05
+def posers(C, V, rec, jaw_w=None):
+    """pose(name, amplitude) for gape, flare, bend, wave, arch and combo (percent of every target at once), and the targets.
+    Used by the sweep and by the turnaround sheets, so both show the same poses."""
     wj = jaw_weights(C, V, rec) if jaw_w is None else jaw_w; wc = cover_weights(C, V, rec)
     O = C['openings']; hx, hy = O['opercle_hinge']
     near = np.argsort(np.hypot(V[:, 0] - hx, V[:, 1] - hy) + 10 * (V[:, 2] < 0))[:3]; zh = float(np.abs(V[near, 2]).mean())
@@ -277,6 +270,20 @@ def range_sweep(C, V, rec, jaw_w=None, only=None):
         P = gape(V, wj, O['jaw_joint'], f * (TG['gape'] or 0)); P = flare(P, wc, O['opercle_hinge'], f * (TG['flare'] or 0), zh)
         rw = np.radians(f * (TG['wave'] or 0))
         return body_pose(P, x0, xend, lambda u: rw * np.sin(2 * np.pi * u), 'z')
+    return pose, TG
+
+
+def range_sweep(C, V, rec, jaw_w=None, only=None):
+    """per pose: the largest clean amplitude (no new crossing pair, no new fold), the first failing step and what failed,
+    and the worst skin squash (smallest triangle area ratio) inside the clean range. A new fold is two neighbouring
+    triangles turning past 90 deg that were within 60 deg at rest; it is rotation-free, so a whole bent tail is not a fault."""
+    T = triangles(C['faces']); _, p0 = self_intersections(V, T); rest = set(map(tuple, p0))
+    hair = set(v for ch in C.get('commissures', []) for v in ch)
+    tfree = np.array([not (set(t) & hair) for t in T.tolist()]); PR = tri_pairs(T); PR = PR[tfree[PR[:, 0]] & tfree[PR[:, 1]]]
+    def nrm(P):
+        n = np.cross(P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]]); a = np.linalg.norm(n, axis=1); return n / (a[:, None] + 1e-15), a
+    N0, A0 = nrm(V); ok0 = (N0[PR[:, 0]] * N0[PR[:, 1]]).sum(1) > 0.5; big = A0 > np.median(A0) * 0.05
+    pose, TG = posers(C, V, rec, jaw_w)
     out = {}
     for name in (only or STEP):
         tg = TG[name]
