@@ -1,0 +1,13 @@
+config_version=5
+[application]
+config/name="Alien Ocean"
+config/version="0.6.0-dev"
+run/main_scene="res://scenes/probe.tscn"
+[display]
+window/size/viewport_width=960
+window/size/viewport_height=540
+[rendering]
+renderer/rendering_method="forward_plus"
+[physics]
+3d/physics_engine="Jolt Physics"
+common/physics_ticks_per_second=60
