@@ -58,6 +58,8 @@ const FOAM_TAU := 4.0        # s: foam fades with this time constant (Callaghan 
 static func foam_delta_a(U: float, chop := CHOP, cascades_02 := false) -> float:
 	return _table(FOAM_JTA2_D if cascades_02 else FOAM_JTA_D, U) * maxf(chop, 0.05)
 
+const FOAM_ROW_A := 0.012   # v336 FFLOW_ROW_A: the windrows' speed, m/s per m/s of wind, from 6 m/s (full at 12)
+
 static func foam_consts(d: Dictionary) -> Dictionary:
 	## what the foam step and the foam's look need from a derived sea (v374 sea-state push): thresholds, the breaker
 	## speed, the wind drift (3 % of the wind, island m/s), the storm ramp. No whitecaps under 4.23 m/s (Brumer's W_B = 0):
@@ -68,7 +70,8 @@ static func foam_consts(d: Dictionary) -> Dictionary:
 	return {"jt": foam_jt(U) if on else -10.0, "jt2": foam_jt(U, CHOP, true) if on else -10.0,
 		"da": foam_delta_a(U), "da2": foam_delta_a(U, CHOP, true), "soft": FOAM_SOFT, "tau": FOAM_TAU,
 		"cbreak": clampf(0.45 * float(d.cp), 2.0, 10.0), "drift": Vector2(cos(a), sin(a)) * 0.03 * U,
-		"wind": Vector2(cos(a), sin(a)), "U": U, "storm": clampf((U - 20.0) / 10.0, 0.0, 1.0), "on": on}
+		"wind": Vector2(cos(a), sin(a)), "U": U, "storm": clampf((U - 20.0) / 10.0, 0.0, 1.0), "on": on,
+		"rows": FOAM_ROW_A * U * clampf((U - 6.0) / 6.0, 0.0, 1.0)}
 
 static func beaufort(force: int, base: Dictionary = OPEN_OCEAN) -> Dictionary:
 	## the tank's Sea knob: base with the force's wind and fetch (swell, depth, cascades kept)

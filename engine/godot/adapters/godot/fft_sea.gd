@@ -220,7 +220,7 @@ func _foam_prep(t: float) -> void:
 	_foam_c = c
 	var v := PackedFloat32Array([c.x, c.y, FOAM_SIZE, dt, pc.x, pc.y, drift.x, drift.y,
 		foam.get("jt2", -10.0), foam.get("soft", 0.04), foam.get("tau", 4.0), 1.0,
-		foam.get("da2", 0.0), foam.get("cbreak", 2.0), foam.get("storm", 0.0), 0.0,
+		foam.get("da2", 0.0), foam.get("cbreak", 2.0), foam.get("storm", 0.0), foam.get("rows", 0.0),
 		patch.x, patch.y, patch.z, patch.w])
 	rd.buffer_update(_foam_ubo, 0, v.size() * 4, v.to_byte_array())
 	RenderingServer.global_shader_parameter_set.call_deferred("sea_foam_org", Vector4(c.x, c.y, FOAM_SIZE, 1.0))
