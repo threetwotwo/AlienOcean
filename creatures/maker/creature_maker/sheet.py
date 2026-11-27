@@ -1,7 +1,7 @@
 """Turnaround sheets: each built fish from eight angles (front, back, left, right, top, bottom, three-quarter from above,
-three-quarter from below) at rest, at real size (every pose at the size the species really makes, all at once) and at
+three-quarter from below) plus the head close up from both three-quarters, at rest, at real size (every pose at the size the species really makes, all at once) and at
 its stylized target (all at once), so a fault hidden from the side shows up from below or behind. Faces that cross or
-fold in a pose (pose.py measures) are painted magenta. Body cage only: fin cards do not follow the poses yet.
+fold in a pose (pose.py measures) are painted magenta. The rest sheet paints faces that already cross at rest. Body cage only: fin cards do not follow the poses yet.
 
 Runs in a Python that can import bpy (Cycles on the CPU). Writes OUT/sheet_<pose>.jpg.
 """
@@ -13,7 +13,9 @@ COLS = {'body': (0.80, 0.82, 0.86), 'eye': (0.35, 0.55, 1.0), 'mouth': (1.0, 0.7
         'cavity': (0.88, 0.30, 0.30), 'gill': (0.30, 0.85, 0.45), 'fault': (1.0, 0.0, 0.85)}
 # camera direction (from the fish to the camera) in cage axes: x snout to tail, y up, z the fish's left
 VIEWS = [('front', (-1, 0, 0)), ('back', (1, 0, 0)), ('left', (0, 0, 1)), ('right', (0, 0, -1)), ('top', (0, 1, 0)),
-         ('bottom', (0, -1, 0)), ('3/4 above', (-0.8, 0.7, 0.9)), ('3/4 below', (-0.8, -0.7, 0.9))]
+         ('bottom', (0, -1, 0)), ('3/4 above', (-0.8, 0.7, 0.9)), ('3/4 below', (-0.8, -0.7, 0.9)),
+         ('head, 3/4 above', (-0.8, 0.7, 0.9)), ('head, 3/4 below', (-0.8, -0.7, 0.9))]   # the openings, close up
+HEAD = 0.35          # close-ups frame the body in front of this x (SL): mouth, eyes, gill covers
 POSES = [('rest', None), ('real size', 80), ('stylized target', 100)]     # combo percent (pose.targets: 80 = real size)
 TILE = (480, 300)
 
@@ -30,6 +32,13 @@ def faults(C, V, P):
     for a, b in PR:
         if (N0[a] * N0[b]).sum() > 0.5 and (N[a] * N[b]).sum() < 0 and not (set(T[a]) | set(T[b])) & hair: bad |= {tf[a], tf[b]}
     return bad
+
+
+def rest_faults(C, V):
+    """faces that already cross at rest (GP0)."""
+    from .pose import triangles, self_intersections
+    T = triangles(C['faces']); tf = [k for k, f in enumerate(C['faces']) for _ in range(1 if len(f) == 3 else 2)]
+    return {tf[k] for p in self_intersections(V, T)[1] for k in p}
 
 
 def render(C, P, bad, out_png):
@@ -62,7 +71,8 @@ def render(C, P, bad, out_png):
         dv = np.array([d[0], -d[2], d[1]], float); dv /= np.linalg.norm(dv)
         up = np.array([0, 0, 1.0]) if abs(dv[2]) < 0.95 else np.array([0, 1.0, 0])
         ax_r = np.cross(up, dv); ax_r /= np.linalg.norm(ax_r); ax_u = np.cross(dv, ax_r)
-        qr, qu = (B - c) @ ax_r, (B - c) @ ax_u           # centre on the projected box: an oblique view shifts it
+        Bv = B[P[:, 0] < HEAD] if name.startswith('head') else B
+        qr, qu = (Bv - c) @ ax_r, (Bv - c) @ ax_u         # centre on the projected box: an oblique view shifts it
         cam.data.ortho_scale = float(max(np.ptp(qr), np.ptp(qu) * TILE[0] / TILE[1]) * 1.08)
         mid = c + ax_r * 0.5 * (qr.min() + qr.max()) + ax_u * 0.5 * (qu.min() + qu.max())
         cam.location = Vector((mid + dv * 3).tolist())
@@ -78,15 +88,15 @@ def sheet(out, record_path, poses=POSES, log=print):
     C = json.load(open(os.path.join(out, 'cage.json'))); V = np.load(os.path.join(out, 'cage.npz'))['V']
     rec = adapt(record_path, C.get('style')); pose, TG = posers(C, V, rec); paths = []
     for label, pc in poses:
-        P = V if pc is None else pose('combo', pc); bad = set() if pc is None else faults(C, V, P)
+        P = V if pc is None else pose('combo', pc); bad = rest_faults(C, V) if pc is None else faults(C, V, P)
         tiles = render(C, P, bad, os.path.join(out, '_tile'))
-        W = Image.new('RGB', (TILE[0] * 4, TILE[1] * 2 + 44), (245, 246, 248)); dr = ImageDraw.Draw(W)
+        W = Image.new('RGB', (TILE[0] * 5, TILE[1] * 2 + 44), (245, 246, 248)); dr = ImageDraw.Draw(W)
         what = '' if pc is None else (f"  gape {TG['gape'] * pc / 100:.0f}, flare {(TG['flare'] or 0) * pc / 100:.0f}, "
                                       f"S-wave {(TG['wave'] or 0) * pc / 100:.0f} deg")
-        verdict = '' if pc is None else (f'   {len(bad)} faces cross or fold (magenta)' if bad else '   clean')
+        verdict = (f'   {len(bad)} faces cross or fold (magenta)' if bad else '   clean') + ('' if pc is None else ' (new in this pose)')
         dr.text((12, 14), f"{C.get('species') or os.path.basename(out)}: {label}{what}{verdict}", fill=(20, 22, 30))
         for i, (name, f) in enumerate(tiles):
-            x, y = TILE[0] * (i % 4), 44 + TILE[1] * (i // 4)
+            x, y = TILE[0] * (i % 5), 44 + TILE[1] * (i // 5)
             W.paste(Image.open(f).convert('RGB'), (x, y)); dr.text((x + 8, y + 6), name, fill=(40, 44, 60)); os.remove(f)
         p = os.path.join(out, f"sheet_{label.replace(' ', '_')}.jpg"); W.save(p, quality=88); paths.append(p)
         log(f'{p}: {len(bad)} fault faces')
