@@ -11,6 +11,8 @@ global uniform float water_ek0;
 global uniform float water_exposure;
 global uniform float water_glow_k;
 global uniform vec4 water_sand;
+global uniform vec3 water_amb_ref;   // the scene's ambient colour (env ambient / exposure, nits): the fill's reference (WorldRoot)
+global uniform float water_fill_ao;  // 1 = the water's fill goes through Godot's ambient path (SSAO, SSIL, AO occlude it), 0 = emission
 const float W_G = 0.9;
 
 vec3 w_G(vec3 k, float L) {
@@ -37,4 +39,19 @@ vec3 w_glow(vec3 d, float z0, float L) {
 vec3 w_EH() {
 	float H = max(water_y - water_floor_y, 0.05);
 	return water_es0 * exp(-water_kd * H) + water_ek0 * exp(-water_ku * H);
+}
+
+// the water's diffuse light on a surface at depth z (m under the surface) whose normal points up by `up` (0.5 + 0.5 n.y), in nits per
+// unit albedo: sky from above exp(-Ku z), the sand's bounce from below (as under_model.py); seabed_surface and ground_surface
+vec3 w_fill(float z, float up) {
+	float H = max(water_y - water_floor_y, 0.05);
+	vec3 ek = water_ek0 * exp(-water_ku * z);
+	vec3 eh = water_es0 * exp(-water_kd * H) + water_ek0 * exp(-water_ku * H);
+	vec3 eu = eh * water_sand.rgb * exp(-water_ku * max(H - z, 0.0));
+	return (ek * up + eu * (1.0 - up)) / PI;
+}
+// Godot's ambient is one colour (water_amb_ref), so the fill's own colour and depth ride in the albedo as a ratio; the direct light
+// divides it back out (light()), so the sun and the net are unchanged while SSAO / SSIL / AO now occlude the fill
+vec3 w_fill_ratio(float z, float up) {
+	return w_fill(z, up) / max(water_amb_ref, vec3(1e-9));
 }
