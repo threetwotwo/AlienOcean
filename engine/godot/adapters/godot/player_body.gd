@@ -53,7 +53,7 @@ func _ray_floor(x: float, z: float) -> Dictionary:
 	var top: float = (s.pos.y - 1.24 + step_height + 0.01) if s.shore_grounded else s.pos.y
 	if wq == null:
 		wq = WorldQuery.new(get_world_3d(), collision_mask)
-		wq.exclude = [get_rid()]
+		wq.exclude.append(get_rid())
 	return wq.ray_down(x, z, top, 80.0)
 
 ## Standing on dry land, a surface too steep to walk (Thalassa: normal.y < 0.56) is a wall, not a reason to start

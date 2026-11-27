@@ -1,6 +1,14 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
 ## 0.6.0-dev (27 Nov 2026, evening): gameplay now built on Gary's Thalassa v20.19
+- M04 body 0.1.0 = Thalassa core/ik-rig.js DiverBodyRig (swim pose, shore walk/wade pose, swim-walk blend, head
+  look, no-clip arms and legs) + ik-solvers.js (two-bone IK, leg with fin), procedural-locomotion.js
+  (BalanceFootPlacer incl. jumps), physics-control.js (PhysicsControlRig profiles, hit reactions), crit springs and
+  inertializer. Golden test against the JS: worst 0.051 mm over two 20 s runs (10 joints). Brain is a quiet stand-in
+  (gaze = look direction) until character-brain.js is ported; hair bob and the UE5 skeleton export are left out.
+  adapters/godot/mannequin.gd builds Thalassa's style/ue5-mannequin.js girl (ceramic segments, slate joints) and is
+  posed by the rig; it replaces the capsule in tools/motion_film.gd ("capsule" arg keeps the old stand-in).
+  Fix: player_body assigned an untyped array to WorldQuery.exclude (Array[RID]); now appends.
 - M02 player motor 0.2.0 = Thalassa core/swimmer-physics.js ported line for line (SwimmerLocomotion: carve turns,
   flipper-kick burst, glide-out braking, dive-to-pullout momentum, slipstream, surface treading with swell, dolphin
   breach, plunge dip, shoreline walk/wade/jog/crouch, anticipation jump, running dive) + mover.js layered moves
