@@ -3,7 +3,7 @@
 An underwater open-world game on an alien planet, inspired by Blue Planet 2, Abzu and Journey. An 11-year-old girl, the only survivor
 of her crew, charts and documents the ocean with Atlas, a second AI companion and a fleet of vessels.
 
-Status: **0.6.0-dev**, the Godot slice prototype (chosen 27 Nov 2026 over staying on Unreal 5.8; see docs/decisions/).
+Status: **0.6.0-dev**, the Godot slice prototype. Engine pinned: **Godot 4.7-stable** (standard build, not .NET) (chosen 27 Nov 2026 over staying on Unreal 5.8; see docs/decisions/).
 
 ## Read in this order
 1. This file  2. The top entry of CHANGELOG.md  3. docs/MILESTONES.md and docs/VERSIONING.md  4. docs/decisions/  5. The folder you work in (its README and OWNERS.md)
