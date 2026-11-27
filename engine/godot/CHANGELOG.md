@@ -1,5 +1,18 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): the shared game root (M32)
+- Game root thread: GameRoot (`adapters/godot/game_root.gd`, scene `scenes/game.tscn`) builds the world and its services and
+  runs one tick order: clock, input, player, actors, fauna, plugs, camera, world. Ported from Thalassa v20.19
+  style/runtime.js updateSimulation (fauna synced before anything reads them) and core/feature-mounts.js (FeatureMounts).
+  New: SimClock (`core/world/sim_clock.gd`, the only game time, t = tick x dt), ActorRegistry
+  (`core/m32_game/actor_registry.gd`, double-buffered, uniform grid, snapshot records for the fish schools, Thalassa POI
+  records), ActorRig (`adapters/godot/actor_rig.gd`, motor + body rig + mannequin as motion_film wires them), GameServices.
+  The tide now moves at the start of each tick, before the girl reads the water (was after, one tick late).
+  Deviation D1: fauna read the player after she moves this tick (Thalassa: the pre-move position).
+- M03 camera adapter 0.2.1: FIX against Thalassa's same-tick swimmer.applyLook: `integrate_look(dt, look)` lets the game
+  root apply the look before the motor reads cam_yaw (was one tick late); tick() keeps integrating for callers that don't.
+- Test: `tests/test_game_root.gd` + `tests/run_game_root.sh` (G1-G10 every tick, 30/60/120 fps, monkey runs, planted faults
+  late_write / clock / grid). Film: `tools/game_film.gd`.
 ## 0.6.0-dev (28 Nov 2026, later): the light net from the FFT sea's own slopes
 - Engine: caustics map 0.2.0 (`look/caustics_slope.gdshader`, `adapters/godot/caustics_map.gd`). While the FFT sea
   runs (global sea_on) the map's slope pass reads the sea's slope atlas (sea_deriv.rg), as v98's CAUS_SLOPE_HLSL read

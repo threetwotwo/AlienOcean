@@ -11,6 +11,7 @@
 | project.godot [input] [physics] [layer_names] [autoload] sections | Gameplay (Build the core gameplay modules) |
 | core/<every other module>/, adapters/godot/<its modules>, tests/test_<its modules>.gd, harness | Gameplay |
 | VERSION bumps and CHANGELOG release headings (game code owner) | Gameplay |
+| core/m32_game/, core/world/sim_clock.gd, adapters/godot/game_root.gd, game_services.gd, actor_rig.gd, scenes/game*, tests/test_game_root.gd, tests/run_game_root.sh, tools/game_film.gd | Game root (Build the shared game root) |
 | README.md, CHANGELOG.md entries | shared: each owner edits only its own section / appends its own entries |
 
 Rules: re-read a shared file just before editing it (this is a network folder; last write wins). A change that touches the

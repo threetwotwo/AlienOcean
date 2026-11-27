@@ -15,12 +15,13 @@
 ##   player    ActorRig.tick: motor (M02) -> body rig (M04)
 ##   actors    every owner writes its actor, then ActorRegistry.commit (readers never see half a tick)
 ##   fauna     each school gets registry.perceived() around its home, then advances (M31)
-##   plugs     anything else in group "game_plug": plug_tick(dt, services)
+##   plugs     every registered plug's plug_tick(dt, services), in registration order
 ##   camera    no-cut camera (M03) after the player moved; the girl is drawn with its head/alpha choice
 ##   world     WorldRoot.apply (sky, light, exposure, tide, water uniforms) and M12 streaming around the viewers
 ##
-## Plugs: a node added under GameRoot (or anywhere) in group "game_plug" with plug_ready(services) and
-## plug_tick(dt, services) joins the tick at "plugs"; set plug_mount = "<mount key>" to let FeatureMounts switch it.
+## Plugs: register_plug(node, mount) adds any node with plug_tick(dt, services); optional plug_ready(services) (called on
+## registration) and plug_write_actors(services) (called in "actors", before the commit). mount = a FeatureMounts key
+## (unknown keys are refused) or "" for always on. While the clock is paused only "clock" and "world" run.
 class_name GameRoot
 extends Node3D
 
@@ -68,7 +69,7 @@ var last_inp = null
 var ready_done := false
 var _applied_hours := -INF
 var _applied_under := false
-var _plugs: Array = []
+var _plugs: Array = []                         # [[node, mount]] in registration order
 var stats := {"tick_ms": 0.0, "max_tick_ms": 0.0, "phase_ms": {}}
 
 func _init() -> void:
@@ -138,9 +139,13 @@ func _physics_process(_delta: float) -> void:
 	# clock
 	var dt := clock.step()
 	# the tide moves with the clock here, before anyone reads the water this tick (the light follows in "world")
-	if dt > 0.0 and world_root.tide_on and mounts.is_mounted("world"): world_root.water.set_clock(clock.hours)
+	# (gameplay water: it follows the clock whatever is mounted; the "world" mount only switches the lighting)
+	if dt > 0.0 and world_root.tide_on: world_root.water.set_clock(clock.hours)
 	_mark("clock", t0)
-	if dt <= 0.0: return
+	if dt <= 0.0:                                   # paused: nothing simulates; the world keeps drawing and streaming
+		_world_phase(Time.get_ticks_usec())
+		ticked.emit(clock.tick)
+		return
 	var t := clock.t
 	# input
 	var tp := Time.get_ticks_usec()
@@ -148,6 +153,8 @@ func _physics_process(_delta: float) -> void:
 	if input_source.is_valid(): inp = input_source.call(t)
 	elif reader != null: inp = reader.read(dt)
 	else: inp = Packet.new()
+	if cam != null and mounts.is_mounted("camera"):
+		cam.integrate_look(dt, inp.look)            # this tick's look reaches the motor this tick (as Thalassa)
 	if cam != null:
 		inp.cam_yaw = cam.yaw; inp.cam_pitch = cam.pitch
 	last_inp = inp
@@ -158,10 +165,10 @@ func _physics_process(_delta: float) -> void:
 	_mark("player", tp)
 	# actors: every owner writes, then one commit
 	tp = Time.get_ticks_usec()
-	actors.move("girl", girl.centre(), girl.velocity() if mounts.is_mounted("girl") else Vector3.ZERO, girl.capsule.axis)
-	var gp = actors.get_actor("girl"); gp.half_len = girl.capsule.half_len
-	for p in _plug_list():
-		if p.has_method("plug_write_actors"): p.plug_write_actors(services)
+	actors.begin()
+	actors.move("girl", girl.centre(), girl.velocity() if mounts.is_mounted("girl") else Vector3.ZERO, girl.capsule.axis, girl.capsule.half_len)
+	for pm in _plugs:
+		if (pm[1] == "" or mounts.is_mounted(pm[1])) and pm[0].has_method("plug_write_actors"): pm[0].plug_write_actors(services)
 	actors.commit(clock.tick)
 	_mark("actors", tp)
 	# fauna
@@ -173,10 +180,8 @@ func _physics_process(_delta: float) -> void:
 	_mark("fauna", tp)
 	# plugs
 	tp = Time.get_ticks_usec()
-	for p in _plug_list():
-		var key: String = p.get("plug_mount") if p.get("plug_mount") != null else ""
-		if key != "" and not mounts.is_mounted(key): continue
-		p.plug_tick(dt, services)
+	for pm in _plugs:
+		if pm[1] == "" or mounts.is_mounted(pm[1]): pm[0].plug_tick(dt, services)
 	_mark("plugs", tp)
 	# camera, then the girl drawn with the camera's head / alpha choice
 	tp = Time.get_ticks_usec()
@@ -190,8 +195,13 @@ func _physics_process(_delta: float) -> void:
 	else:
 		girl.draw(1.0)
 	_mark("camera", tp)
-	# world
-	tp = Time.get_ticks_usec()
+	_world_phase(Time.get_ticks_usec())
+	stats.tick_ms = (Time.get_ticks_usec() - t0) / 1000.0
+	stats.max_tick_ms = maxf(stats.max_tick_ms, stats.tick_ms)
+	ticked.emit(clock.tick)
+
+func _world_phase(tp: int) -> void:
+	## sky, light, exposure and water uniforms (WorldRoot), then M12 streaming around the committed viewers
 	if mounts.is_mounted("world"):
 		var eye_y: float = cam.global_position.y if cam != null else girl.eye_point().y
 		var under := eye_y < world_root.water.level
@@ -199,22 +209,29 @@ func _physics_process(_delta: float) -> void:
 			world_root.hours = clock.hours
 			world_root.apply(eye_y)
 			_applied_hours = clock.hours; _applied_under = under
-		RenderingServer.global_shader_parameter_set("water_y", world_root.water.level)   # the drawn sea = the gameplay level, every tick
+	RenderingServer.global_shader_parameter_set("water_y", world_root.water.level)   # the drawn sea = the gameplay level, every tick
 	if mounts.is_mounted("streaming"):
 		streamer.step(_viewers())
 	if sea != null: sea.visible = mounts.is_mounted("sea")
 	lagoon.visible = mounts.is_mounted("lagoon")
 	_mark("world", tp)
-	stats.tick_ms = (Time.get_ticks_usec() - t0) / 1000.0
-	stats.max_tick_ms = maxf(stats.max_tick_ms, stats.tick_ms)
-	ticked.emit(clock.tick)
 
 func _mark(phase: String, since: int) -> void:
 	trace.append(phase)
 	stats.phase_ms[phase] = (Time.get_ticks_usec() - since) / 1000.0
 
-func _plug_list() -> Array:
-	return get_tree().get_nodes_in_group("game_plug") if is_inside_tree() else []
+## Add a plug to the tick (after GameRoot is ready). Returns false when refused (unknown mount, no plug_tick).
+func register_plug(node: Node, mount := "") -> bool:
+	if not node.has_method("plug_tick"):
+		push_error("GameRoot: plug %s has no plug_tick" % node.name); return false
+	if mount != "" and not mounts.mounts.has(mount):
+		push_error("GameRoot: plug %s names unknown mount '%s'" % [node.name, mount]); return false
+	_plugs.append([node, mount])
+	if node.has_method("plug_ready"): node.plug_ready(services)
+	return true
+
+func unregister_plug(node: Node) -> void:
+	_plugs = _plugs.filter(func(pm): return pm[0] != node)
 
 func _shot_for(mode: String) -> String:
 	if cam.shot == "first_person" or cam.shot == "observe": return cam.shot   # a chosen first-person view holds
