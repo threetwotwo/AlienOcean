@@ -1,5 +1,22 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (27 Nov 2026, later still): the light net from a map, once a frame
+- Engine: caustics map 0.1.0 (`adapters/godot/caustics_map.gd`, WorldRoot.caustics; `look/caustics_slope`, `_focus`,
+  `_blur.gdshader`): lagoonwater v98's route. Each frame the net is drawn once into a 512 px tile of 2.56 m
+  (r g b = 0.8 / 2 / 5 m) in v98's three passes: the slopes in each depth's mip (128 / 64 / 32 px), CAUS_HLSL, the
+  sun's disc (8 ring taps and the centre). seabed_surface and ground_surface read it through the global sampler
+  `water_caus_map` as v98's light function did: at the sunlight's entry point, three turned copies of the tile (tile
+  break, 7 m patches), four taps over the pixel past 1 cm. caustics 0.2.0 (`look/caustics.gdshaderinc`) keeps the
+  per-pixel maths as the check path (`WorldRoot.caustics.per_pixel`, shot tool AO_CAUS=pixel; also what a scene
+  without the map node gets); `frozen_time` / AO_CAUS_T holds the net still for comparisons.
+- The 32 waves now sit on the tile (each moved to the nearest whole wave, its slope kept; 8.8 to 23.3 rad/m) and
+  live in `look/caustic_waves.gdshaderinc` (generated; CAUS_K and the new CAUS_A height amplitudes are there for
+  the surface). Offline, map / per pixel / v98: std at 0.8, 2, 5 m 0.15 / 0.32 / 0.31, 0.15 / 0.32 / 0.30,
+  0.14-0.15 / 0.29-0.31 / 0.34. The engine's map against the tool's numpy map: rms 0.0008.
+- Measured (llvmpipe, 960 x 540, ms a frame, shots 01 / 04): no net 443 / 616, map 498 / 741, per pixel as merged
+  (one copy) 965 / 1119, per pixel with the tile break 1110 / 1352. Map against per pixel on the sand: mean
+  difference under 0.3 of 255.
+
 ## 0.6.0-dev (28 Nov 2026): Gary's brightness pick
 - Engine: under water +1 stop (WorldRoot.under_exposure_art 1.0) and haze GlowK 1.0 (was 2.5) by default: Gary picked
   "Brighter" 17:06Z. Noon near sand L* 72, far water 48, shadow 50 (key frame 79 / 50-52 / 44).
