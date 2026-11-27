@@ -5,8 +5,9 @@
 ## Cdom 0.03, ScatK 0.40, GlowK 2.50) in the seabed, surface and underwater-view shaders. Env: AO_HOUR (default 12).
 ## 0.3.0: the world (light, sky, exposure, water) comes from adapters/godot/world_root.gd, the same node the game uses.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/lagoon_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
-## Env: AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_AGX_MODE=1 (raw buffer, for checks), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
-## Still to port: stars, AgX extras, the surface's waves and tide, caustics, god rays.
+## Env: AO_UNDER_EV (art stops under water), AO_GLOW_K (haze strength, 2.5), AO_LIGHT_NEUTRAL=0..1 (art direction: sunlight keeps its colour on the way down), AO_DEPTH_COLOUR=1 (Unreal's depth colour give-back; AO_DEPTH_SHARE its share, default 0.25), AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_AGX_MODE=1 (raw buffer, for checks), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
+## Night: the Unreal night eye (WorldRoot.apply) and the Unreal stars (look/sky_stars.gdshaderinc). Try AO_HOUR=22 (moonless), 94 (moonlit).
+## Still to port: the surface's waves and tide, god rays (the light net is in: look/caustics.gdshaderinc).
 extends SceneTree
 
 const WATER_Y := LagoonWaterField.SURFACE_Y   # the Unreal lagoon's saved surface: SurfaceZ 400 cm (tide 0)
@@ -62,6 +63,11 @@ func _setup():
 	# light, sky, exposure and water uniforms: one WorldRoot driven by the world clock
 	wr = WorldRoot.new()
 	wr.hours = float(OS.get_environment("AO_HOUR")) if OS.get_environment("AO_HOUR") != "" else 12.0
+	wr.depth_colour = OS.get_environment("AO_DEPTH_COLOUR") == "1"   # Unreal v168 depth colour give-back (off by default)
+	if OS.get_environment("AO_UNDER_EV") != "": wr.under_exposure_art = float(OS.get_environment("AO_UNDER_EV"))
+	if OS.get_environment("AO_GLOW_K") != "": wr.glow_k = float(OS.get_environment("AO_GLOW_K"))
+	if OS.get_environment("AO_LIGHT_NEUTRAL") != "": wr.light_neutral = float(OS.get_environment("AO_LIGHT_NEUTRAL"))
+	if OS.get_environment("AO_DEPTH_SHARE") != "": wr.depth_colour_share = float(OS.get_environment("AO_DEPTH_SHARE"))
 	world.add_child(wr)
 	if OS.get_environment("AO_AGX") == "0": wr.set_agx(false)   # Godot's built-in AgX, for before/after
 	if OS.get_environment("AO_AGX_MODE") != "": wr.agx_fx.mode = int(OS.get_environment("AO_AGX_MODE"))

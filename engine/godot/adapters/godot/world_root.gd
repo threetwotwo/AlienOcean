@@ -22,6 +22,34 @@ extends Node3D
 @export var z_ref := 2.0              # depth the key light is pre-attenuated to (eye / fish depth)
 const UNDER_WHITE := {"calm_lagoon": Vector3(1.0713, 0.9914, 0.8748)}   # v183: under water the white point is daylight (6500 K)
 const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0.2 m of depth
+## v168 depth colour (art bible 8.8): the camera gives back a share of the colour the water took at its depth.
+## Off by default, as in the Unreal lagoon since v176 (Style 16:58Z); depth_colour = true turns it on.
+@export var depth_colour := false
+## Art direction (27 Nov, Gary: 'art direction trumps'): how much of its colour sunlight and skylight keep on the way
+## down to the floor. 0 = the physics (red lost over 4 m); 1 = the light arrives as white as it entered, with the same
+## overall loss. The haze along the view (absorption + scattering between eye and object) is untouched.
+## Art direction: stops added under water on top of the place's compensation, and the water haze's strength
+## (Unreal GlowK, Gary's clarity pick 2.5). Under water only, so the sky above the sea keeps its exposure.
+@export var under_exposure_art := 1.0     # Gary picked "Brighter" 27 Nov 17:06Z
+@export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
+@export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
+@export var depth_colour_share := DEPTH_WB   # art direction lever (27 Nov: Gary 'art direction trumps'); Unreal 0.25
+const DEPTH_WB := 0.25                # the share given back
+const DEPTH_WB_PATH := 1.2            # m of water per m of depth (sky light)
+const WATER_SUBBANDS := [             # clear_lagoon (contracts/water_optics_v6.json): per channel (weight, absorption /m)
+	[[0.45, 0.12], [0.4, 0.26], [0.15, 0.4]], [[0.45, 0.038], [0.55, 0.073]], [[1.0, 0.025]]]
+
+static func depth_gain(depth_m: float, share := DEPTH_WB, path := DEPTH_WB_PATH) -> Vector3:
+	## sun_v184 depth_gain(): (1 / T)^share per channel, T = the sky light left at depth, scaled so a white card keeps
+	## its luminance. 1, 1, 1 at the surface and above, and with share 0.
+	var z := maxf(depth_m, 0.0) * path
+	var t := Vector3.ZERO
+	for i in 3:
+		for wa in WATER_SUBBANDS[i]: t[i] += wa[0] * exp(-wa[1] * z)
+	var g := Vector3(pow(1.0 / maxf(t.x, 1e-9), share), pow(1.0 / maxf(t.y, 1e-9), share), pow(1.0 / maxf(t.z, 1e-9), share))
+	var L := Vector3(0.2126, 0.7152, 0.0722)
+	var n := L.dot(t) / maxf(L.dot(g * t), 1e-12)
+	return g * n
 
 var clock: GDScript = SkyClock
 var optics: GDScript = WaterOptics
@@ -38,6 +66,33 @@ var last := {}
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
 var _dome_g := 0.0
+
+const NIGHT_FLOOR_EV := 0.0           # MPC_Sky NightFloorEV (saved 0)
+const NIGHT_OPEN := -4.75             # v72: at night the eye opens to EV100 floor + this
+const NIGHT_SHUT := -3.25             # v72: the dark end stops at EV100 floor + this
+const BRIGHTEN_STOPS := 1.5           # how far the eye may brighten from the dark end
+const NIGHT_LIFT := 0.5               # v34: floats and water +0.5 stop at night
+const NIGHT_EYE_UNDER := 1.0          # v73: stops darker under the water at night
+
+static func night_weight(total: float) -> float:
+	## v26: 0 at 1000 lux and above, 1 at 1 lux and below (log in between)
+	return clampf((3.0 - log(maxf(total, 1e-6)) / log(10.0)) / 3.0, 0.0, 1.0)
+
+static func _key(lux: float) -> float:
+	return 1.03 - 2.0 / (2.0 + log(0.18 * maxf(lux, 1e-6) / PI + 1.0) / log(10.0))
+
+static func night_key_stops(total: float) -> float:
+	## v26: compensation of a dark-adapted eye (Krawczyk, Myszkowski & Seidel 2005), never brighter than a camera
+	return minf(log(maxf(_key(total), 1e-3) / 0.18) / log(2.0), 0.0)
+
+static func _dawn_dim(total: float, noon_total: float, nw: float) -> float:
+	## v93: twilight reads dimmer than noon by the night eye's key, never darker than the night eye at 1 lux
+	if nw <= 0.0: return 0.0
+	var t := minf(nw / 0.1, 1.0)
+	var K := minf(log(maxf(_key(total), 1e-3) / _key(noon_total)) / log(2.0), 0.0) * t * t * (3.0 - 2.0 * t)
+	var O := nw * (night_key_stops(total) + NIGHT_LIFT)
+	var fl := night_key_stops(1.0) + NIGHT_LIFT
+	return minf(minf(O, maxf(K, fl)) - O, 0.0)
 
 static func to_godot(v: Vector3) -> Vector3:
 	return Vector3(v.x, v.z, -v.y)
@@ -114,10 +169,21 @@ func apply(cam_y: float) -> Dictionary:
 	var tint: Color = SkyClock.kelvin_rgb(body.kelvin) * air_tint(body.elev)
 	if key != "sun": tint = tint * SkyClock.MOON_TINTS[key].lerp(Color(1, 1, 1), 0.5)
 	# exposure: the eye's dark end slid with the light; steady under water; place compensation
+	# sun_v184 exposure(): limits slid with the light; at night the eye opens to EV100 NIGHT_OPEN within the night
+	# floor (NIGHT_SHUT), with the dark-adapted key (night_key_stops), the night lift and dawn_dim on the compensation.
+	# Godot has no auto-exposure meter here, so the eye sits at the dark end clamped into Unreal's limits.
 	var noon_total: float = SkyClock.sky_state(12.0)["total"]
-	var ev := ev100(st.total) - (ev100(noon_total) - SkyClock.EV_MAX)
-	if under: ev -= SkyClock.STEADY_UNDER_AT
+	var dark := ev100(st.total) - (ev100(noon_total) - SkyClock.EV_MAX)
+	var nw := night_weight(st.total)
+	var hi := maxf(dark, NIGHT_FLOOR_EV + NIGHT_SHUT)
+	var lo := minf(maxf(dark - BRIGHTEN_STOPS, NIGHT_FLOOR_EV + NIGHT_SHUT - BRIGHTEN_STOPS), hi)
+	lo = minf(lo, lo + (NIGHT_FLOOR_EV + NIGHT_OPEN - lo) * nw)
+	var ev := clampf(dark, lo, hi)
+	if under: ev -= SkyClock.STEADY_UNDER_AT * (1.0 - nw)       # the steady under-water eye is a daytime rule (st_w)
 	var bias: float = SkyClock.EXPOSURE_BIAS.get(place, 0.0)
+	bias += nw * (night_key_stops(st.total) + NIGHT_LIFT)
+	bias += _dawn_dim(st.total, noon_total, nw)
+	if under: bias += under_exposure_art - NIGHT_EYE_UNDER * nw
 	# EV100 = log2(N^2 / t) at ISO 100. f/22 keeps Godot's physical depth of field out of the way (deep focus).
 	cam_attr.exposure_sensitivity = 100.0; cam_attr.exposure_aperture = 22.0
 	cam_attr.exposure_shutter_speed = pow(2.0, ev) / (22.0 * 22.0)
@@ -132,17 +198,18 @@ func apply(cam_y: float) -> Dictionary:
 		agx_fx.moon_a = _moon_view(st.A.dir, SkyClock.MOONS[0].drawn_deg)
 		agx_fx.moon_b = _moon_view(st.B.dir, SkyClock.MOONS[1].drawn_deg)
 		var kw := clampf((water_y - cam_y) / UNDER_WHITE_FADE_M, 0.0, 1.0)
-		agx_fx.depth_gain = Vector3.ONE.lerp(UNDER_WHITE.get(place, Vector3.ONE), kw)
+		var dg: Vector3 = depth_gain(water_y - cam_y, depth_colour_share) if depth_colour else Vector3.ONE
+		agx_fx.depth_gain = dg * Vector3.ONE.lerp(UNDER_WHITE.get(place, Vector3.ONE), kw)
 	var a := WaterOptics.absorb(); var b := WaterOptics.scatter()
 	if under:
 		var tr := WaterOptics.refract_sun(up_air)
-		var kd: Vector3 = (a + WaterOptics.BB * b) / tr.y
+		var kd: Vector3 = _art_k((a + WaterOptics.BB * b) / tr.y)
 		var att := Color(exp(-kd.x * z_ref), exp(-kd.y * z_ref), exp(-kd.z * z_ref))
 		light.look_at_from_position(Vector3.ZERO, -tr, Vector3.FORWARD if absf(tr.y) > 0.99 else Vector3.UP)
 		light.light_intensity_lux = beam_h * WaterOptics.FRESNEL_SUN / tr.y
 		light.light_color = (tint * att)
 		# ambient for standard materials (fish): the water's diffuse light at z_ref, sky from above + sand from below
-		var ku: Vector3 = (a + WaterOptics.BB * b) / 0.75
+		var ku: Vector3 = _art_k((a + WaterOptics.BB * b) / 0.75)
 		var ek: Vector3 = Vector3(exp(-ku.x * z_ref), exp(-ku.y * z_ref), exp(-ku.z * z_ref)) * st.skylux * WaterOptics.FRESNEL_SKY
 		# + the sand's bounce from below (Lighting's sand bounce: the lower hemisphere lit by the sand), half the sphere each
 		var H := water_y - floor_y
@@ -164,8 +231,13 @@ func apply(cam_y: float) -> Dictionary:
 		light.light_intensity_lux = beam_h / maxf(up_air.y, 0.02)
 		light.light_color = tint
 	last = {"key": key, "elev": body.elev, "total_lux": st.total, "sky_lux": st.skylux, "beam_h": beam_h,
-		"ev100": ev, "bias": bias, "under": under}
+		"ev100": ev, "bias": bias, "under": under, "night_w": nw}
 	return last
+
+func _art_k(k: Vector3) -> Vector3:
+	## light_neutral: the light's per-band loss pulled toward its luminance-weighted mean (colour only)
+	var m := k.dot(Vector3(0.2126, 0.7152, 0.0722))
+	return k.lerp(Vector3(m, m, m), clampf(light_neutral, 0.0, 1.0))
 
 static func _moon_view(d: Vector3, drawn_deg: float) -> Vector4:
 	var g := to_godot(d)
@@ -194,13 +266,13 @@ func _push_water(water_y: float, sun_up_air: Vector3, beam_h_lux: float, sky_lux
 	rs.global_shader_parameter_set("water_floor_y", floor_y)
 	rs.global_shader_parameter_set("water_a", a)
 	rs.global_shader_parameter_set("water_b", b)
-	rs.global_shader_parameter_set("water_kd", (a + WaterOptics.BB * b) / tr.y)
-	rs.global_shader_parameter_set("water_ku", (a + WaterOptics.BB * b) / 0.75)
+	rs.global_shader_parameter_set("water_kd", _art_k((a + WaterOptics.BB * b) / tr.y))
+	rs.global_shader_parameter_set("water_ku", _art_k((a + WaterOptics.BB * b) / 0.75))
 	rs.global_shader_parameter_set("water_sun_w", tr)
 	rs.global_shader_parameter_set("water_es0", beam_h_lux * WaterOptics.FRESNEL_SUN)   # horizontal lux of the sun just under
 	rs.global_shader_parameter_set("water_ek0", sky_lux * WaterOptics.FRESNEL_SKY)      # horizontal lux of the sky just under
 	rs.global_shader_parameter_set("water_exposure", exposure)
-	rs.global_shader_parameter_set("water_glow_k", WaterOptics.LOOK_SET.glow_k)
+	rs.global_shader_parameter_set("water_glow_k", glow_k)
 	rs.global_shader_parameter_set("water_sand", WaterOptics.SAND)
 	rs.global_shader_parameter_set("water_sky_nits", sky_lux / PI)   # clear sky as a uniform dome (stand-in for the surface)
 	rs.global_shader_parameter_set("water_zref", z_ref)
