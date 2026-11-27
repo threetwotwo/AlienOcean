@@ -1,5 +1,11 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): the camera's field of view
+- Engine: WorldRoot.set_fov used an 18 mm half sensor, but Godot's CameraAttributesPhysical takes the vertical FOV from
+  a 24 mm sensor height (12 mm half), so asking for 44 deg gave 30.15 deg: every shot was about 1.5x zoomed in. Now
+  12 / tan(fov / 2); checked headless, cam.fov reads 44.0 for 44 and 60.0 for 60. Brightness is unchanged (f/22, the
+  same shutter); only the framing widens. Found by the lagoon dressing thread.
+
 ## 0.6.0-dev (28 Nov 2026): the sky's handedness
 - Engine: WorldRoot.to_godot is now Unreal (x, y, z) -> Godot (x, z, y) (was (x, z, -y), the island frame's map), and
   sky_stars s_zup is its inverse. Evidence: the lagoon GLBs are written (x, z, -y) from island metres, and Unreal
