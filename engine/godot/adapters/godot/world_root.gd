@@ -28,6 +28,10 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 ## Art direction (27 Nov, Gary: 'art direction trumps'): how much of its colour sunlight and skylight keep on the way
 ## down to the floor. 0 = the physics (red lost over 4 m); 1 = the light arrives as white as it entered, with the same
 ## overall loss. The haze along the view (absorption + scattering between eye and object) is untouched.
+## Art direction: stops added under water on top of the place's compensation, and the water haze's strength
+## (Unreal GlowK, Gary's clarity pick 2.5). Under water only, so the sky above the sea keeps its exposure.
+@export var under_exposure_art := 0.0
+@export var glow_k := WaterOptics.LOOK_SET.glow_k
 @export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
 @export var depth_colour_share := DEPTH_WB   # art direction lever (27 Nov: Gary 'art direction trumps'); Unreal 0.25
 const DEPTH_WB := 0.25                # the share given back
@@ -142,6 +146,7 @@ func apply(cam_y: float) -> Dictionary:
 	var ev := ev100(st.total) - (ev100(noon_total) - SkyClock.EV_MAX)
 	if under: ev -= SkyClock.STEADY_UNDER_AT
 	var bias: float = SkyClock.EXPOSURE_BIAS.get(place, 0.0)
+	if under: bias += under_exposure_art
 	# EV100 = log2(N^2 / t) at ISO 100. f/22 keeps Godot's physical depth of field out of the way (deep focus).
 	cam_attr.exposure_sensitivity = 100.0; cam_attr.exposure_aperture = 22.0
 	cam_attr.exposure_shutter_speed = pow(2.0, ev) / (22.0 * 22.0)
@@ -230,7 +235,7 @@ func _push_water(water_y: float, sun_up_air: Vector3, beam_h_lux: float, sky_lux
 	rs.global_shader_parameter_set("water_es0", beam_h_lux * WaterOptics.FRESNEL_SUN)   # horizontal lux of the sun just under
 	rs.global_shader_parameter_set("water_ek0", sky_lux * WaterOptics.FRESNEL_SKY)      # horizontal lux of the sky just under
 	rs.global_shader_parameter_set("water_exposure", exposure)
-	rs.global_shader_parameter_set("water_glow_k", WaterOptics.LOOK_SET.glow_k)
+	rs.global_shader_parameter_set("water_glow_k", glow_k)
 	rs.global_shader_parameter_set("water_sand", WaterOptics.SAND)
 	rs.global_shader_parameter_set("water_sky_nits", sky_lux / PI)   # clear sky as a uniform dome (stand-in for the surface)
 	rs.global_shader_parameter_set("water_zref", z_ref)
