@@ -150,7 +150,7 @@ def clips(C, V, raw_record, bone_list, checks=None):
                   envelopes_by_speed_rule='rows as amplitude_envelope_BL, measured from the engine at each U (alpha_law, amp_law and recoil included); blend linearly in U between the two nearest, hold the end rows outside the range; amplitude_envelope_BL is the U_rec entry'),
         frame=dict(forward_axis_gltf=[-1, 0, 0], up_axis_gltf=[0, 1, 0], left_axis_gltf=[0, 0, 1], snout_at_origin=True,
                    s_of_vertex='s = position.x / body_length_m (glTF metres, snout 0 -> tail 1)'),
-        beat_law=dict(formula='f(U) = f_rec * (c + U) / (c + U_rec)  (Bainbridge offset law, lessons swim v3)', f_rec_Hz=mo.get('f'), U_rec_BLps=U,
+        beat_law=dict(formula='f(U) = f_rec * (c + U) / (c + U_rec)  (Bainbridge offset law, lessons swim v3)', f_rec_Hz=mo.get('f'), U_rec_BLps=U_rec,
                       c_BLps=R['fc'], stride_BL_per_beat=round(R['stride'], 4)),
         amp_law=dict(formula='A_U = A * clamp(ampMin + (1 - ampMin) * U / ampU1, 0, 1)', ampMin=g.get('ampMin'), ampU1=g.get('ampU1')),
         alpha_law=dict(formula='alpha_U = clamp(alpha - alphaSlope * (U - U_rec), alphaMin, alphaMax)', alphaSlope=mo.get('alphaSlope'),
