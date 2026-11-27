@@ -22,6 +22,7 @@ var ground_follow := NAN
 var noclip_off := {}
 var _step_dt := 1.0 / 60.0
 const NOCLIP_RATE := 3.0
+const HARD_MISS := 0.07     # m: a planted foot this far out of reach steps at once, even just landed (foot_placer.FORCED_HARD)
 const MAX_STEP := 1.0 / 55.0     # longest rig step; a longer frame is caught up in sub-steps (30 Hz runs as two 60 Hz steps)
 const SWIM_ANKLE_RATE := 6.0
 var swim_ankle_rel := {}
@@ -148,12 +149,22 @@ func push_clear(pt: Vector3, radius: float, surf, max_push := 0.55) -> Vector3:
 		var moved := false
 		if q_world != null:
 			var hit: Dictionary = q_world.call(o, radius + 0.03, null)
-			if not hit.is_empty() and hit.dist < radius and hit.has("normal"):
+			var q_solid = surf.get("point_solid")
+			if not hit.is_empty() and hit.has("normal") and q_solid != null and q_solid.call(o):
+				# FIX (stress B42 at 30 Hz): a point buried deeper than its radius (one long tick sweeping a trailing
+				# foot into a wall) was left inside: out along the contact normal past the surface instead
+				o += hit.normal * (radius + hit.dist)
+				moved = true
+			elif not hit.is_empty() and hit.dist < radius and hit.has("normal"):
 				o += hit.normal * (radius - hit.dist)
 				moved = true
 		if q_floor != null:
 			var fy: float = q_floor.call(o.x, o.z)
-			if is_finite(fy) and o.y < fy + radius:
+			# FIX (stress B42): with ledges and overhangs a point well below the floor straight above it is under a
+			# slab or beside a wall, not sunk into a height-field: lifting it onto the top (0.5 m+) threw the leg round.
+			# The ray and the surface push above handle it.
+			var under: bool = surf.has("ray") and o.y < fy - 0.12
+			if is_finite(fy) and o.y < fy + radius and not under:
 				o.y = fy + radius
 				moved = true
 		if not moved: break
@@ -191,7 +202,15 @@ func solve_noclip_arm(sh: Vector3, target: Vector3, pole: Vector3, surf, o := {}
 	return ik
 
 func solve_noclip_leg(hip: Vector3, raw_ankle: Vector3, side: float, pd: Vector3, pf: Vector3, surf, lo := {}) -> Dictionary:
-	var at := push_clear(raw_ankle, 0.056, surf, 0.65)
+	var at := raw_ankle
+	if surf != null and not thalassa_exact and surf.has("ray"):
+		# FIX (stress B42): a leg trailing past a rock edge was pushed out of the nearest face, which can be the far
+		# side (under a slab she is rising beside): the foot stays on the hip's side of any surface between them
+		var dir := (raw_ankle - hip).normalized()
+		var h: Dictionary = surf.ray.call(hip, raw_ankle + dir * 0.06)
+		if not h.is_empty():
+			at = h.position + h.normal * 0.06
+	at = push_clear(at, 0.056, surf, 0.65)
 	var solved := BM.leg(hip, at, side, pd, pf, thigh_len, shin_len, lo)
 	if surf != null:
 		for _pass in 3:
@@ -217,7 +236,10 @@ func solve_noclip_leg(hip: Vector3, raw_ankle: Vector3, side: float, pd: Vector3
 			# jump 25 cm in one tick. Let the push change by at most NOCLIP_RATE m/s.
 			var want := at - raw_ankle
 			var prev: Vector3 = noclip_off.get(side, Vector3.ZERO)
-			var off := prev + (want - prev).limit_length(NOCLIP_RATE * _step_dt)
+			# out of rock at up to 3x the rate (a buried foot is the worse fault; rising past a slab edge the push grows
+			# ~9 m/s), back towards the raw pose at the slow rate
+			var rate := NOCLIP_RATE * (3.0 if want.length() > prev.length() + 1e-4 else 1.0)
+			var off := prev + (want - prev).limit_length(rate * _step_dt)
 			noclip_off[side] = off
 			if off.distance_to(want) > 0.002:
 				solved = BM.leg(hip, raw_ankle + off, side, pd, pf, thigh_len, shin_len, lo)
@@ -508,6 +530,7 @@ func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary,
 		on_stroke_pull.call(clampf(swim_blend * (0.7 + sprint_blend * 0.35), 0.25, 1.0))
 	prev_ubr = ubr_base
 	var surf_env = {"floor_height": get_floor, "nearest_surface": query} if s.ground_walk_blend < 0.15 else null
+	if surf_env != null and not thalassa_exact and env.has("point_solid"): surf_env["point_solid"] = env.point_solid; surf_env["ray"] = env.get("ray")
 	if surf_env != null and get_floor == null and query == null: surf_env = null
 
 	var solve_arm := func(side: float, override_target = null) -> Dictionary:
@@ -1062,7 +1085,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			land_age[fkey] = 0.0 if fst.stepping else land_age[fkey] + dt
 			# a foot that has just landed yields to the other foot (its request counts a third): stepping it again at
 			# once stole the other foot's turn and left that one dragging
-			var wgt := 0.33 if land_age[fkey] < 0.12 else 1.0
+			var wgt := 0.33 if (land_age[fkey] < 0.12 and excess <= HARD_MISS) else 1.0     # far out of reach can't wait
 			world_foot_placer.forced[fkey] = excess * wgt if (excess > 0.025 and not fst.stepping) else 0.0
 		var rel_yaw := BM.wrap_pi(fst.yaw - pelv_yaw)
 		var fwf := Vector3(-sin(fst.yaw), 0, -cos(fst.yaw))
@@ -1183,7 +1206,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			var miss: float = solved.ik.eff.distance_to(ft + adj)
 			var fk2 := "L" if side < 0 else "R"
 			if not fst.stepping and miss > 0.03:
-				world_foot_placer.forced[fk2] = maxf(world_foot_placer.forced[fk2], miss * (0.33 if land_age[fk2] < 0.12 else 1.0))
+				world_foot_placer.forced[fk2] = maxf(world_foot_placer.forced[fk2], miss * (0.33 if (land_age[fk2] < 0.12 and miss <= HARD_MISS) else 1.0))
 		return {"ik": solved.ik, "finMat": solved.finMat, "finDir": solved.finDir}
 	var leg_l: Dictionary = shore_leg.call(-1.0)
 	var leg_r: Dictionary = shore_leg.call(1.0)

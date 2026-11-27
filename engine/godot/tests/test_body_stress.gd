@@ -43,7 +43,7 @@ const KNEE_BACK_TOL := 0.03
 const NECK_TOL := 0.02
 const HEAD_CHEST_MAX := 100.0
 const POP_REL := 14.0
-const PELVIS_JUMP := 0.12      # m in one tick, relative to the eye
+const PELVIS_JUMP := 0.12      # m per 1/60 s against the eye (a longer tick may move further, a shorter one is not held tighter)
 const PEN_RUN := 3
 const PEN_MARGIN := 0.02
 const SOLE_UNDER := 0.02
@@ -59,10 +59,6 @@ const TORSO_SINK := 0.03
 ## Each entry says what fails and why, as found; fix one, then delete its line.
 const KNOWN := {
 	"B12 step": "trailing foot slides 3.6 cm for a few ticks walking back down off the step (forced step waits for the other foot)",
-	"B17": "a foot slides 3.4 cm at the beach crease: it lands short of a spot it can't reach and is stepped again",
-	"B18": "as B17",
-	"B19": "as B17",
-	"B34": "as B17",
 	"B35": "toe of the swing foot scuffs 3 cm into a 30 deg slope walked across: the pelvis is low and the uphill knee is folded",
 	"B36": "as B35, standing across the slope",
 	"B37": "stairs: the eye climbs each riser as her centre crosses it, faster than the steps, so the trailing foot is left stretched and slides",
@@ -508,7 +504,8 @@ func _check(p: Dictionary, dt: float) -> void:
 		var eye: Vector3 = body.motor.swimmer.pos
 		var dpel: Vector3 = (J.pelvis - eye) - (pj.pelvis - prev.get("eye", eye))
 		_w("pelvis_jump", dpel.length())
-		if dpel.length() > PELVIS_JUMP: _fail("J5", "pelvis jumped %.2f m against the eye" % dpel.length())
+		var pj_lim: float = PELVIS_JUMP * maxf(1.0, dt * 60.0)
+		if dpel.length() > pj_lim: _fail("J5", "pelvis jumped %.2f m against the eye" % dpel.length())
 		for k in J:
 			var v: float = ((J[k] - pj[k]) - dpel).length() / dt
 			_w("pop", v)
