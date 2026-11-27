@@ -32,7 +32,8 @@ var initialized := false
 var last_vessel_id = null
 var feet := {"L": Foot.new(), "R": Foot.new()}
 ## Set by the body rig when a planted foot is held back by its reach limits (it would be dragged): step it now.
-const FORCED_MIN := 0.0     # any request counts; the rig discounts a just-landed foot so the other goes first
+const FORCED_MIN := 0.0
+const FORCED_HARD := 0.07     # any request counts; the rig discounts a just-landed foot so the other goes first
 var forced := {"L": 0.0, "R": 0.0}     # set by the rig: how far (m) a planted foot is from where the leg can hold it
 ## Optional world check set by the body rig: filter(body_ground: Vector3, to: Vector3, yaw: float) -> Vector3 returns
 ## a landing spot the foot can really stand on (Thalassa's placer only knew a flat deck).
@@ -481,9 +482,11 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var f_first := "L" if forced.L >= forced.R else "R"
 		var f_other := "R" if f_first == "L" else "L"
 		var ft_ok := 0.25     # waiting for the other foot to land (0.85) left the forced foot dragging: 28 of 45, not 35
-		if forced[f_first] > FORCED_MIN and not feet[f_first].stepping and (not feet[f_other].stepping or feet[f_other].t >= ft_ok):
+		# a foot the leg can't hold at all (> FORCED_HARD) goes now, even with the other in the air (a running hop);
+		# after a dropped-frame catch-up both feet can be out of reach at once (stress B40)
+		if forced[f_first] > FORCED_MIN and not feet[f_first].stepping and (not feet[f_other].stepping or feet[f_other].t >= ft_ok or forced[f_first] > FORCED_HARD):
 			trigger.call(f_first, true)
-		elif forced[f_other] > FORCED_MIN and not feet[f_other].stepping and (not feet[f_first].stepping or feet[f_first].t >= ft_ok):
+		elif forced[f_other] > FORCED_MIN and not feet[f_other].stepping and (not feet[f_first].stepping or feet[f_first].t >= ft_ok or forced[f_other] > FORCED_HARD):
 			trigger.call(f_other, true)
 		elif not step_l and trail_l > emerg and (not step_r or feet.R.t >= 0.72):
 			trigger.call("L", true)

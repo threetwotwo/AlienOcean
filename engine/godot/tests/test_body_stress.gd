@@ -43,7 +43,7 @@ const KNEE_BACK_TOL := 0.03
 const NECK_TOL := 0.02
 const HEAD_CHEST_MAX := 100.0
 const POP_REL := 14.0
-const PELVIS_JUMP := 0.25
+const PELVIS_JUMP := 0.12      # m in one tick, relative to the eye
 const PEN_RUN := 3
 const PEN_MARGIN := 0.02
 const SOLE_UNDER := 0.02
@@ -504,14 +504,17 @@ func _check(p: Dictionary, dt: float) -> void:
 	# J5 pops
 	if prev.has("J"):
 		var pj: Dictionary = prev.J
-		var dpel: Vector3 = J.pelvis - pj.pelvis
+		# against the eye the motor moves (a sprint-swim breach moves the whole body 0.25 m in a 30 Hz tick legitimately)
+		var eye: Vector3 = body.motor.swimmer.pos
+		var dpel: Vector3 = (J.pelvis - eye) - (pj.pelvis - prev.get("eye", eye))
 		_w("pelvis_jump", dpel.length())
-		if dpel.length() > PELVIS_JUMP: _fail("J5", "pelvis jumped %.2f m" % dpel.length())
+		if dpel.length() > PELVIS_JUMP: _fail("J5", "pelvis jumped %.2f m against the eye" % dpel.length())
 		for k in J:
 			var v: float = ((J[k] - pj[k]) - dpel).length() / dt
 			_w("pop", v)
 			if v > POP_REL: _fail("J5", "%s moved %.1f m/s against the pelvis" % [k, v])
 	prev.J = J
+	prev.eye = body.motor.swimmer.pos
 	# J6 world: spheres along limbs (mannequin radii)
 	var samples := [["head", p.headMat * Vector3(0, 0.10, 0), 0.095], ["chest", p.chestPos, 0.08], ["pelvis", p.pelvisPos, 0.08]]
 	for side in ["L", "R"]:

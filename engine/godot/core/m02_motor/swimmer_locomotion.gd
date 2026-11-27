@@ -286,6 +286,15 @@ func _update_shore(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, 
 	pos.z += shore_vel_xz.y * sdt
 	var new_floor := _floor_y(env, pos.x, pos.z) if env.has("floor_height") else raw_floor_y
 	var eff_floor := new_floor if is_finite(new_floor) else raw_floor_y
+	# FIX: in the air the jump offset is height above the floor under her; when that floor changes (off a ledge, over
+	# a step) re-base it so the eye stays on its arc (Thalassa's height-field had no ledges: the eye dropped/rose by
+	# the floor step in one tick, 0.32 m off a 30 cm step)
+	if shore_is_airborne and is_finite(eff_floor) and is_finite(shore_floor_y):
+		shore_jump_offset += shore_floor_y - eff_floor
+		if shore_jump_offset <= 0.0:
+			var imp2 := absf(shore_jump_vel_y)
+			shore_jump_offset = 0.0; shore_jump_vel_y = 0.0; shore_is_airborne = false; shore_just_landed = true
+			shore_landing_impact = clampf(imp2 / 3.4, 0.28, 1.0)
 	shore_floor_y = eff_floor
 	if env.has("terrain_normal"):
 		shore_floor_normal = env.terrain_normal.call(pos.x, pos.z)

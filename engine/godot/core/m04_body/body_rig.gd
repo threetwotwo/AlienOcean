@@ -22,7 +22,7 @@ var ground_follow := NAN
 var noclip_off := {}
 var _step_dt := 1.0 / 60.0
 const NOCLIP_RATE := 3.0
-const MAX_STEP := 1.0 / 30.0     # longest rig step; a longer frame is caught up in sub-steps
+const MAX_STEP := 1.0 / 55.0     # longest rig step; a longer frame is caught up in sub-steps (30 Hz runs as two 60 Hz steps)
 const SWIM_ANKLE_RATE := 6.0
 var swim_ankle_rel := {}
 var swing_floor := {"L": NAN, "R": NAN}
@@ -842,6 +842,8 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 	if is_finite(s.shore_floor_y): floor_here = s.shore_floor_y
 	elif get_floor != null: floor_here = get_floor.call(s.pos.x, s.pos.z)
 	else: floor_here = s.pos.y - 1.24
+	if not thalassa_exact and not is_finite(floor_here):
+		floor_here = s.pos.y - 1.24     # FIX (stress BM): no ground under her at all (walked off the world's edge) made the whole pose NaN
 	if not thalassa_exact:
 		# FIX (stress J5): follow the floor the way the motor's eye does (18/s, trailing by at most its step_lag), so
 		# the pelvis climbs a ledge with the eye instead of snapping 30 cm in one tick
@@ -1012,7 +1014,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		var fz: float = fst.pos.z
 		var fgy: float = get_floor.call(fx, fz) if get_floor != null else floor_here
 		var fn: Vector3 = get_normal.call(fx, fz) if get_normal != null else s.shore_floor_normal
-		if not thalassa_exact and is_finite(fgy) and (absf(fgy - floor_here) > 0.36 or fn.y < 0.56):
+		if not thalassa_exact and (not is_finite(fgy) or absf(fgy - floor_here) > 0.36 or fn.y < 0.56):
 			fn = s.shore_floor_normal
 			fgy = floor_here     # FIX (stress J7): ground more than a step above or below her, or too steep to walk (Thalassa's 0.56), is a wall or a drop, not a foothold
 		var plane_g := fgy     # the real ground under the foot (the swing floor below may sit higher), for the sole plane test
