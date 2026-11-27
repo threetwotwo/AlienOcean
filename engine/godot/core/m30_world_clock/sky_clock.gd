@@ -30,7 +30,12 @@ const MARINE_AOD := 0.03
 const AEROSOL_HEIGHT_KM := 1.2
 const AEROSOL_SSA := 0.97
 const OCEAN_ALBEDO := 0.06
-const SUN_SIZE := 8.25                # drawn sun x real (4.4 deg)
+const SUN_SIZE := 8.25                # drawn sun x real for the disc's quad (v19)
+const SUN_SIZE_NOW := 5.288461538461538   # drawn sun x real now (v136): 2.8 deg on the sky
+const AIR_EXT := Vector3(0.0862, 0.1665, 0.2961)   # per-band extinction of the air, x air mass (SUN_HLSL)
+const CORONA := 1.0
+const MOON_LOOK := {"albedo_A": 0.12, "albedo_B": 0.20, "maria": 0.3, "planetshine": 2e-4, "moon_sat": 0.5,
+		"moon_blue": 0.2, "moon_cap": 3.0, "moon_tint_mix": 0.5, "moon_edge": 1.5}
 const SUN_BIAS := 4.0
 const HANDOVER_FADE := 0.6
 # ---- exposure (Lighting): EV100 limits and per-place compensation

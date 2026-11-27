@@ -1,6 +1,11 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
 ## 0.6.0-dev (27 Nov 2026), slice setup, not yet in a git repo
+- Engine: sky port 0.1.0 (`look/sky.gdshader`, `look/sky_driver.gd`): the Unreal sun disc and corona (SUN_HLSL) and both
+  moons (MOON_HLSL: Lommel-Seeliger face, maria, planetshine, soft edge, phases from the clock) drawn as is, sun x5.29;
+  air extinction per band (0.0862, 0.1665, 0.2961) now also colours the key light. Dome: Godot's PhysicalSkyMaterial shape
+  (stand-in for Unreal's SkyAtmosphere, an engine feature), scaled so its ground light equals the clock's sky_lux.
+  Checked at day 2, 5:30 pm: Moon B 76% lit, Moon A a 9% crescent beside the low sun. Stars (STARS_HLSL) still to port.
 - Engine: ported Unreal systems, round 1 (Gary 27 Nov 15:13Z "port working Unreal systems to Godot").
   M30 world clock 0.1.0 (`core/m30_world_clock/sky_clock.gd`): the Unreal sky clock's maths (sun_v184) as is: G2V sun twin,
   128 klx above the air, 78 deg noon, moons A and B (size, albedo, colour, phases, orbits), eclipses, twilight table, key-light
