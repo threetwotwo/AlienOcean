@@ -15,7 +15,8 @@
 ##   G8 streaming    the girl's cell is live once the streamer has settled
 ##   G9 leaks        node count flat after warm-up; registry size constant through add/remove churn
 ##   G10 contract    no late registry writes; unknown plug mounts refused; pause runs only clock + world, nothing moves;
-##                   mean tick under 5 ms (cloud CPU, headless)
+##                   mean tick under 5 ms (cloud CPU, headless; the fish schools' own phase is reported, not counted:
+##                   the school module owns its budget)
 ## Rates: the simulation tick is fixed (60 Hz), so 30/60/120 fps must end in the same place (tests/compare_rates.py m32).
 ## Planted faults (must FAIL): late_write (a plug moves the girl's record after the commit), clock (a plug steps the
 ## clock a second time), grid (an actor's position changed behind the registry's back).
@@ -48,6 +49,7 @@ var max_tick_ms := 0.0
 var ticks := 0
 var done := false
 var sum_ms := 0.0
+var fauna_ms := 0.0
 var paused_ticks := 0
 var wall := 0.0
 
@@ -147,7 +149,7 @@ func _next() -> void:
 		_report(); done = true; return
 	cur = cases[ci]
 	fails = {}; nodes_at_warm = -1; prev_girl = Vector3.INF; girl_was_mounted = true; school_steps = {}; max_tick_ms = 0.0; ticks = 0
-	sum_ms = 0.0; paused_ticks = 0; wall = 0.0
+	sum_ms = 0.0; fauna_ms = 0.0; paused_ticks = 0; wall = 0.0
 	g = GameRoot.new()
 	g.start_hour = float(cur.opts.get("hour", 12.0))
 	g.hours_per_second = float(cur.opts.get("hps", 0.0))
@@ -177,7 +179,8 @@ func _check(tick: int) -> void:
 	var paused := g.clock.paused
 	if paused: paused_ticks += 1
 	if ticks > 30 and not paused:
-		max_tick_ms = maxf(max_tick_ms, g.stats.tick_ms); sum_ms += g.stats.tick_ms
+		var own: float = g.stats.tick_ms - float(g.stats.phase_ms.get("fauna", 0.0))   # the root's own cost; schools own theirs
+		max_tick_ms = maxf(max_tick_ms, own); sum_ms += own; fauna_ms += float(g.stats.phase_ms.get("fauna", 0.0))
 	# G1
 	var want_trace: Array = ["clock", "world"] if paused else GameRoot.TICK_ORDER
 	if g.trace != want_trace: _fail("G1", "phases %s" % [g.trace])
@@ -288,8 +291,8 @@ func _finish_case() -> void:
 	var ok := fails.is_empty()
 	var end: Vector3 = g.girl.body.global_position
 	results.append({"name": cur.name, "ok": ok, "end": [end.x, end.y, end.z], "ticks": ticks, "fails": fails,
-		"max_tick_ms": snappedf(max_tick_ms, 0.01), "mean_tick_ms": snappedf(mean, 0.001), "schools": g.school_nodes.size()})
-	print("%s %s  end %s  tick mean %.2f / max %.2f ms  schools %d" % ["PASS" if ok else "FAIL", cur.name, end, mean, max_tick_ms, g.school_nodes.size()])
+		"max_tick_ms": snappedf(max_tick_ms, 0.01), "mean_tick_ms": snappedf(mean, 0.001), "mean_fauna_ms": snappedf(fauna_ms / maxf(counted, 1), 0.001), "schools": g.school_nodes.size()})
+	print("%s %s  end %s  tick mean %.2f / max %.2f ms (+ schools %d: %.2f ms)" % ["PASS" if ok else "FAIL", cur.name, end, mean, max_tick_ms, g.school_nodes.size(), fauna_ms / maxf(counted, 1)])
 	for k in fails: print("   %s x%d  first: %s" % [k, fails[k].n, fails[k].first])
 
 func _report() -> void:

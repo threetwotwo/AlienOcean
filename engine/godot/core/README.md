@@ -39,5 +39,6 @@ any module uses it.
 | m04_body | body rig: springs, IK, foot placement, swim and walk poses | core/ik-rig.js, ik-solvers.js, procedural-locomotion.js, ik-poses-world.js, physics-control.js (in progress) |
 | m12_streaming | open-world cell streamer (engine thread) | |
 | m29_water_physics | buoyancy | |
+| m31_school | fish schools: the Nov 1 schooling paper's rules (numpy school.py port, golden-checked) + M08 perceived actors (school thread) | research/schooling/school.py (not Thalassa) |
 | m32_game | game root: actor registry, feature mounts (adapter: adapters/godot/game_root.gd, actor_rig.gd, game_services.gd; scene scenes/game.tscn) | style/runtime.js updateSimulation tick order, runtime-senses.js POI records, core/feature-mounts.js |
 | world | shared world state: sky clock (M30), lagoon water, water optics (engine thread) | |

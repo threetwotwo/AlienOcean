@@ -36,6 +36,9 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 ## Art direction: stops added under water on top of the place's compensation, and the water haze's strength
 ## (Unreal GlowK, Gary's clarity pick 2.5). Under water only, so the sky above the sea keeps its exposure.
 @export var under_exposure_art := 1.0     # Gary picked "Brighter" 27 Nov 17:06Z
+@export var fill_occluded := true          # the water's fill light goes through Godot's ambient, so SSAO / SSIL occlude it (false = as before, unoccluded)
+@export var cdom := 0.03                   # art lever (a real condition): yellow substance in the water, Unreal LOOK_SET 0.03; less = bluer haze
+@export var scat_k := 0.40                 # art lever (a real condition): particles in the water, Unreal LOOK_SET 0.40; less = clearer
 @export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
 @export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
 ## The god rays under the water (Unreal GodK): the light net's map summed along each view ray. false = off (checks).
@@ -230,7 +233,7 @@ func apply(cam_y: float) -> Dictionary:
 		var kw := clampf((water_y - cam_y) / UNDER_WHITE_FADE_M, 0.0, 1.0)
 		var dg: Vector3 = depth_gain(water_y - cam_y, depth_colour_share) if depth_colour else Vector3.ONE
 		agx_fx.depth_gain = dg * Vector3.ONE.lerp(UNDER_WHITE.get(place, Vector3.ONE), kw)
-	var a := WaterOptics.absorb(); var b := WaterOptics.scatter()
+	var a := WaterOptics.absorb(cdom); var b := WaterOptics.scatter(scat_k)
 	if under:
 		var tr := WaterOptics.refract_sun(up_air)
 		var kd: Vector3 = _art_k((a + WaterOptics.BB * b) / tr.y)
@@ -252,11 +255,14 @@ func apply(cam_y: float) -> Dictionary:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		env.ambient_light_color = Color(amb.x / mx, amb.y / mx, amb.z / mx) if mx > 0.0 else Color.BLACK
 		env.ambient_light_energy = mx
+		RenderingServer.global_shader_parameter_set("water_amb_ref", amb / maxf(exposure, 1e-12))
 	else:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		var dz := dome(Vector3.UP, _dome_sun); var dm := maxf(dz.x, maxf(dz.y, dz.z))
 		env.ambient_light_color = Color(dz.x / dm, dz.y / dm, dz.z / dm) if dm > 0.0 else Color.WHITE
 		env.ambient_light_energy = st.skylux / PI * exposure
+		var ac: Color = env.ambient_light_color * (st.skylux / PI)
+		RenderingServer.global_shader_parameter_set("water_amb_ref", Vector3(ac.r, ac.g, ac.b))
 		light.look_at_from_position(Vector3.ZERO, -up_air, Vector3.FORWARD if absf(up_air.y) > 0.99 else Vector3.UP)
 		light.light_intensity_lux = beam_h / maxf(up_air.y, 0.02)
 		light.light_color = tint
@@ -288,13 +294,14 @@ static func declare_globals() -> void:
 		"water_caus_map": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()],
 		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)],
 		# the sea surface (water surface thread): the sky dome's shape sun and scale, the key body in air and its beam lux
+		"water_amb_ref": [V, Vector3.ONE], "water_fill_ao": [F, 1.0],
 		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)
 
 func _push_water(water_y: float, sun_up_air: Vector3, beam_h_lux: float, sky_lux: float) -> void:
-	var a := WaterOptics.absorb(); var b := WaterOptics.scatter()
+	var a := WaterOptics.absorb(cdom); var b := WaterOptics.scatter(scat_k)
 	var tr := WaterOptics.refract_sun(sun_up_air)
 	var rs := RenderingServer
 	rs.global_shader_parameter_set("water_y", water_y)
@@ -308,6 +315,7 @@ func _push_water(water_y: float, sun_up_air: Vector3, beam_h_lux: float, sky_lux
 	rs.global_shader_parameter_set("water_ek0", sky_lux * WaterOptics.FRESNEL_SKY)      # horizontal lux of the sky just under
 	rs.global_shader_parameter_set("water_exposure", exposure)
 	rs.global_shader_parameter_set("water_glow_k", glow_k)
+	rs.global_shader_parameter_set("water_fill_ao", 1.0 if fill_occluded else 0.0)
 	rs.global_shader_parameter_set("water_sand", WaterOptics.SAND)
 	rs.global_shader_parameter_set("water_sky_nits", sky_lux / PI)   # clear sky as a uniform dome (stand-in for the surface)
 	rs.global_shader_parameter_set("water_zref", z_ref)
