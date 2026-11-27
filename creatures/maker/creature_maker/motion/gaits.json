@@ -1,0 +1,290 @@
+{
+ "_doc": "Gait defaults by swimming style (data only). A record picks its style with body.motion.gait; until records carry it, 'byPlan' below fills it in. Any key here can be overridden by body.motion.gaitOverrides. recoil (v2): share of the free-body Lighthill recoil left after the water resists sideways motion; 0.5 fitted to the snapper posterior wavelength and snout sway, see motion/swim/v2. fOffsetU (v3): beat law offset c in f = f_rec (c+U)/(c+U_rec); 1 L/s from Bainbridge 1958, matches Tytell 2004 eel (1.3 + 1.3 U). idleHz (v4): body-wave beat kept when the wanted speed is zero (eel station holding; no forward thrust below the beat law offset). perch-hop v5: hopBL (default length, est. 1-5 L), hopBurst s, hopTauU (burst speed-up), glide tau, glideEnd (share of burst speed where the brake starts), brakeTau. hopCal 1.17: measured ratio of commanded to travelled hop length with burst 0.2 s (0.85-0.86 for 1-6 L). skinStrain (v6): the turn bend is capped at skinStrain / widest half-width of the bending body (probe K3 limit 0.10 with margin). tempo (v7): speed wander cv (log sd) and yawSD deg/s with correlation time T s, always on unless cmd.tempo = 0; with cmd.auto the engine also pauses (pauseRate per s, pause [min,max] s; eel/moray 1.5-5 s, cowfish 2-6 s from probe K12 ranges) and bursts (burstRate, burst s, burstK x U). Estimates until blueprint swim blocks carry them; measured kinematic checks run with tempo 0. surge (v7): forward speed oscillates at twice the beat (one push per stroke), share of U: estimates 0.06 carangiform-like, 0.04 eel (Tytell 2004 reports small eel surge); applied to travel only. windDeg (v8): turn wind-up, head swung this far the other way at 90 ms before a turn from straight (tuskfish hero_motion feel.anticipation 5 deg, raised for read at game distance); 0 for the boxfish (rigid carapace turns by fins); cmd.wind = 0 switches it off. windYaw (v8): counter-yaw rate deg/s during the wind-up for bodies that cannot bend (boxfish). v12 breathing and soft body: throatDropD (share of the head depth at the throat, default 0.04; v13, was throatDrop 0.01 L) and opercleFlare (deg, default 6) at full record.breathing.amp, halved by ram ventilation above 1-2.5 L/s; softDrive (default 0.2): share of the station's sideways acceleration that reaches a soft zone's spring (the tissue mostly moves with the body; 0.2 keeps a fatty belly under its peak at cruise). finGait (v14, boxfish): median-fin gait shares by speed (Hove 2001: anal from 0 to full by 1 L/s, dorsal 0.8-1.5, caudal from Ulab), sway deg at full share (capped at 0.9 x the rig's fins.<fin>.sway room), lag = wave cycles along the fin, rockDeg = body yaw against the fins (snout excursion target 0.7-3.8 % TL), hoverHz and hoverShare = slow anal sculling at rest. finLife (v15, Gary 14 Nov 2026 02:05Z 'nothing should stay perfectly still'; the tuskfish's hero_motion FEEL_FINS, tail idle and alive layers, Fish lab 19 Oct): deg = median-fin ripple lean at hover (deg, capped at 0.9 x the rig's fins.<fin>.sway room), raiseDeg the rays' lift and fall with it, hz the fins' own frequency (each fish and fin x0.85-1.15), lam the ripple's wavelength along the fin (L, x0.85-1.15), periodCV / sizeCV the OU wander of frequency and size (tauF, tauS s), tailDeg / tailHz / tailLag the caudal idle scull about the fin base (tip lag in cycles), spreadDeg the lobes opening and closing (at 0.37 x tailHz; 1.5 deg keeps the fork membrane under 8 % edge stretch on the r22 snapper, 4 deg stretched it 17.8 %), pecPeriodCV / pecSizeCV each pectoral's own clock and size wander, pelvicDeg / tauP the pelvics' OU lean; all x (0.3 + 0.7 still), still = 1 - smoothstep(stillU), and x (1 - smoothstep(burstU)). A style or model may carry its own finLife. phrase (v16, Style FE2 14 Nov 2026; body-and-tail swimmers only, a style without it keeps the pectoral-only band; Fulton 2007: Lutjanus ~93 % body-and-tail fin use in the field; numbers ESTIMATES from Style's starting bars until a record carries them in body.motion.gaitOverrides.phrase): U = asked speed (L/s) over which the phrases fade in from rest; beats = the beat counts a phrase may draw; glide = [min, max] s; fK = beat rate in a phrase x the beat law, fVar its spread per phrase; ampK = beat size x the gait's amplitude at that speed, ampVar its spread per phrase; rise / fall = beats over which a phrase swells and dies; speedK = share of the asked speed gained through the beats, speedDn the most lost in a glide; differ = least difference of one phrase period from the last; tauA s = easing when the asked speed enters or leaves the slow band; pecTuck = share of the pectoral spread and stroke drawn in during the beats.",
+ "finLife": {
+  "deg": 7.0,
+  "raiseDeg": 2.5,
+  "hz": 1.7,
+  "lam": 0.9,
+  "periodCV": 0.13,
+  "sizeCV": 0.15,
+  "tauF": 3.0,
+  "tauS": 3.0,
+  "tailDeg": 4.0,
+  "tailHz": 0.9,
+  "tailLag": 0.25,
+  "spreadDeg": 1.5,
+  "pecPeriodCV": 0.1,
+  "pecSizeCV": 0.15,
+  "pelvicDeg": 3.0,
+  "tauP": 2.0,
+  "stillU": [
+   0.25,
+   1.2
+  ],
+  "burstU": [
+   1.6,
+   2.6
+  ]
+ },
+ "styles": {
+  "subcarangiform": {
+   "Ulab": 1.1,
+   "UlabBand": 0.35,
+   "pecHz0": 1.6,
+   "pecHzK": 1.0,
+   "pecSweep": 32,
+   "pecFlap": 0.35,
+   "pecLag": 55,
+   "pecFoldU": 1.8,
+   "pecFold": 30,
+   "pecSpread": 18,
+   "pecAlt": 0.5,
+   "ampU1": 1.0,
+   "ampMin": 0.45,
+   "bendK": 0.7,
+   "rMin": 0.25,
+   "yawRateMax": 240,
+   "yawRateHover": 60,
+   "tauYaw": 0.18,
+   "tauF": 0.15,
+   "tauU": 0.55,
+   "Umax": 3.0,
+   "fMin": 0.6,
+   "hoverDrift": 0.02,
+   "recoil": 0.5,
+   "fOffsetU": 1.0,
+   "skinStrain": 0.08,
+   "tempo": {
+    "cv": 0.1,
+    "T": 1.2,
+    "yawSD": 8,
+    "pauseRate": 0.03,
+    "pause": [
+     1,
+     3
+    ],
+    "burstRate": 0.06,
+    "burst": [
+     0.4,
+     1.0
+    ],
+    "burstK": 1.8
+   },
+   "surge": 0.06,
+   "windDeg": 10,
+   "windYaw": 60,
+   "phrase": {
+    "U": [
+     0.08,
+     0.2
+    ],
+    "beats": [
+     3,
+     3.5,
+     4,
+     5
+    ],
+    "glide": [
+     0.6,
+     1.6
+    ],
+    "fK": 0.8,
+    "ampK": 0.62,
+    "ampVar": [
+     0.8,
+     1.15
+    ],
+    "rise": 1.25,
+    "fall": 1.75,
+    "speedK": 0.045,
+    "speedDn": 0.08,
+    "differ": 0.07,
+    "tauA": 0.25,
+    "pecTuck": 0.2,
+    "fVar": [
+     0.85,
+     1.15
+    ],
+    "floor": 0.32,
+    "glideF": 0.55
+   },
+   "skill": 0.85
+  },
+  "anguilliform": {
+   "Ulab": 0,
+   "UlabBand": 0,
+   "pecHz0": 0.8,
+   "pecHzK": 0.4,
+   "pecSweep": 10,
+   "pecFlap": 0.3,
+   "pecLag": 40,
+   "pecFoldU": 1.0,
+   "pecFold": 10,
+   "pecSpread": 8,
+   "pecAlt": 0.5,
+   "ampU1": 0.6,
+   "ampMin": 0.35,
+   "bendK": 1.0,
+   "rMin": 0.35,
+   "yawRateMax": 150,
+   "yawRateHover": 20,
+   "tauYaw": 0.3,
+   "tauF": 0.2,
+   "tauU": 0.8,
+   "Umax": 2.4,
+   "fMin": 0.5,
+   "hoverDrift": 0.08,
+   "recoil": 0.5,
+   "fOffsetU": 1.0,
+   "idleHz": 0.6,
+   "skinStrain": 0.08,
+   "tempo": {
+    "cv": 0.09,
+    "T": 1.5,
+    "yawSD": 4,
+    "pauseRate": 0.1,
+    "pause": [
+     2,
+     5
+    ],
+    "burstRate": 0,
+    "burst": [
+     0.5,
+     1
+    ],
+    "burstK": 1.3
+   },
+   "surge": 0.04,
+   "windDeg": 4,
+   "skill": 0.8
+  },
+  "ostraciiform": {
+   "Ulab": 2.0,
+   "UlabBand": 0.4,
+   "pecHz0": 3.0,
+   "pecHzK": 1.5,
+   "pecSweep": 30,
+   "pecFlap": 0.5,
+   "pecLag": 60,
+   "pecFoldU": 99,
+   "pecFold": 0,
+   "pecSpread": 20,
+   "pecAlt": 0.5,
+   "ampU1": 2.0,
+   "ampMin": 0.0,
+   "bendK": 0.0,
+   "rMin": 0.0,
+   "yawRateMax": 120,
+   "yawRateHover": 120,
+   "tauYaw": 0.25,
+   "tauF": 0.15,
+   "tauU": 0.5,
+   "Umax": 3.0,
+   "fMin": 0.0,
+   "hoverDrift": 0.01,
+   "recoil": 0.5,
+   "fOffsetU": 1.0,
+   "skinStrain": 0.08,
+   "tempo": {
+    "cv": 0.18,
+    "T": 0.7,
+    "yawSD": 15,
+    "pauseRate": 0.14,
+    "pause": [
+     2,
+     6
+    ],
+    "burstRate": 0.01,
+    "burst": [
+     0.3,
+     0.6
+    ],
+    "burstK": 1.5
+   },
+   "surge": 0.03,
+   "windDeg": 0,
+   "windYaw": 120,
+   "finGait": {
+    "analU": [
+     0,
+     1
+    ],
+    "dorsalU": [
+     0.8,
+     1.5
+    ],
+    "deg": 25,
+    "lag": 0.4,
+    "rockDeg": 2.0,
+    "hoverHz": 1.2,
+    "hoverShare": 0.15
+   },
+   "skill": 0.4
+  },
+  "perch-hop": {
+   "base": "subcarangiform",
+   "Ulab": 0,
+   "UlabBand": 0,
+   "pecHz0": 1.2,
+   "pecSweep": 14,
+   "pecSpread": 28,
+   "pecFoldU": 0.8,
+   "pecFold": 32,
+   "perchFrac": 0.75,
+   "hopRest": [
+    1.5,
+    6.0
+   ],
+   "hopLift": 0.15,
+   "glide": 0.1,
+   "hopBL": 3.0,
+   "hopBurst": 0.2,
+   "hopTauU": 0.06,
+   "glideEnd": 0.2,
+   "brakeTau": 0.04,
+   "hopCal": 1.17,
+   "windDeg": 13,
+   "windYaw": 80,
+   "skill": 0.5
+  }
+ },
+ "byPlan": {
+  "snapper": "subcarangiform",
+  "goby": "perch-hop",
+  "eel": "anguilliform",
+  "cowfish": "ostraciiform"
+ },
+ "personality": {
+  "amp": [
+   0.88,
+   1.12
+  ],
+  "rate": [
+   0.9,
+   1.1
+  ],
+  "glide": [
+   0.8,
+   1.25
+  ],
+  "fins": [
+   0.8,
+   1.2
+  ]
+ },
+ "skillLaw": {
+  "_doc": "factor = 1 + number x d, d = style skill - fish skill (+ = poorer swimmer)",
+  "dMin": -0.3,
+  "dMax": 0.7,
+  "dip": 2.5,
+  "sharp": 1.2,
+  "amp": 0.8,
+  "recoil": 1.5,
+  "pecHz": 1.2,
+  "pecSweep": 0,
+  "pecSweepMax": 1,
+  "tuck": 1.0,
+  "rock": 1.5,
+  "fins": 0.6
+ }
+}

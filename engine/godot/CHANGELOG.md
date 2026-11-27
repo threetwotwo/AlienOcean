@@ -18,6 +18,23 @@
   AO_SDFGI_CELL, AO_SDFGI_BOUNCE, AO_SUN=0, AO_SKY_MODE, AO_GI_DEBUG. Occlusion and 0.1 m cells changed the shadow by <3 L*.
 - Mac M1 cost of SDFGI not measured yet (Mac runs paused).
 
+## 0.6.0-dev (28 Nov 2026): dressed-place cameras stand on the sand
+- World: DressCell.seat() now also finds the sand under each manifest camera (at and look) and cam() returns their heights over it;
+  `on_sand(v)` does the same for any key-frame point (the shot tool's hero fish). The key frame's heights (camera 1.05 m, look
+  0.58 m) were over ITS sand (z 0); on the drawn floor, 0.17 m under the place's anchor, the camera stood 1.22 m up and the near
+  corals sat ~7 % low in frame (Fable silhouette review r7c). Now table/brain tops within 2-3 % of the key frame. Test D5.
+
+## 0.6.0-dev (28 Nov 2026): lagoon dressing round 7, silhouettes first
+- Gary 27 Nov 18:42Z: silhouettes of all assets before detail. Measured against the key frame at its camera: the arch massif ran
+  18-86 % of the frame width with its top cut off (key frame 5-63 %, top 11 % down) and the second head merged into it. The arch
+  head is now turned 13 deg left about the camera and set back to 16 m, its yaw turned with it so the gate still faces the camera
+  (gate camera, key_arch look and the lanes moved with it); the second head is 14 m out at x1.3. Now massif 1-58 %, second head
+  72-87 % (key frame 73-88 %) with a clear gap. Manifest 0.6.0; dress_cell `with` takes a list.
+- The v18c head gets a sand skirt (`SB_Skirt_0_v18c`): the key frame rig's habitat.bank (0.12 m against the foot, arch_set.sh),
+  concave collision. Table coral saturation x1.2 (kf_family x1.7 read orange under the Godot light).
+- Fable silhouette review r7c: second head and finger coral MATCH; massif extents fit but it reads as one flat slab (form);
+  foreground corals sit ~7 % lower in frame than the key frame; hero fish form is the creature thread's.
+
 ## 0.6.0-dev (28 Nov 2026): the water's fill light can be occluded
 - Engine: seabed_surface and ground_surface no longer add the water's fill (sky from above, sand bounce from below, through
   the depth) as unoccluded emission. It now goes through Godot's ambient path, so SSAO, SSIL, the material AO and any GI

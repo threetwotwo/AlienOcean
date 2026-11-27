@@ -120,9 +120,12 @@ func _setup():
 				if m is BaseMaterial3D: m.vertex_color_use_as_albedo = false   # our fish COLOR_0 is data
 		var aps := fish.find_children("*", "AnimationPlayer", true, false)
 		if aps.size() > 0:
-			ap = aps[0]; var a = ap.get_animation_list()[0]; ap.get_animation(a).loop_mode = Animation.LOOP_LINEAR; ap.play(a)
+			ap = aps[0]; var a = ap.get_animation_list()[0]
+			for an in ap.get_animation_list():   # the maker's swim clip ("swim" after an editor import, "swim_loop" at runtime)
+				if an.begins_with("swim"): a = an
+			ap.get_animation(a).loop_mode = Animation.LOOP_LINEAR; ap.play(a)
 	if dress and fish:
-		fish.position = dress.to_world(dress.manifest.hero.at); fish.rotation.y = dress.anchor_xform.basis.get_euler().y + float(dress.manifest.hero.rot)
+		fish.position = dress.on_sand(dress.manifest.hero.at); fish.rotation.y = dress.anchor_xform.basis.get_euler().y + float(dress.manifest.hero.rot)
 	var fp := fish.position if fish else Vector3(1.2, 0.9, -9.6)
 	shots = [
 		["01_hero_3p", fp + Vector3(-0.55, 0.18, 0.5), fp, 50.0],

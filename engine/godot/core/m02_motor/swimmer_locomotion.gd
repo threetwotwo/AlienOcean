@@ -66,6 +66,7 @@ var shore_floor_normal := Vector3.UP
 var shore_vel_xz := Vector2.ZERO
 var shore_accel_xz := Vector2.ZERO
 var shore_desired_vel_xz := Vector2.ZERO
+var climb_scale := 1.0     # speed scale while climbing or descending (stairs, steep ramps)
 var shore_jump_offset := 0.0
 var shore_air_lag := 0.0
 var shore_jump_vel_y := 0.0
@@ -239,6 +240,20 @@ func _update_shore(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, 
 	var depth_speed_scale: float = lerpf(1.0, c.wade_min_speed_scale, smoothstep01(0.06, 0.98, water_depth))
 	var base_spd: float = (c.crouch_speed if want_crouch else (c.jog_speed if in_boost else c.walk_speed)) * depth_speed_scale
 	var target_spd := base_spd * clampf(ml, 0.0, 1.0) if ml > 0.05 else 0.0
+	if not c.thalassa_exact and not shore_is_airborne and target_spd > 0.05:
+		# FIX (body stress B37 stairs): legs climb at a limited rate. Thalassa walked a flight at flat-ground speed
+		# (1.38 m/s up 0.17/0.28 stairs = 0.84 m/s of climb), more than two treads per step; a 1.38 m child climbs
+		# about 0.40 m/s walking and 0.70 m/s running (stair-gait studies: ~0.5 m/s cadence-limited for adults).
+		# The grade is the floor rise over the 0.6 m ahead along her heading, up or down.
+		var fy0 := _floor_y(env, pos.x - m.x * 0.1, pos.z - m.y * 0.1)
+		var fy1 := _floor_y(env, pos.x + m.x * 0.5, pos.z + m.y * 0.5)
+		var grade := absf(fy1 - fy0) / 0.6 if (is_finite(fy0) and is_finite(fy1) and absf(fy1 - fy0) < 0.6) else 0.0
+		var vmax: float = lerpf(c.get("climb_rate_walk", 0.40), c.get("climb_rate_run", 0.70), clampf((base_spd - c.walk_speed) / maxf(0.01, c.jog_speed - c.walk_speed), 0.0, 1.0))
+		var want_k := minf(1.0, vmax / maxf(1e-3, target_spd * grade))
+		climb_scale = lerpf(climb_scale, want_k, exp_k(4.0 if want_k < climb_scale else 2.5, sdt))
+		target_spd *= climb_scale
+	else:
+		climb_scale = lerpf(climb_scale, 1.0, exp_k(2.5, sdt))
 	var des := m * target_spd
 	shore_desired_vel_xz = des
 	var prev_v := shore_vel_xz
