@@ -2,7 +2,7 @@
 ## Kinds: ramp {angle}, step {h}, shore {waves}, pool {waves, current}, cave {s}, wall, overhang.
 extends RefCounted
 
-const Env := preload("res://core/m23_harness/test_env.gd")
+const Env := preload("res://tests/harness/test_env.gd")
 
 ## Pictures: when a material is set here, every box also gets a visible mesh (tools/motion_film.gd sets it).
 static var visual_material: Material = null
