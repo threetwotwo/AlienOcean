@@ -1,4 +1,4 @@
-// Ground surface 0.1.0 (engine thread): the shared world material M_Ground_Blend (WorldSurface.ush GroundBlend, Textures thread,
+// Ground surface 0.2.0 (engine thread): the shared world material M_Ground_Blend (WorldSurface.ush GroundBlend, Textures thread,
 // generated into look/world_surface.gdshaderinc by tools/ws_to_godot.py), lit through the ported lagoon water like the seabed.
 // Locked art bible v1.6 colours come in as uniforms (look/world_textures.gd), tiles colour-free as in Unreal.
 // Frame: the library works in the island frame (x east, y north, z up, metres); Godot (x, y, z) -> island (x, -z, y).
@@ -6,6 +6,7 @@ shader_type spatial;
 render_mode blend_mix, cull_back, diffuse_lambert, specular_disabled, ambient_light_disabled;
 #include "res://look/world_surface.gdshaderinc"
 #include "res://look/water_physics.gdshaderinc"
+#include "res://look/caustics.gdshaderinc"
 global uniform float water_zref;
 
 uniform sampler2D rBC : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
@@ -31,21 +32,10 @@ uniform vec3 cSand; uniform vec3 cSandD; uniform vec3 cRock; uniform vec3 cCrev;
 uniform vec3 cRubA; uniform vec3 cRubB; uniform vec3 cRubMid;
 uniform vec3 mRock = vec3(0.5); uniform vec3 mTurf = vec3(0.5); uniform vec3 mCrust = vec3(0.5); uniform vec3 mGrain = vec3(0.5);
 uniform float share = 1.0;           // sand share where the mesh carries none (lagoon floor: all sand)
-uniform float caustic_strength : hint_range(0.0, 2.0) = 1.0;
-uniform float caustic_scale = 0.55;
-uniform float caustic_speed = 0.35;
+uniform float caustic_strength : hint_range(0.0, 3.0) = 1.0;   // Unreal's NetK: x the saved net strength (1 = the Unreal picture)
 varying vec3 wpos;
 varying vec3 wnorm;
 
-vec2 chash(vec2 p) { p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3))); return fract(sin(p) * 43758.5453); }
-float ccells(vec2 p, float t) {
-	vec2 i = floor(p), f = fract(p); float d = 8.0;
-	for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
-		vec2 g = vec2(float(x), float(y)); vec2 o = chash(i + g); o = 0.5 + 0.5 * sin(t + 6.2831 * o);
-		d = min(d, length(g + o - f));
-	}
-	return d;
-}
 void vertex() {
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	wnorm = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
@@ -79,11 +69,8 @@ void fragment() {
 void light() {
 	float z = max(water_y - wpos.y, 0.0);
 	vec3 corr = exp(-water_kd * (z - water_zref));
-	vec3 L = water_sun_w;
-	vec2 p = (wpos.xz + z * L.xz / max(L.y, 0.2)) * caustic_scale;
-	float t = TIME * caustic_speed;
-	float c = min(ccells(p, t), ccells(p * 1.37 + 3.1, -t * 1.13));
-	c = pow(1.0 - smoothstep(0.0, 0.55, c), 3.0);
-	float caus = mix(1.0, 0.55 + 2.6 * c, caustic_strength);
+	// the light net (look/caustics.gdshaderinc, Unreal lagoonwater v98): on the sun's beam only, by depth and the refracted sun
+	float px = length(wpos - INV_VIEW_MATRIX[3].xyz) * 2.0 / (abs(PROJECTION_MATRIX[1][1]) * VIEWPORT_SIZE.y);
+	float caus = caustic_sun(wpos, water_y - wpos.y, water_sun_w, px, TIME, caustic_strength);
 	DIFFUSE_LIGHT += clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * ATTENUATION * LIGHT_COLOR / PI * corr * caus;
 }
