@@ -53,6 +53,9 @@ func _setup():
 		if "floor" in f.to_lower():
 			if ground == null and OS.get_environment("AO_WORLDTEX") != "":
 				ground = WorldTextures.make_material(OS.get_environment("AO_WORLDTEX"))   # the shared world material (sand ripples, grains)
+				if ground and OS.get_environment("AO_SAND") != "":   # look check: another sand colour pair (hex,hex), e.g. the key frame's e3cca2,f0e1c0
+					var sp := OS.get_environment("AO_SAND").split(",")
+					ground.set_shader_parameter("cSandD", WorldTextures.lin(sp[0])); ground.set_shader_parameter("cSand", WorldTextures.lin(sp[1]))
 			if ground: mat = ground
 			else:
 				mat = seabed.duplicate(); mat.set_shader_parameter("sand_lock", 1.0)
@@ -78,6 +81,7 @@ func _setup():
 	if OS.get_environment("AO_SDFGI_CELL") != "": wr.env.sdfgi_min_cell_size = float(OS.get_environment("AO_SDFGI_CELL"))
 	if OS.get_environment("AO_SDFGI_BOUNCE") != "": wr.env.sdfgi_bounce_feedback = float(OS.get_environment("AO_SDFGI_BOUNCE"))
 	if OS.get_environment("AO_SKY_FILL") != "": wr.sky_fill_k = float(OS.get_environment("AO_SKY_FILL"))   # art lever: sky light entering the water
+	if OS.get_environment("AO_UNDER_WHITE") != "": var uw := OS.get_environment("AO_UNDER_WHITE").split(","); wr.under_white = Vector3(float(uw[0]), float(uw[1]), float(uw[2]))
 	if OS.get_environment("AO_GI_K") != "": wr.gi_k = float(OS.get_environment("AO_GI_K"))   # art lever: GI strength
 	if OS.get_environment("AO_SUN") == "0": wr.light.light_energy = 0.0   # GI checks: the fill and bounce alone
 	if OS.get_environment("AO_GI_DEBUG") != "": root.debug_draw = int(OS.get_environment("AO_GI_DEBUG"))   # e.g. 16 SDFGI, 17 SDFGI probes

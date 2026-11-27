@@ -42,6 +42,7 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 @export var sky_fill_k := 0.6              # art lever: share of the sky's light that enters the water (1 = physical: 11 % of the light on the
                                            # 4 m sand at noon). The key frame (Blender, 28 Nov passes) has 7 %: 0.6 here. Feeds the fill, the GI's
                                            # water light field and the haze alike.
+@export var under_white := Vector3.ZERO      # look check: the under-water camera balance (zero = the place's UNDER_WHITE)
 @export var gi_k := 1.0                    # art lever: GI strength (SDFGI energy). 1 = physical (the water's fill + the sand's real bounce)
 @export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
 @export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
@@ -241,7 +242,8 @@ func apply(cam_y: float) -> Dictionary:
 		agx_fx.moon_b = _moon_view(st.B.dir, SkyClock.MOONS[1].drawn_deg)
 		var kw := clampf((water_y - cam_y) / UNDER_WHITE_FADE_M, 0.0, 1.0)
 		var dg: Vector3 = depth_gain(water_y - cam_y, depth_colour_share) if depth_colour else Vector3.ONE
-		agx_fx.depth_gain = dg * Vector3.ONE.lerp(UNDER_WHITE.get(place, Vector3.ONE), kw)
+		var uw: Vector3 = under_white if under_white != Vector3.ZERO else UNDER_WHITE.get(place, Vector3.ONE)
+		agx_fx.depth_gain = dg * Vector3.ONE.lerp(uw, kw)
 	var a := WaterOptics.absorb(cdom); var b := WaterOptics.scatter(scat_k)
 	if under:
 		var tr := WaterOptics.refract_sun(up_air)
