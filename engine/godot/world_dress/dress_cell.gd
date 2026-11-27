@@ -17,6 +17,9 @@ var items: Array = []        # [{node, body, item, aabb}]
 var cache := {}              # piece -> generated scene (template)
 var stats := {"items": 0, "tris": 0, "hulls": 0, "concave": 0, "soft": 0, "missing": []}
 var _seabed: ShaderMaterial
+var _space: PhysicsDirectSpaceState3D = null
+var _excl: Array = []
+var _cam_ground := {}        # cam name -> [sand y under at, sand y under look] (seat() fills it)
 
 static func load_manifest(path: String) -> Dictionary:
 	var f := FileAccess.open(path, FileAccess.READ)
@@ -138,7 +141,31 @@ func seat(space: PhysicsDirectSpaceState3D, sink := 0.015) -> Dictionary:
 		var gy: float = hit.position.y
 		var dy := (gy - sink - bb.position.y) if keep else (gy + float(e.item.at[2]) - h.global_position.y)
 		h.global_position.y += dy; rep.seated += 1; rep.dy.append(snappedf(dy, 0.001))
+	# cameras stand on the sand like the items: the key frame's heights (cam 1.05 m, look 0.58 m) are over ITS sand (z 0). r7: on the
+	# drawn floor (0.17 m under the anchor here) an anchor-relative camera stood 1.22 m up, so the near corals sat ~7 % low in frame.
+	var excl2 := []
+	for x in items: excl2.append(x.node.get_node("Body").get_rid())
+	for cn in manifest.get("cams", {}):
+		var g := []
+		for key in ["at", "look"]:
+			var w := to_world(manifest.cams[cn][key])
+			var q2 := PhysicsRayQueryParameters3D.create(Vector3(w.x, 20.0, w.z), Vector3(w.x, -20.0, w.z))
+			q2.exclude = excl2; q2.collide_with_areas = false
+			var hit2 := space.intersect_ray(q2)
+			g.append(0.0 if hit2.is_empty() else float(hit2.position.y) - anchor_xform.origin.y)
+		_cam_ground[cn] = g
+	rep["cam_ground"] = _cam_ground
+	_space = space; _excl = excl2
 	return rep
+
+## A key-frame point (x, y, z over the sand) in the world, its height over the drawn sand under it (after seat()).
+func on_sand(v: Array) -> Vector3:
+	var w := to_world(v)
+	if _space == null: return w
+	var q := PhysicsRayQueryParameters3D.create(Vector3(w.x, 20.0, w.z), Vector3(w.x, -20.0, w.z))
+	q.exclude = _excl; q.collide_with_areas = false
+	var hit := _space.intersect_ray(q)
+	return w if hit.is_empty() else w + Vector3.UP * (float(hit.position.y) - anchor_xform.origin.y)
 
 ## No item may stand in a keep-clear volume (the school's space). Checked against the real collision (hulls), not boxes: an arch's
 ## box covers its own gate. Returns the intruders.
@@ -157,4 +184,5 @@ func keep_clear_report(space: PhysicsDirectSpaceState3D) -> Array:
 
 func cam(name_: String) -> Array:
 	var c: Dictionary = manifest.cams[name_]
-	return [to_world(c.at), to_world(c.look), float(c.vfov)]
+	var g: Array = _cam_ground.get(name_, [0.0, 0.0])   # heights over the sand once seat() has run
+	return [to_world(c.at) + Vector3.UP * g[0], to_world(c.look) + Vector3.UP * g[1], float(c.vfov)]

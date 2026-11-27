@@ -1,5 +1,11 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): dressed-place cameras stand on the sand
+- World: DressCell.seat() now also finds the sand under each manifest camera (at and look) and cam() returns their heights over it;
+  `on_sand(v)` does the same for any key-frame point (the shot tool's hero fish). The key frame's heights (camera 1.05 m, look
+  0.58 m) were over ITS sand (z 0); on the drawn floor, 0.17 m under the place's anchor, the camera stood 1.22 m up and the near
+  corals sat ~7 % low in frame (Fable silhouette review r7c). Now table/brain tops within 2-3 % of the key frame. Test D5.
+
 ## 0.6.0-dev (28 Nov 2026): lagoon dressing round 7, silhouettes first
 - Gary 27 Nov 18:42Z: silhouettes of all assets before detail. Measured against the key frame at its camera: the arch massif ran
   18-86 % of the frame width with its top cut off (key frame 5-63 %, top 11 % down) and the second head merged into it. The arch
