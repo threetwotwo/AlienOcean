@@ -11,7 +11,11 @@
 ## key_fade), EV100 slides with the light (noon cap 15.5), under water the steady eye sits 0.75 stop below the cap,
 ## each place has its compensation (calm lagoon +1.2). Under water the key light points along the refracted sun and
 ## is pre-attenuated to z_ref; water-aware shaders correct for their own depth.
-## Godot axes: SkyClock is z-up (x, y, z); Godot is y-up: (x, z, -y).
+## God rays (look/god_rays.gdshaderinc, lagoonwater v98's, drawn by the underwater view): .god_rays false = off.
+## Godot axes: SkyClock works in Unreal's world axes (z up, left-handed); Godot is y up, right-handed. Unreal (x, y, z)
+## is Godot (x, z, y): a swap, so a mirror, as Unreal's own glTF import does. The world pieces fix it: the lagoon GLBs
+## (island/tools/slice_common.py write_glb) sit in Unreal at (g.x, g.z, g.y) x 100 cm (lagoon slice check P4, bounding
+## boxes). The island frame (x east, y north, z up, right-handed) is a different one: island (x, y, z) = Godot (x, z, -y).
 class_name WorldRoot
 extends Node3D
 
@@ -33,6 +37,11 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 @export var under_exposure_art := 1.0     # Gary picked "Brighter" 27 Nov 17:06Z
 @export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
 @export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
+## The god rays under the water (Unreal GodK): the light net's map summed along each view ray. false = off (checks).
+@export var god_rays := true:
+	set(v):
+		god_rays = v
+		if under_mat: under_mat.set_shader_parameter("god_k", 1.0 if v else 0.0)
 @export var depth_colour_share := DEPTH_WB   # art direction lever (27 Nov: Gary 'art direction trumps'); Unreal 0.25
 const DEPTH_WB := 0.25                # the share given back
 const DEPTH_WB_PATH := 1.2            # m of water per m of depth (sky light)
@@ -65,6 +74,7 @@ var key := ""
 var last := {}
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
+var under_mat: ShaderMaterial       # the underwater view quad's material (attach_camera)
 var caustics: CausticsMap           # the light net's map, drawn once a frame (adapters/godot/caustics_map.gd)
 var _dome_g := 0.0
 
@@ -96,7 +106,9 @@ static func _dawn_dim(total: float, noon_total: float, nw: float) -> float:
 	return minf(minf(O, maxf(K, fl)) - O, 0.0)
 
 static func to_godot(v: Vector3) -> Vector3:
-	return Vector3(v.x, v.z, -v.y)
+	## an Unreal world direction (the clock's) in Godot's axes. Not (x, z, -y): that is the island frame's map, and it
+	## showed the sky mirrored along Unreal's Y against the reefs (at noon_yaw 0 the sun set on the rising side).
+	return Vector3(v.x, v.z, v.y)
 
 static func ev100(lux: float) -> float:
 	return log(maxf(0.18 * lux / PI * 100.0 / 12.5, 1e-12)) / log(2.0)
@@ -143,11 +155,20 @@ func attach_camera(cam: Camera3D) -> void:
 	var q := MeshInstance3D.new(); q.name = "UnderwaterView"
 	var qm := QuadMesh.new(); qm.size = Vector2(2, 2); q.mesh = qm
 	var qmat := ShaderMaterial.new(); qmat.shader = load("res://look/underwater_view.gdshader"); q.material_override = qmat
+	under_mat = qmat; qmat.set_shader_parameter("god_k", 1.0 if god_rays else 0.0)
 	q.extra_cull_margin = 16384.0; q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; cam.add_child(q)
 
+func _process(_dt: float) -> void:
+	## the god rays' start point moves on each frame only where TAA averages it (Unreal: StateFrameIndexMod8 under TSR);
+	## without TAA it holds still, or the shafts would boil.
+	if under_mat == null: return
+	var vp := get_viewport()
+	under_mat.set_shader_parameter("god_frame", float(Engine.get_frames_drawn() % 8) if vp and vp.use_taa else 0.0)
+
 func set_fov(fov_deg: float) -> void:
-	## CameraAttributesPhysical owns the field of view (18 mm half sensor height)
-	cam_attr.frustum_focal_length = 18.0 / tan(deg_to_rad(fov_deg) * 0.5)
+	## CameraAttributesPhysical owns the field of view: Godot takes the vertical FOV from a 24 mm sensor height (12 mm
+	## half), so the focal length for a vertical fov is 12 / tan(fov / 2). (Was 18: every shot was ~1.5x zoomed in.)
+	cam_attr.frustum_focal_length = 12.0 / tan(deg_to_rad(fov_deg) * 0.5)
 
 func make_surface(size_m := 160.0) -> MeshInstance3D:
 	## the drawn water surface overhead (look/water_surface.gdshader), at the water's level
@@ -367,7 +388,9 @@ func _push_sky(st: Dictionary) -> void:
 	if mat.get_shader_parameter("star_cat") == null:
 		mat.set_shader_parameter("star_cat", StarCatalogue.texture())
 	var north: Vector3 = st.frame[1]                       # the sky turns about the planet's axis once a day (z-up, as the clock)
-	var turn: float = deg_to_rad(fmod(rad_to_deg(TAU * (float(st.days) - 0.5)), 360.0))
+	# Gary 27 Nov 17:44Z: the stars turn WITH the sun (Unreal turned the actor by +2 pi (days - 0.5), against the sun,
+	# though its comment said "with the sun"); the midnight sky is the same either way, only the motion's sense changes
+	var turn: float = -deg_to_rad(fmod(rad_to_deg(TAU * (float(st.days) - 0.5)), 360.0))
 	mat.set_shader_parameter("star_spin", Vector4(north.x, north.y, north.z, turn))
 	var glow: float = st.eclipse.glow
 	mat.set_shader_parameter("stars_on", 1.0 if (float(st.total) < 50.0 or glow > 0.0) else 0.0)   # STARS_BELOW_LUX
