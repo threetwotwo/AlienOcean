@@ -137,3 +137,26 @@ def test_bake_keeps_interior_and_linings_off_the_skin_maps(tmp_path):
     assert good['P6_pass'], good
     bad = bake(dict(CREATURE_PLANT_BAKE_FAULT='interior_on_skin'))
     assert not bad['P6_pass'] and bad['P6_backward_texels'] > 20 * max(good['P6_backward_texels'], 1), bad
+
+
+def test_ventral_vs_from_the_record():
+    """the lower-jaw V and the gill V are form plates, the slit has a ventral leg, and the hole loop matches the slit loop."""
+    from creature_maker.record import adapt
+    from creature_maker.form import Form
+    from creature_maker.chart import Chart
+    from creature_maker.cage import build_cage
+    rec = adapt(REC); form = Form(rec)
+    assert {'jaw.dentary', 'jaw.mandibleLow'} <= set(rec['defaults_used'])          # the proof record has no jaw bones: listed
+    assert [p[0] for p in form.VPLATES] == ['mandible', 'branchiostegal'] and form.vedge['za'] < form.vedge['zc']
+    e = form.vedge; xm = 0.5 * (e['xa'] + e['xc']); zm = float(form.vedge_z(xm)); y = float(form.BOT(xm)) + 0.004
+    d_in, d_out = (float(form.sd_full(np.array([[xm, y, z]]))[0] - form.sd_body(np.array([[xm, y, z]]))[0]) for z in (zm - 0.004, zm + 0.004))
+    assert d_out < d_in - 1e-4                                                      # the membrane stands proud outside the V edge only
+    # the proof record's slit is 14 columns long, so the 17-edge cap leaves no leg that reaches the cavity slot; a cover
+    # with a lower top (as most records have) gets the leg
+    assert build_cage(form, Chart(form), rec).gill.info['ia'] is None
+    rec['cover']['rear'] = rec['cover']['rear'][len(rec['cover']['rear']) // 2:]; form = Form(rec)
+    B = build_cage(form, Chart(form), rec); g = B.gill.info
+    assert g['ia'] is not None and g['ne'] == g['nj'] + g['i'] - g['ia'] <= 17
+    for s in B.gill.slits:
+        assert len(s['loop']) == len(s['hole']) == 2 * g['ne']
+        assert abs(B.V[s['loop'][g['ne']]][2]) < abs(B.V[s['loop'][g['nj']]][2])    # the leg runs in toward the midline

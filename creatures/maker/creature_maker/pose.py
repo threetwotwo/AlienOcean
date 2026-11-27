@@ -2,8 +2,8 @@
 cheeks, eye socket, gill cover, throat floor, cavity) never cross or poke through each other.
 
 Weights come from the cage's own structure, not from paint: the jaw is one field in the side view round the rictus and
-the jaw joint (jaw_weights); the gill flap and the cover skin behind the opercle hinge follow the cover. Pivots: record
-jaw joint and opercle hinge (or DEFAULT).
+the jaw joint (jaw_weights); the gill flap and the cover skin behind the opercle hinge follow the cover, and with a gill V
+so does the membrane under the head. Pivots: record jaw joint and opercle hinge (or DEFAULT).
 The same weights become the jaw and opercle bones in the export.
 """
 import math
@@ -82,6 +82,11 @@ def cover_weights(C, V, rec):
     hwt = np.array(rec['outline']['hw']); hw = np.interp(x, hwt[:, 0], hwt[:, 1])
     # the two covers swing apart: weight fades out toward the ventral and dorsal midline, where left meets right
     w = inside * smooth((x - xp(y) + 0.01) / 0.02) * smooth((np.abs(V[:, 2]) - 0.25 * hw) / (0.35 * hw))
+    gv = O.get('gill_v'); memb = np.zeros(len(V), bool)
+    if gv:      # the branchiostegal membrane opens with the cover: the skin outside the V edge, under the opercle's lower side
+        ex, ez = zip(*gv['edge'])
+        memb = (x > ex[0]) & (x < ex[-1] + 1e-4) & (y < np.interp(x, *zip(*gv['under']))) & (np.abs(V[:, 2]) > np.interp(x, ex, ez))
+        w = np.maximum(w, memb * 1.0)
     flaps = set(v for s in O['gill_flaps'] for v in s)
     skin = set(v for f, t in zip(C['faces'], C['ftag']) if t in ('body',) for v in f)
     w = np.where([v in skin or v in flaps for v in range(len(V))], w, 0.0)
@@ -98,7 +103,7 @@ def cover_weights(C, V, rec):
     inner = set(v for f, t in zip(C['faces'], C['ftag']) if t in ('cavity', 'mouth') for v in f)
     lip = set(v for rows in O.get('gill_rows', []) for v in rows[0] + rows[-1]) - flaps
     for v in eye | inner: w[v] = 0.0
-    mid = set(np.where(np.abs(V[:, 2]) < 0.25 * hw)[0].tolist()) - flaps    # left and right swing apart: the midline holds
+    mid = set(np.where((np.abs(V[:, 2]) < 0.25 * hw) & ~memb)[0].tolist()) - flaps    # left and right swing apart: the midline holds
     w[list(mid)] = 0.0
     return soften(C, w, flaps | lip | eye | inner | mid)              # flap, body lip, cavity hole, eye, mouth, midline stay put
 
@@ -110,14 +115,24 @@ def gape(V, w, joint, deg):
     return V + w[:, None] * (R - V)
 
 
-def flare(V, w, hinge, deg, zh):
-    """each cover swings outward about a vertical axis through the opercle hinge (x, z on the skin at the hinge)."""
-    a = math.radians(deg); hx = hinge[0]; P = V.copy()
+def flare(V, w, hinge, deg, zh, apex=None):
+    """each cover swings outward about a vertical axis through the opercle hinge (x, z on the skin at the hinge). With a
+    gill V the part below the hinge swings about the line from the hinge down to the V's apex on the isthmus, so the cover
+    and its membrane open as one fan that stays closed at the throat."""
+    a = math.radians(deg); P = V.copy()
     for sg in (1, -1):
-        m = V[:, 2] * sg > 0; dx = V[m, 0] - hx; dz = V[m, 2] - sg * zh
-        c, s = math.cos(a), math.sin(a) * sg
-        P[m, 0] = hx + c * dx - s * dz; P[m, 2] = sg * zh + s * dx + c * dz
+        m = V[:, 2] * sg > 0; H = np.array([hinge[0], hinge[1], sg * zh]); d = V[m] - H; c, s = math.cos(a), -math.sin(a) * sg
+        rot = lambda u: H + d * c + np.cross(u, d) * s + np.outer(d @ u, u) * (1 - c)
+        P[m] = rot(np.array([0.0, 1.0, 0.0]))
+        if apex is not None:
+            u = H - np.array([apex[0], apex[1], sg * abs(apex[2])]); k = smooth(-d[:, 1] / (0.5 * u[1] + 1e-9))[:, None]
+            P[m] = (1 - k) * P[m] + k * rot(u / np.linalg.norm(u))
+            P[m, 2] = sg * np.maximum(sg * P[m, 2], sg * V[m, 2])      # a cover swings out, never in across the throat
     return V + w[:, None] * (P - V)
+
+
+def flare_apex(C):
+    return (C['openings'].get('gill_v') or {}).get('apex')
 
 
 # ---- triangle-triangle intersection (vectorised edge-through-triangle test on grid-hashed candidates)
@@ -183,7 +198,7 @@ def stress(C, V, rec, gape_steps=None, flare_steps=(0, 10, 20), jaw_w=None):
         out['gape'][deg] = dict(new_crossings=new_pairs(P), flipped=int((((normals(P) * N0).sum(1) < 0) & free).sum()),
                                 eye_rim_drift_pctSL=round(float(np.abs(P[rims] - V[rims]).max()) * 100, 3) if rims else 0.0)
     for deg in flare_steps:
-        P = flare(V, wc, C['openings']['opercle_hinge'], deg, zh)
+        P = flare(V, wc, C['openings']['opercle_hinge'], deg, zh, flare_apex(C))
         out['flare'][deg] = dict(new_crossings=new_pairs(P), flipped=int((((normals(P) * N0).sum(1) < 0) & free).sum()))
     out['GP1_pass'] = all(s['new_crossings'] <= 0 and s['flipped'] == 0 and s['eye_rim_drift_pctSL'] < 0.05 for s in out['gape'].values())
     out['GF1_pass'] = all(s['new_crossings'] <= 0 and s['flipped'] == 0 for s in out['flare'].values())
@@ -271,12 +286,12 @@ def posers(C, V, rec, jaw_w=None):
     def pose(name, a):
         r = np.radians(a)
         if name == 'gape': return gape(V, wj, O['jaw_joint'], a)
-        if name == 'flare': return flare(V, wc, O['opercle_hinge'], a, zh)
+        if name == 'flare': return flare(V, wc, O['opercle_hinge'], a, zh, flare_apex(C))
         if name == 'bend': return body_pose(V, x0, xend, lambda u: r * u, 'z')
         if name == 'wave': return body_pose(V, x0, xend, lambda u: r * np.sin(2 * np.pi * u), 'z')
         if name == 'arch': return body_pose(V, x0, xend, lambda u: r * u, 'y', yc)
         f = a / 100.0                                                # combo: every pose at once, a fraction of its target
-        P = gape(V, wj, O['jaw_joint'], f * (TG['gape'] or 0)); P = flare(P, wc, O['opercle_hinge'], f * (TG['flare'] or 0), zh)
+        P = gape(V, wj, O['jaw_joint'], f * (TG['gape'] or 0)); P = flare(P, wc, O['opercle_hinge'], f * (TG['flare'] or 0), zh, flare_apex(C))
         rw = np.radians(f * (TG['wave'] or 0))
         return body_pose(P, x0, xend, lambda u: rw * np.sin(2 * np.pi * u), 'z')
     return pose, TG
