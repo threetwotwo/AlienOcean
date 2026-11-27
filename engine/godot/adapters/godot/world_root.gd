@@ -19,6 +19,7 @@ class_name WorldRoot
 extends Node3D
 
 @export var hours := 12.0
+@export var tide_on := true          # the sea level follows the tide (false pins it at the mean, for reference shots)
 @export var place := "calm_lagoon"
 @export var noon_yaw := 0.0
 @export var floor_y := 0.0            # the lagoon's sand (floor tiles sit at y -0.3..0.1 under a 4 m surface)
@@ -148,22 +149,20 @@ func attach_camera(cam: Camera3D) -> void:
 	var q := MeshInstance3D.new(); q.name = "UnderwaterView"
 	var qm := QuadMesh.new(); qm.size = Vector2(2, 2); q.mesh = qm
 	var qmat := ShaderMaterial.new(); qmat.shader = load("res://look/underwater_view.gdshader"); q.material_override = qmat
-	q.extra_cull_margin = 16384.0; q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; cam.add_child(q)
+	q.extra_cull_margin = 16384.0; q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; q.layers = 1 << 3   # layer 4: the eye's own quads (the sea floor map's captures skip it)
+	cam.add_child(q)
 
 func set_fov(fov_deg: float) -> void:
 	## CameraAttributesPhysical owns the field of view (18 mm half sensor height)
 	cam_attr.frustum_focal_length = 18.0 / tan(deg_to_rad(fov_deg) * 0.5)
 
-func make_surface(size_m := 160.0) -> MeshInstance3D:
-	## the drawn water surface overhead (look/water_surface.gdshader), at the water's level
-	var surf := MeshInstance3D.new(); surf.name = "WaterSurface"
-	var pm := PlaneMesh.new(); pm.size = Vector2(size_m, size_m); surf.mesh = pm
-	surf.position.y = water.level
-	var wm := ShaderMaterial.new(); wm.shader = load("res://look/water_surface.gdshader"); surf.material_override = wm
-	surf.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	return surf
+func make_surface(_size_m := 160.0) -> Node3D:
+	## the drawn sea (adapters/godot/sea_surface.gd, water surface thread): the Unreal lagoon's FFT sea on camera-centred
+	## rings, seen from above and below. Its level is water_y (the tide); nothing to place or stream.
+	return SeaSurface.new()
 
 func apply(cam_y: float) -> Dictionary:
+	if tide_on: water.set_clock(hours)   # the sea level follows the two moons (core/world/tide.gd)
 	var water_y := water.level
 	var st := SkyClock.sky_state(hours, noon_yaw)
 	state = st
@@ -198,6 +197,12 @@ func apply(cam_y: float) -> Dictionary:
 	exposure = pow(2.0, bias) / (1.2 * pow(2.0, ev))  # buffer units per nit (Godot's normalisation)
 	_push_water(water_y, up_air, beam_h, st.skylux)
 	_push_sky(st)
+	# the sea surface's sky and sun (look/sky_dome.gdshaderinc, look/sea_*.gdshader): the dome the sky draws, the key body
+	var rsw := RenderingServer
+	rsw.global_shader_parameter_set("water_dome_sun", sky_mat.get_shader_parameter("dome_sun"))
+	rsw.global_shader_parameter_set("water_sky_norm", sky_mat.get_shader_parameter("sky_norm"))
+	rsw.global_shader_parameter_set("water_sun_air", up_air)
+	rsw.global_shader_parameter_set("water_sun_lux", beam_h / maxf(up_air.y, 0.02) if up_air.y > 0.0 else 0.0)
 	if agx_fx.enabled:
 		agx_fx.exposure = exposure; agx_fx.buf_scale = exposure   # Godot's buffer arrives already exposed (measured 27 Nov)
 		agx_fx.white_now = SkyClock.white_now(st)
@@ -263,7 +268,9 @@ static func declare_globals() -> void:
 		"water_sand": [RenderingServer.GLOBAL_VAR_TYPE_COLOR, Color.WHITE],
 		# the light net (look/caustics.gdshaderinc): its map, and x 1 = read the map / 0 = per pixel, y the net's time (-1 = TIME)
 		"water_caus_map": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()],
-		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)]}
+		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)],
+		# the sea surface (water surface thread): the sky dome's shape sun and scale, the key body in air and its beam lux
+		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)
