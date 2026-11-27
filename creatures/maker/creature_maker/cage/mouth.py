@@ -11,7 +11,7 @@ from ..mesh import relax_rings
 from . import eye as eye_mod
 
 GAP, TLIP = 0.0025, 0.003          # closed-lip gap and lip thickness (SL)
-EYE_MG_K, LIP_MG = 0.6, 0.008      # shared head ring: margin in front of the eye rim (x eye radius), behind the lip (SL)
+LIP_MG = 0.008                     # shared head ring: margin behind the lip (SL); the eye margin is eye.margin
 NC, ND = 7, 3                      # cavity rings, dome rings
 
 
@@ -96,21 +96,25 @@ def plan(B):
     M.LIP3, M.LIPX, M.LIPT, M.LIPF = np.array(LIP3), LIPX, LIPT, LIPF
     # shared head ring (rule): ring iK is both the outer mouth loop and, where the eye is near, the eye patch's front side.
     # In fish the eye often starts in front of the rictus (alfonsino, trevally), so a straight ring would cut through the
-    # eye. Per column the ring is pulled forward to keep EYE_MG in front of the eye rim (measured on the unrolled chart) and
-    # held back LIP_MG behind the lip on the same column, so the mouth loops keep room. Lips win if both cannot hold.
+    # eye. Per column the ring is pulled forward to where the column first comes within the eye margin of the rim, and held
+    # back LIP_MG behind the lip on the same column, so the mouth loops keep room. The distance is taken on the skin along
+    # the column itself: comparing chart arcs taken at two different x missed columns that graze the eye, and the ring
+    # then cut across it (grouper). If both margins cannot hold they shrink in proportion; the ring never enters the eye
+    # (letting the lips win put it inside the rim on a snout-tip eye, blenny).
     XK = np.full(NT, XS[iK]); short = []
-    for sg in (1, -1):
-        rimc = eye_mod.rim_chart(B, sg); m = float(np.clip(EYE_MG_K * form.er, 0.003, 0.02))
-        for j in (range(0, NT // 2 + 1) if sg > 0 else range(NT // 2, NT + 1)):
-            jj = j % NT; a = chart.arc_of(np.array([XS[iK]]), TH[[jj]])[0]
-            d2 = m ** 2 - (a - rimc[:, 1]) ** 2
-            if not (d2 > 0).any(): continue
-            Llim = float(np.min(rimc[d2 > 0, 0] - np.sqrt(d2[d2 > 0])))
-            lens = chart.len_of(XS, np.full(XS.shape, TH[jj])); xl = float(np.interp(Llim, lens, XS))
-            xlip = LIPX[jj] + LIP_MG
-            x_new = max(min(XK[jj], xl), xlip)
-            if xl < xlip: short.append(jj)
-            XK[jj] = x_new
+    ex, eyy, er = form.ex, form.eyy, form.er; m = eye_mod.margin(form)
+    xs = np.linspace(min(T.X0, XS[iK]), XS[iK], 400)
+    for jj in range(NT):
+        near = eye_mod.col_dist(B, jj, xs, 1 if jj <= NT // 2 else -1) < m
+        if not near.any(): continue
+        xl = float(xs[max(int(np.argmax(near)) - 1, 0)])                    # last sample in front of the margin
+        xlip = LIPX[jj] + LIP_MG
+        if xl < xlip:
+            short.append(jj)
+            P = form.loft_point(xs, np.full(xs.shape, TH[jj])); ins = np.hypot(P[:, 0] - ex, P[:, 1] - eyy) < er
+            x_rim = float(xs[max(int(np.argmax(ins)) - 1, 0)]) if ins.any() else XS[iK]
+            xl = LIPX[jj] + max(x_rim - LIPX[jj], 0.0) * LIP_MG / (LIP_MG + m) if x_rim < xlip + m else xlip
+        XK[jj] = min(XK[jj], xl)
     M.XK, M.XK_EYE_SHORT = XK, short
 
 

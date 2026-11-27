@@ -183,21 +183,49 @@ def stress(C, V, rec, gape_steps=None, flare_steps=(0, 10, 20), jaw_w=None):
 
 
 # ---- stylized range (SR1): big poses for art direction and animation, each swept until the first crossing or fold.
-# GP1/GF1 above test the real fish (gape 30, flare 20). SR1 asks how far past that the cage holds, so an animator or a
-# stylized art direction knows the safe range per species, and a rule change that shrinks it shows up on the board.
-# Amplitude ladders and targets are DEFAULTS of the test (cartoon-scale), not record values. A step fails on a new
-# crossing pair, a new fold, or a crush (a skin triangle squeezed under CRUSH of its rest area: it pinches on screen).
-RANGE = dict(gape=(5, 65), flare=(5, 45), bend=(15, 330), wave=(10, 150), arch=(15, 240), twist=(30, 360), combo=(10, 150))
-CRUSH = 0.1
-GAPE_HEADROOM, GAPE_MIN, GAPE_MAX = 1.3, 45, 65     # stylized gape target: 1.3 x the record gape, kept within 45..65 deg
-
-
-def gape_target(rec): return float(np.clip(GAPE_HEADROOM * rec.get('gape_deg', 30.0), GAPE_MIN, GAPE_MAX))
-
-
-TARGET = dict(gape=45, flare=30, bend=90, wave=45, arch=45, twist=90, combo=50)
+# GP1/GF1 above test the real fish. SR1 asks how far past that the cage holds, so an animator or a stylized art direction
+# knows the safe range per species, and a rule change that shrinks it shows up on the board. Each target is what this
+# species can really do, times a stylized HEADROOM, so no fish is asked for a pose its body could never make (Gary 17:24Z:
+# no S-wave for a puffer, no gape past 45 for a small-mouthed reef fish):
+#   gape   the record gape (jaw.linkage.gape), capped at 65 deg
+#   bend, wave, arch   the muscle strain limit: the inside of a bend shortens by curvature x half-width (half-depth for
+#          the arch), and fish muscle shortens at most STRAIN; a C-bend of heading H over the body length Lb has curvature
+#          H / Lb, an S-wave of peak heading H has 2 pi H / Lb
+#   flare  FLARE_REAL (no record field yet)
+#   combo  gape, flare and wave together at 1 / HEADROOM of their targets: the real fish feeding while it swims
+# A target under DROP is no test at all and is skipped. A step fails on a new crossing pair, a new fold, or a crush (a
+# skin triangle squeezed under CRUSH of its rest area: it pinches on screen). Ladders stop at twice the target.
+HEADROOM, STRAIN, FLARE_REAL, GAPE_MAX, DROP, CRUSH = 1.3, 0.3, 23.0, 65.0, 10.0, 0.1      # DEFAULTS of the test
+STEP = dict(gape=5, flare=5, bend=15, wave=5, arch=5, combo=10)
+CAP = dict(bend=180, wave=60, arch=60)      # past these no fish body goes, however slender (a C-start tops out near 180)
 UNIT = dict(gape='deg', flare='deg', bend='deg tail heading', wave='deg peak heading', arch='deg tail heading',
-            twist='deg roll at tail', combo='% of every target at once')
+            combo='% of every target at once')
+
+
+def body_frame(C, rec):
+    """the bending part of the body (behind the gill cover, as a fish rig's spine), its length and widest half-width and
+    half-depth there, and the axis height at its root."""
+    x0 = float(max(p[0] for p in rec['cover']['rear'])); xend = float(C['xend'])
+    O = rec['outline']; hw, top, bot = (np.array(O[k]) for k in ('hw', 'top', 'bot')); xs = np.linspace(x0, xend, 50)
+    w = float(np.interp(xs, hw[:, 0], hw[:, 1]).max())
+    d = float((np.interp(xs, top[:, 0], top[:, 1]) - np.interp(xs, bot[:, 0], bot[:, 1])).max() / 2)
+    yc = float(0.5 * (np.interp(x0, top[:, 0], top[:, 1]) + np.interp(x0, bot[:, 0], bot[:, 1])))
+    return x0, xend, w, d, yc
+
+
+def targets(C, rec):
+    """per pose: the stylized target, or None where the species could never make the pose (skipped)."""
+    x0, xend, w, d, _ = body_frame(C, rec); Lb = xend - x0; deg = np.degrees
+    T = dict(gape=min(GAPE_MAX, HEADROOM * rec.get('gape_deg', 30.0)), flare=HEADROOM * FLARE_REAL,
+             bend=HEADROOM * deg(STRAIN * Lb / w), wave=HEADROOM * deg(STRAIN * Lb / (2 * np.pi * w)),
+             arch=HEADROOM * deg(STRAIN * Lb / d))
+    T = {k: min(v, CAP.get(k, 1e9)) for k, v in T.items()}
+    T = {k: (float(max(STEP[k], round(v / STEP[k]) * STEP[k])) if v >= DROP else None) for k, v in T.items()}   # on the ladder
+    T['combo'] = 80.0                         # about 1 / HEADROOM: every pose at its real size, all at once
+    return T
+
+
+def gape_target(rec): return min(GAPE_MAX, HEADROOM * rec.get('gape_deg', 30.0))
 
 
 def body_pose(V, x0, xend, phi, plane, yc=0.0):
@@ -213,14 +241,6 @@ def body_pose(V, x0, xend, phi, plane, yc=0.0):
     ang = np.interp(uu, u, a); X = np.interp(uu, u, cx) + past * np.cos(a[-1]); S = np.interp(uu, u, cs) + past * np.sin(a[-1])
     off = V[m, k] - c0
     P[m, 0] = X - off * np.sin(ang); P[m, k] = c0 + S + off * np.cos(ang)
-    return P
-
-
-def twist(V, x0, xend, deg, yc):
-    """roll the body behind x0 about its axis, growing linearly to deg at the tail end."""
-    P = V.copy(); m = V[:, 0] > x0; t = np.radians(deg) * np.clip((V[m, 0] - x0) / (xend - x0), 0, 1)
-    y, z = V[m, 1] - yc, V[m, 2]
-    P[m, 1] = yc + np.cos(t) * y - np.sin(t) * z; P[m, 2] = np.sin(t) * y + np.cos(t) * z
     return P
 
 
@@ -245,9 +265,7 @@ def range_sweep(C, V, rec, jaw_w=None, only=None):
     wj = jaw_weights(C, V, rec) if jaw_w is None else jaw_w; wc = cover_weights(C, V, rec)
     O = C['openings']; hx, hy = O['opercle_hinge']
     near = np.argsort(np.hypot(V[:, 0] - hx, V[:, 1] - hy) + 10 * (V[:, 2] < 0))[:3]; zh = float(np.abs(V[near, 2]).mean())
-    x0 = float(max(p[0] for p in rec['cover']['rear'])); xend = float(C['xend'])
-    top, bot = np.array(rec['outline']['top']), np.array(rec['outline']['bot'])
-    yc = float(0.5 * (np.interp(x0, top[:, 0], top[:, 1]) + np.interp(x0, bot[:, 0], bot[:, 1])))
+    x0, xend, _, _, yc = body_frame(C, rec); TG = targets(C, rec)
     def pose(name, a):
         r = np.radians(a)
         if name == 'gape': return gape(V, wj, O['jaw_joint'], a)
@@ -255,20 +273,21 @@ def range_sweep(C, V, rec, jaw_w=None, only=None):
         if name == 'bend': return body_pose(V, x0, xend, lambda u: r * u, 'z')
         if name == 'wave': return body_pose(V, x0, xend, lambda u: r * np.sin(2 * np.pi * u), 'z')
         if name == 'arch': return body_pose(V, x0, xend, lambda u: r * u, 'y', yc)
-        if name == 'twist': return twist(V, x0, xend, a, yc)
         f = a / 100.0                                                # combo: every pose at once, a fraction of its target
-        P = gape(V, wj, O['jaw_joint'], f * gape_target(rec)); P = flare(P, wc, O['opercle_hinge'], f * TARGET['flare'], zh)
-        rw = np.radians(f * TARGET['wave'])
+        P = gape(V, wj, O['jaw_joint'], f * (TG['gape'] or 0)); P = flare(P, wc, O['opercle_hinge'], f * (TG['flare'] or 0), zh)
+        rw = np.radians(f * (TG['wave'] or 0))
         return body_pose(P, x0, xend, lambda u: rw * np.sin(2 * np.pi * u), 'z')
     out = {}
-    for name in (only or RANGE):
-        st, mx = RANGE[name]; clean = 0; fail = None; squash = 1.0
+    for name in (only or STEP):
+        tg = TG[name]
+        if tg is None: out[name] = dict(skipped=f'target under {DROP:g} deg: not a pose this body makes', unit=UNIT[name]); continue
+        st = STEP[name]; mx = int(np.ceil(min(2 * tg, GAPE_MAX if name == 'gape' else 1e9) / st) * st)
+        clean = 0; fail = None; squash = 1.0
         for a in range(st, mx + 1, st):
             P = pose(name, a); _, pp = self_intersections(P, T); new = len(set(map(tuple, pp)) - rest)
             N, A = nrm(P); folds = int((ok0 & ((N[PR[:, 0]] * N[PR[:, 1]]).sum(1) < 0)).sum())
             sq = float((A[big] / A0[big]).min())
             if new or folds or sq < CRUSH: fail = dict(at=a, new_crossings=new, new_folds=folds, squash=round(sq, 3)); break
             clean = a; squash = min(squash, sq)
-        tg = gape_target(rec) if name == 'gape' else TARGET[name]
         out[name] = dict(safe=clean, max=mx, target=tg, unit=UNIT[name], first_fail=fail, worst_squash=round(squash, 3))
     return out
