@@ -90,7 +90,9 @@ class Form:
         lo = sorted(lo, key=lambda p: p[0]); d_ = np.array(dn)
         if len(dn) >= 2 and dn[-1][0] - dn[0][0] > 0.01:
             poly = [[p[0], p[2]] for p in dn] + [[p[0], p[2]] for p in lo[::-1]]
-            out.append(('mandible', poly, CV['step'] * 0.6, None, 0, lambda x: np.interp(x, d_[:, 0], d_[:, 1]),
+            # the plate keeps under the lips (two lip thicknesses below the mouth line), or the first loops round the mouth cross
+            lip = lambda x: np.interp(x, self.ml[:, 0], self.ml[:, 1] - 0.006, right=1e9)
+            out.append(('mandible', poly, CV['step'] * 0.6, None, 0, lambda x: np.minimum(np.interp(x, d_[:, 0], d_[:, 1]), lip(x)),
                         'lower jaw rami: record jaw.dentary + jaw.mandibleLow (to the jaw joint)'))
         # gill V: from the cover's lower corner the free edge runs straight (seen from below) to the isthmus at the apex.
         # A cover whose corner stays above the membrane's top ray has no free membrane: a side slit only (puffers).

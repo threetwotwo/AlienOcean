@@ -158,15 +158,16 @@ def build_slits(B):
                 Q = allr[k]; Qn = 0.5 * Q + 0.5 * (0.25 * (np.roll(Q, 1, 0) + np.roll(Q, -1, 0)) + 0.25 * (allr[k - 1] + allr[k + 1]))
                 allr[k] = wp * D1 + (1 - wp) * Qn if k == 1 else Qn
         for k in range(1, TG + 1): allr[k][:, 2] = sg * np.maximum(sg * allr[k][:, 2], 0.0008)    # each passage on its own side (keeled bellies)
-        for _ in range(60):          # and inside the body: vertices, and edge midpoints too (a throat that curves in)
-            ok = True
+        for _ in range(60):          # and inside the body: vertices, and from the second row on edge midpoints too (a
+            ok = True                # throat that curves in). The first row lies in the lens by design and is left alone.
             for k in range(1, TG + 1):
                 Q = allr[k]
-                for T_, also in ((Q, 0), (0.5 * (Q + np.roll(Q, -1, 0)), -1), (0.5 * (Q + allr[k + 1]), 0)) + (((0.5 * (Q + allr[k - 1]), 0),) if k > 1 else ()):
-                    bad = form.sd_body(T_) > -0.0015
+                tests = ((Q, 0),) if k == 1 else ((Q, 0), (0.5 * (Q + np.roll(Q, -1, 0)), 1), (0.5 * (Q + allr[k + 1]), 0), (0.5 * (Q + allr[k - 1]), 0))
+                for T_, nxt in tests:
+                    bad = form.sd_body(T_) > (-0.001 if k == 1 else -0.0015)
                     if not bad.any(): continue
                     ok = False; step = np.zeros_like(Q); step[bad] = grad(form.sd_body, T_[bad]) * 0.0005
-                    Q -= step + (np.roll(step, -also, 0) if also else 0)
+                    Q -= step + (np.roll(step, nxt, 0) if nxt else 0)
             if ok: break
         for k in range(1, TG + 1): rows.append([mesh.add_v(p, np.nan, np.nan) for p in allr[k]])
         rows.append(H_loop)
