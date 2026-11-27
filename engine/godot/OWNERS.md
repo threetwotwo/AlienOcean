@@ -6,6 +6,7 @@
 | scenes/probe*, look/ (water, fog, caustics, GI stack, grade) | Engine |
 | tools/turnaround.gd, tools/cloud_render.sh | Engine |
 | core/m12_streaming/, adapters/godot/stream_loader.gd, tests/test_cell_streamer.gd, tests/test_stream_world.gd | Engine |
+| core/world/ (sky clock, water optics, lagoon water), adapters/godot/world_root.gd, adapters/godot/world_textures.gd, tools/lagoon_shots.gd, tools/ws_to_godot.py, tests/test_world_clock.gd | Engine |
 | docs/ engine and look evidence | Engine |
 | project.godot [input] [physics] [layer_names] [autoload] sections | Gameplay (Build the core gameplay modules) |
 | core/<every other module>/, adapters/godot/<its modules>, tests/test_<its modules>.gd, harness | Gameplay |
