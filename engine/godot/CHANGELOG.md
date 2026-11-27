@@ -1,5 +1,16 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): the lagoon dressed like the key frame (world_dress)
+- World: an authored place, `world_dress/lagoon_keyframe.json`, built by `world_dress/dress_cell.gd` (DressCell): the approved
+  key frame's content ported, not rebuilt. Rock's heads_v18c arch (Gary's pick) as the focal head at 13 m with its gate facing the
+  key camera, reef kit v18 heads b2 and b4 with their sand skirts, the five colony corals (table, brain, boulder, staghorn, finger),
+  and the colony maker's grown meadow bed. Every piece carries collision from its maker (kit UCX hulls, CoACD hulls for v18c and
+  the corals, concave sand skirts, grass as soft Area3D); every item is ray-seated on the floor; a keep-clear volume holds the fish
+  school's space and is checked against the real hulls. Pieces: `tools/lagoon_dress/export_pieces.py` with the key frame's
+  material family baked per vertex (`kf_paint.py`; rock top chroma x0.5 and walls x0.82 for the Godot water, art direction).
+- Tools: `tools/lagoon_shots.gd` takes AO_DRESS / AO_DRESS_PIECES (the place's cameras become shots 09+). Test:
+  `tests/test_dress_cell.gd` (collision, seating, school space, axis map; planted fault caught).
+
 ## 0.6.0-dev (28 Nov 2026): the camera's field of view
 - Engine: WorldRoot.set_fov used an 18 mm half sensor, but Godot's CameraAttributesPhysical takes the vertical FOV from
   a 24 mm sensor height (12 mm half), so asking for 44 deg gave 30.15 deg: every shot was about 1.5x zoomed in. Now

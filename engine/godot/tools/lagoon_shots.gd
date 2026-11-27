@@ -5,7 +5,7 @@
 ## Cdom 0.03, ScatK 0.40, GlowK 2.50) in the seabed, surface and underwater-view shaders. Env: AO_HOUR (default 12).
 ## 0.3.0: the world (light, sky, exposure, water) comes from adapters/godot/world_root.gd, the same node the game uses.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/lagoon_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
-## Env: AO_UNDER_EV (art stops under water), AO_GLOW_K (haze strength, 2.5), AO_LIGHT_NEUTRAL=0..1 (art direction: sunlight keeps its colour on the way down), AO_DEPTH_COLOUR=1 (Unreal's depth colour give-back; AO_DEPTH_SHARE its share, default 0.25), AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_AGX_MODE=1 (raw buffer, for checks), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
+## Env: AO_DRESS=<world_dress/x.json> + AO_DRESS_PIECES=<dir> (an authored place built by world_dress/dress_cell.gd; its cameras become shots 09+), AO_UNDER_EV (art stops under water), AO_GLOW_K (haze strength, 2.5), AO_LIGHT_NEUTRAL=0..1 (art direction: sunlight keeps its colour on the way down), AO_DEPTH_COLOUR=1 (Unreal's depth colour give-back; AO_DEPTH_SHARE its share, default 0.25), AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_AGX_MODE=1 (raw buffer, for checks), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
 ## Light net: AO_CAUS=pixel (per pixel instead of the map), AO_CAUS_T=<s> (hold the net at that second), AO_CAUS_DUMP=<file> (the map as raw float32 RGBA).
 ## Night: the Unreal night eye (WorldRoot.apply) and the Unreal stars (look/sky_stars.gdshaderinc). Try AO_HOUR=22 (moonless), 94 (moonlit).
 ## Still to port: the surface's waves and tide, god rays (the light net is in: look/caustics.gdshaderinc, adapters/godot/caustics_map.gd).
@@ -78,6 +78,15 @@ func _setup():
 	if OS.get_environment("AO_CAUS_T") != "": wr.caustics.frozen_time = float(OS.get_environment("AO_CAUS_T"))   # hold the net at this second
 	if OS.get_environment("AO_CAUS_DUMP") != "": _caus_dump = OS.get_environment("AO_CAUS_DUMP")
 	world.add_child(wr.make_surface())
+	var dress: DressCell = null
+	if OS.get_environment("AO_DRESS") != "":   # an authored place (world_dress/<name>.json) built from its pieces (AO_DRESS_PIECES), seated on the floor
+		dress = DressCell.new(); dress.setup(OS.get_environment("AO_DRESS"), OS.get_environment("AO_DRESS_PIECES")); dress.ground_material = ground
+		world.add_child(dress); dress.build()
+		for mi in world.find_children("*", "MeshInstance3D", true, false):
+			if "floor" in String(mi.get_parent().name).to_lower(): mi.create_trimesh_collision()
+		await physics_frame; await physics_frame
+		var space := root.get_world_3d().direct_space_state
+		print("SEAT ", dress.seat(space), " KEEP_CLEAR ", dress.keep_clear_report(space))
 	# hero fish, hovering near the coral heads
 	fish = _load(args[1]) as Node3D
 	if fish:
@@ -89,6 +98,8 @@ func _setup():
 		var aps := fish.find_children("*", "AnimationPlayer", true, false)
 		if aps.size() > 0:
 			ap = aps[0]; var a = ap.get_animation_list()[0]; ap.get_animation(a).loop_mode = Animation.LOOP_LINEAR; ap.play(a)
+	if dress and fish:
+		fish.position = dress.to_world(dress.manifest.hero.at); fish.rotation.y = dress.anchor_xform.basis.get_euler().y + float(dress.manifest.hero.rot)
 	var fp := fish.position if fish else Vector3(1.2, 0.9, -9.6)
 	shots = [
 		["01_hero_3p", fp + Vector3(-0.55, 0.18, 0.5), fp, 50.0],
@@ -104,6 +115,10 @@ func _setup():
 	var mp := Vector3(0, WATER_Y + 1.5, 10)
 	shots.append(["06_moon_b", mp, mp + WorldRoot.to_godot(stm.B.dir) * 10.0, 12.0])
 	shots.append(["07_moon_a", mp, mp + WorldRoot.to_godot(stm.A.dir) * 10.0, 12.0])
+	if dress:   # the place's own cameras (the key frame's camera first)
+		var nk := 9
+		for c in dress.manifest.cams:
+			var cc := dress.cam(c); shots.append(["%02d_dress_%s" % [nk, c], cc[0], cc[1], cc[2]]); nk += 1
 	if OS.get_environment("AO_SHOTS") != "":
 		var keep := OS.get_environment("AO_SHOTS").split(",")
 		shots = shots.filter(func(sh): return sh[0].substr(0, 2) in keep)
