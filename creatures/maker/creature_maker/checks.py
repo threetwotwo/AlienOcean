@@ -156,13 +156,20 @@ def cage_checks(C, V, form, rec):
     return R
 
 
-def pose_checks(C, V, rec, jaw_w=None):
+def pose_checks(C, V, rec, jaw_w=None, sweep=True):
     """GP0 no crossing faces at rest; GP1 gape 0-30 deg and GF1 gill flare 0-20 deg add no crossings or flipped faces and
-    leave the eye rims in place (pose.py)."""
-    from .pose import stress
+    leave the eye rims in place; SR1 stylized range: gape, flare, C-bend, S-wave, arch, twist and all at once each stay
+    clean up to the cartoon-scale target (pose.py)."""
+    from .pose import stress, range_sweep
     S = stress(C, V, rec, jaw_w=jaw_w)
-    return {'GP0_rest_crossings': S['rest_crossings'], 'GP0_pass': S['GP0_pass'], 'GP1_gape': S['gape'], 'GP1_pass': S['GP1_pass'],
-            'GF1_flare': S['flare'], 'GF1_pass': S['GF1_pass']}
+    R = {'GP0_rest_crossings': S['rest_crossings'], 'GP0_pass': S['GP0_pass'], 'GP1_gape': S['gape'], 'GP1_pass': S['GP1_pass'],
+         'GF1_flare': S['flare'], 'GF1_pass': S['GF1_pass']}
+    if sweep:
+        R['SR1_range'] = range_sweep(C, V, rec, jaw_w=jaw_w)
+        R['SR1_safe'] = {k: v['safe'] for k, v in R['SR1_range'].items()}
+        R['SR1_short'] = sorted(k for k, v in R['SR1_range'].items() if v['safe'] < v['target'])
+        R['SR1_pass'] = not R['SR1_short']
+    return R
 
 
 def p6(N, Mk):
@@ -236,19 +243,21 @@ def planted(C0, V0, VN0, form, rec):
     PL['GP0 (cavity vertex pushed through the cheek)'] = self_intersections(V, T_)[0] > base
     w = jaw_weights(C0, V0, rec); up = C0['openings']['mouth_rows'][1]
     for v in up[1:C0['openings']['jr'] - 1:2]: w[v] = 1.0       # upper-lip loop vertices wrongly bound to the jaw
-    PL['GP1 (upper lip loop bound to the jaw)'] = not pose_checks(C0, V0, rec, jaw_w=w)['GP1_pass']
+    PL['GP1 (upper lip loop bound to the jaw)'] = not pose_checks(C0, V0, rec, jaw_w=w, sweep=False)['GP1_pass']
+    from .pose import range_sweep, TARGET
+    PL['SR1 (upper lip loop bound to the jaw)'] = range_sweep(C0, V0, rec, jaw_w=w, only=['gape'])['gape']['safe'] < TARGET['gape']
     PL['P6 (flat normal map)'] = not p6(np.dstack([np.zeros((64, 64)), np.zeros((64, 64)), np.ones((64, 64))]), np.ones((64, 64), bool))['P6_pass']
     PL['P1 (40k tris)'] = not export_checks('/nonexistent', dict(tris_total=40000, bones=10))['P1_pass']
     return PL
 
 
-def check(out, record_path, with_planted=False):
+def check(out, record_path, with_planted=False, sweep=True):
     from .record import adapt
     from .form import Form
-    rec = adapt(record_path); form = Form(rec)
     C = json.load(open(os.path.join(out, 'cage.json'))); Z = np.load(os.path.join(out, 'cage.npz'))
+    rec = adapt(record_path, C.get('style')); form = Form(rec)
     R = cage_checks(C, Z['V'], form, rec)
-    R.update(pose_checks(C, Z['V'], rec))
+    R.update(pose_checks(C, Z['V'], rec, sweep=sweep))
     stp = os.path.join(out, 'glb_stats.json')
     if os.path.exists(stp): R.update(export_checks(out, json.load(open(stp))))
     R['P9_form_cage_s'] = round(C['stats']['build_s'] - C['stats']['bake_s'], 1); R['P9_pass'] = R['P9_form_cage_s'] < 60

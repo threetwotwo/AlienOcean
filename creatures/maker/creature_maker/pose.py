@@ -14,6 +14,22 @@ import numpy as np
 def smooth(t): t = np.clip(t, 0, 1); return t * t * (3 - 2 * t)
 
 
+SOFTEN_IT = 12      # DEFAULT: neighbour-averaging passes over the structural weights
+
+
+def soften(C, w, pins, it=SOFTEN_IT):
+    """average each free weight with its mesh neighbours, holding the pinned ones. The structural rules (by column, by
+    region, by tag) leave steps where two rules meet: a vertex at 1 beside one at 0 folds the face between them once the
+    pose is large (the stylized range found these at gape 50 and flare 15). Skinning wants weights that vary smoothly."""
+    nb = [[] for _ in range(len(w))]
+    for f in C['faces']:
+        for a, b in zip(f, f[1:] + f[:1]): nb[a].append(b); nb[b].append(a)
+    free = np.array([bool(nb[v]) for v in range(len(w))]); free[list(pins)] = False; fi = np.where(free)[0]
+    w = w.copy()
+    for _ in range(it): w[fi] = np.array([w[nb[v]].mean() for v in fi])
+    return w
+
+
 def jaw_weights(C, V, rec):
     O = C['openings']; NT = len(O['mouth_rows'][0]); jr = O['jr']; xj, yj = O['jaw_joint']
     ml = np.array(rec['mouth']['line']); ml = ml[np.argsort(ml[:, 0])]
@@ -39,7 +55,8 @@ def jaw_weights(C, V, rec):
     eye = set(v for f, t in zip(C['faces'], C['ftag']) if t == 'eye' for v in f)
     gill = set(v for f, t in zip(C['faces'], C['ftag']) if t == 'gill' for v in f)
     w[list(eye | gill)] = 0.0
-    return w
+    pins = set(O['mouth_rows'][0]) | set(O['cavity_rows'][1]) | eye | gill         # lip loop, lip roll, eye and gill stay put
+    return soften(C, w, pins)
 
 
 def cover_weights(C, V, rec):
@@ -65,7 +82,13 @@ def cover_weights(C, V, rec):
         side_A = [k for k, v in enumerate(rows[0]) if v in flaps]
         for r, row in enumerate(rows[1:-1], 1):
             for k in side_A: w[row[k]] = 1.0 - r / (len(rows) - 1)
-    return w
+    eye = set(v for f, t in zip(C['faces'], C['ftag']) if t == 'eye' for v in f)
+    inner = set(v for f, t in zip(C['faces'], C['ftag']) if t in ('cavity', 'mouth') for v in f)
+    lip = set(v for rows in O.get('gill_rows', []) for v in rows[0] + rows[-1]) - flaps
+    for v in eye | inner: w[v] = 0.0
+    mid = set(np.where(np.abs(V[:, 2]) < 0.25 * hw)[0].tolist()) - flaps    # left and right swing apart: the midline holds
+    w[list(mid)] = 0.0
+    return soften(C, w, flaps | lip | eye | inner | mid)              # flap, body lip, cavity hole, eye, mouth, midline stay put
 
 
 def gape(V, w, joint, deg):
@@ -131,7 +154,8 @@ def self_intersections(V, T):
 
 def stress(C, V, rec, gape_steps=(0, 10, 20, 30), flare_steps=(0, 10, 20), jaw_w=None):
     """returns per step: crossing triangle pairs (new versus rest), flipped faces, eye rim drift; and the pass flags."""
-    T = triangles(C['faces']); n0, _ = self_intersections(V, T)
+    T = triangles(C['faces']); n0, p0 = self_intersections(V, T); rest = set(map(tuple, p0))
+    def new_pairs(P): return len(set(map(tuple, self_intersections(P, T)[1])) - rest)     # a pair fixed elsewhere hides nothing
     def normals(P):
         n = np.cross(P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]]); return n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-15)
     hair = set(v for ch in C.get('commissures', []) for v in ch)
@@ -142,13 +166,98 @@ def stress(C, V, rec, gape_steps=(0, 10, 20, 30), flare_steps=(0, 10, 20), jaw_w
     hx, hy = C['openings']['opercle_hinge']; near = np.argsort(np.hypot(V[:, 0] - hx, V[:, 1] - hy) + 10 * (V[:, 2] < 0))[:3]
     zh = float(np.abs(V[near, 2]).mean())                          # skin z at the hinge
     for deg in gape_steps:
-        P = gape(V, wj, C['openings']['jaw_joint'], deg); n, _ = self_intersections(P, T)
-        out['gape'][deg] = dict(new_crossings=n - n0, flipped=int((((normals(P) * N0).sum(1) < 0) & free).sum()),
+        P = gape(V, wj, C['openings']['jaw_joint'], deg)
+        out['gape'][deg] = dict(new_crossings=new_pairs(P), flipped=int((((normals(P) * N0).sum(1) < 0) & free).sum()),
                                 eye_rim_drift_pctSL=round(float(np.abs(P[rims] - V[rims]).max()) * 100, 3) if rims else 0.0)
     for deg in flare_steps:
-        P = flare(V, wc, C['openings']['opercle_hinge'], deg, zh); n, _ = self_intersections(P, T)
-        out['flare'][deg] = dict(new_crossings=n - n0, flipped=int((((normals(P) * N0).sum(1) < 0) & free).sum()))
+        P = flare(V, wc, C['openings']['opercle_hinge'], deg, zh)
+        out['flare'][deg] = dict(new_crossings=new_pairs(P), flipped=int((((normals(P) * N0).sum(1) < 0) & free).sum()))
     out['GP1_pass'] = all(s['new_crossings'] <= 0 and s['flipped'] == 0 and s['eye_rim_drift_pctSL'] < 0.05 for s in out['gape'].values())
     out['GF1_pass'] = all(s['new_crossings'] <= 0 and s['flipped'] == 0 for s in out['flare'].values())
     out['jaw_weighted_verts'] = int((wj > 0.01).sum()); out['cover_weighted_verts'] = int((wc > 0.01).sum())
+    return out
+
+
+# ---- stylized range (SR1): big poses for art direction and animation, each swept until the first crossing or fold.
+# GP1/GF1 above test the real fish (gape 30, flare 20). SR1 asks how far past that the cage holds, so an animator or a
+# stylized art direction knows the safe range per species, and a rule change that shrinks it shows up on the board.
+# Amplitude ladders and targets are DEFAULTS of the test (cartoon-scale), not record values. A step fails on a new
+# crossing pair, a new fold, or a crush (a skin triangle squeezed under CRUSH of its rest area: it pinches on screen).
+RANGE = dict(gape=(5, 70), flare=(5, 45), bend=(15, 330), wave=(10, 150), arch=(15, 240), twist=(30, 360), combo=(10, 150))
+CRUSH = 0.1
+TARGET = dict(gape=45, flare=30, bend=90, wave=45, arch=45, twist=90, combo=50)
+UNIT = dict(gape='deg', flare='deg', bend='deg tail heading', wave='deg peak heading', arch='deg tail heading',
+            twist='deg roll at tail', combo='% of every target at once')
+
+
+def body_pose(V, x0, xend, phi, plane, yc=0.0):
+    """bend the body behind x0 along a centreline whose heading is phi(u) (u = 0 at x0, 1 at the tail end), in the side
+    plane ('z': swimming C-bend and S-wave) or the vertical plane ('y': arch about the axis height yc). Cross-sections stay
+    square to the centreline, so the inside of a bend compresses as on an animated body. The head in front of x0 is rigid,
+    as on a fish rig whose spine starts behind the skull."""
+    L = xend - x0; u = np.linspace(0, 1, 801); a = phi(u); am = 0.5 * (a[1:] + a[:-1]); du = np.diff(u) * L
+    cx = x0 + np.r_[0, np.cumsum(np.cos(am) * du)]; cs = np.r_[0, np.cumsum(np.sin(am) * du)]
+    k = 2 if plane == 'z' else 1; c0 = 0.0 if plane == 'z' else yc
+    P = V.copy(); m = V[:, 0] > x0
+    uu = (V[m, 0] - x0) / L; past = np.maximum(uu - 1, 0) * L              # beyond the tail end: straight on
+    ang = np.interp(uu, u, a); X = np.interp(uu, u, cx) + past * np.cos(a[-1]); S = np.interp(uu, u, cs) + past * np.sin(a[-1])
+    off = V[m, k] - c0
+    P[m, 0] = X - off * np.sin(ang); P[m, k] = c0 + S + off * np.cos(ang)
+    return P
+
+
+def twist(V, x0, xend, deg, yc):
+    """roll the body behind x0 about its axis, growing linearly to deg at the tail end."""
+    P = V.copy(); m = V[:, 0] > x0; t = np.radians(deg) * np.clip((V[m, 0] - x0) / (xend - x0), 0, 1)
+    y, z = V[m, 1] - yc, V[m, 2]
+    P[m, 1] = yc + np.cos(t) * y - np.sin(t) * z; P[m, 2] = np.sin(t) * y + np.cos(t) * z
+    return P
+
+
+def tri_pairs(T):
+    """pairs of triangles sharing an edge."""
+    E = defaultdict(list)
+    for k, t in enumerate(T.tolist()):
+        for i in range(3): E[frozenset((t[i], t[(i + 1) % 3]))].append(k)
+    return np.array([p[:2] for p in E.values() if len(p) >= 2], int)
+
+
+def range_sweep(C, V, rec, jaw_w=None, only=None):
+    """per pose: the largest clean amplitude (no new crossing pair, no new fold), the first failing step and what failed,
+    and the worst skin squash (smallest triangle area ratio) inside the clean range. A new fold is two neighbouring
+    triangles turning past 90 deg that were within 60 deg at rest; it is rotation-free, so a whole bent tail is not a fault."""
+    T = triangles(C['faces']); _, p0 = self_intersections(V, T); rest = set(map(tuple, p0))
+    hair = set(v for ch in C.get('commissures', []) for v in ch)
+    tfree = np.array([not (set(t) & hair) for t in T.tolist()]); PR = tri_pairs(T); PR = PR[tfree[PR[:, 0]] & tfree[PR[:, 1]]]
+    def nrm(P):
+        n = np.cross(P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]]); a = np.linalg.norm(n, axis=1); return n / (a[:, None] + 1e-15), a
+    N0, A0 = nrm(V); ok0 = (N0[PR[:, 0]] * N0[PR[:, 1]]).sum(1) > 0.5; big = A0 > np.median(A0) * 0.05
+    wj = jaw_weights(C, V, rec) if jaw_w is None else jaw_w; wc = cover_weights(C, V, rec)
+    O = C['openings']; hx, hy = O['opercle_hinge']
+    near = np.argsort(np.hypot(V[:, 0] - hx, V[:, 1] - hy) + 10 * (V[:, 2] < 0))[:3]; zh = float(np.abs(V[near, 2]).mean())
+    x0 = float(max(p[0] for p in rec['cover']['rear'])); xend = float(C['xend'])
+    top, bot = np.array(rec['outline']['top']), np.array(rec['outline']['bot'])
+    yc = float(0.5 * (np.interp(x0, top[:, 0], top[:, 1]) + np.interp(x0, bot[:, 0], bot[:, 1])))
+    def pose(name, a):
+        r = np.radians(a)
+        if name == 'gape': return gape(V, wj, O['jaw_joint'], a)
+        if name == 'flare': return flare(V, wc, O['opercle_hinge'], a, zh)
+        if name == 'bend': return body_pose(V, x0, xend, lambda u: r * u, 'z')
+        if name == 'wave': return body_pose(V, x0, xend, lambda u: r * np.sin(2 * np.pi * u), 'z')
+        if name == 'arch': return body_pose(V, x0, xend, lambda u: r * u, 'y', yc)
+        if name == 'twist': return twist(V, x0, xend, a, yc)
+        f = a / 100.0                                                # combo: every pose at once, a fraction of its target
+        P = gape(V, wj, O['jaw_joint'], f * TARGET['gape']); P = flare(P, wc, O['opercle_hinge'], f * TARGET['flare'], zh)
+        rw = np.radians(f * TARGET['wave'])
+        return body_pose(P, x0, xend, lambda u: rw * np.sin(2 * np.pi * u), 'z')
+    out = {}
+    for name in (only or RANGE):
+        st, mx = RANGE[name]; clean = 0; fail = None; squash = 1.0
+        for a in range(st, mx + 1, st):
+            P = pose(name, a); _, pp = self_intersections(P, T); new = len(set(map(tuple, pp)) - rest)
+            N, A = nrm(P); folds = int((ok0 & ((N[PR[:, 0]] * N[PR[:, 1]]).sum(1) < 0)).sum())
+            sq = float((A[big] / A0[big]).min())
+            if new or folds or sq < CRUSH: fail = dict(at=a, new_crossings=new, new_folds=folds, squash=round(sq, 3)); break
+            clean = a; squash = min(squash, sq)
+        out[name] = dict(safe=clean, max=mx, target=TARGET[name], unit=UNIT[name], first_fail=fail, worst_squash=round(squash, 3))
     return out
