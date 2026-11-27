@@ -11,7 +11,11 @@
 ## key_fade), EV100 slides with the light (noon cap 15.5), under water the steady eye sits 0.75 stop below the cap,
 ## each place has its compensation (calm lagoon +1.2). Under water the key light points along the refracted sun and
 ## is pre-attenuated to z_ref; water-aware shaders correct for their own depth.
-## Godot axes: SkyClock is z-up (x, y, z); Godot is y-up: (x, z, -y).
+## God rays (look/god_rays.gdshaderinc, lagoonwater v98's, drawn by the underwater view): .god_rays false = off.
+## Godot axes: SkyClock works in Unreal's world axes (z up, left-handed); Godot is y up, right-handed. Unreal (x, y, z)
+## is Godot (x, z, y): a swap, so a mirror, as Unreal's own glTF import does. The world pieces fix it: the lagoon GLBs
+## (island/tools/slice_common.py write_glb) sit in Unreal at (g.x, g.z, g.y) x 100 cm (lagoon slice check P4, bounding
+## boxes). The island frame (x east, y north, z up, right-handed) is a different one: island (x, y, z) = Godot (x, z, -y).
 class_name WorldRoot
 extends Node3D
 
@@ -28,7 +32,16 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 ## Art direction (27 Nov, Gary: 'art direction trumps'): how much of its colour sunlight and skylight keep on the way
 ## down to the floor. 0 = the physics (red lost over 4 m); 1 = the light arrives as white as it entered, with the same
 ## overall loss. The haze along the view (absorption + scattering between eye and object) is untouched.
+## Art direction: stops added under water on top of the place's compensation, and the water haze's strength
+## (Unreal GlowK, Gary's clarity pick 2.5). Under water only, so the sky above the sea keeps its exposure.
+@export var under_exposure_art := 1.0     # Gary picked "Brighter" 27 Nov 17:06Z
+@export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
 @export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
+## The god rays under the water (Unreal GodK): the light net's map summed along each view ray. false = off (checks).
+@export var god_rays := true:
+	set(v):
+		god_rays = v
+		if under_mat: under_mat.set_shader_parameter("god_k", 1.0 if v else 0.0)
 @export var depth_colour_share := DEPTH_WB   # art direction lever (27 Nov: Gary 'art direction trumps'); Unreal 0.25
 const DEPTH_WB := 0.25                # the share given back
 const DEPTH_WB_PATH := 1.2            # m of water per m of depth (sky light)
@@ -61,10 +74,41 @@ var key := ""
 var last := {}
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
+var under_mat: ShaderMaterial       # the underwater view quad's material (attach_camera)
+var caustics: CausticsMap           # the light net's map, drawn once a frame (adapters/godot/caustics_map.gd)
 var _dome_g := 0.0
 
+const NIGHT_FLOOR_EV := 0.0           # MPC_Sky NightFloorEV (saved 0)
+const NIGHT_OPEN := -4.75             # v72: at night the eye opens to EV100 floor + this
+const NIGHT_SHUT := -3.25             # v72: the dark end stops at EV100 floor + this
+const BRIGHTEN_STOPS := 1.5           # how far the eye may brighten from the dark end
+const NIGHT_LIFT := 0.5               # v34: floats and water +0.5 stop at night
+const NIGHT_EYE_UNDER := 1.0          # v73: stops darker under the water at night
+
+static func night_weight(total: float) -> float:
+	## v26: 0 at 1000 lux and above, 1 at 1 lux and below (log in between)
+	return clampf((3.0 - log(maxf(total, 1e-6)) / log(10.0)) / 3.0, 0.0, 1.0)
+
+static func _key(lux: float) -> float:
+	return 1.03 - 2.0 / (2.0 + log(0.18 * maxf(lux, 1e-6) / PI + 1.0) / log(10.0))
+
+static func night_key_stops(total: float) -> float:
+	## v26: compensation of a dark-adapted eye (Krawczyk, Myszkowski & Seidel 2005), never brighter than a camera
+	return minf(log(maxf(_key(total), 1e-3) / 0.18) / log(2.0), 0.0)
+
+static func _dawn_dim(total: float, noon_total: float, nw: float) -> float:
+	## v93: twilight reads dimmer than noon by the night eye's key, never darker than the night eye at 1 lux
+	if nw <= 0.0: return 0.0
+	var t := minf(nw / 0.1, 1.0)
+	var K := minf(log(maxf(_key(total), 1e-3) / _key(noon_total)) / log(2.0), 0.0) * t * t * (3.0 - 2.0 * t)
+	var O := nw * (night_key_stops(total) + NIGHT_LIFT)
+	var fl := night_key_stops(1.0) + NIGHT_LIFT
+	return minf(minf(O, maxf(K, fl)) - O, 0.0)
+
 static func to_godot(v: Vector3) -> Vector3:
-	return Vector3(v.x, v.z, -v.y)
+	## an Unreal world direction (the clock's) in Godot's axes. Not (x, z, -y): that is the island frame's map, and it
+	## showed the sky mirrored along Unreal's Y against the reefs (at noon_yaw 0 the sun set on the rising side).
+	return Vector3(v.x, v.z, v.y)
 
 static func ev100(lux: float) -> float:
 	return log(maxf(0.18 * lux / PI * 100.0 / 12.5, 1e-12)) / log(2.0)
@@ -83,6 +127,7 @@ func _init() -> void:
 	light = DirectionalLight3D.new(); light.name = "KeyLight"
 	light.shadow_enabled = true; light.directional_shadow_max_distance = 60.0
 	add_child(light)
+	caustics = CausticsMap.new(); add_child(caustics)
 	env = Environment.new()
 	var sky := Sky.new(); sky_mat = ShaderMaterial.new(); sky_mat.shader = load("res://look/sky.gdshader"); sky.sky_material = sky_mat
 	env.background_mode = Environment.BG_SKY; env.sky = sky; env.background_intensity = 1.0   # sky shader outputs nits
@@ -110,11 +155,20 @@ func attach_camera(cam: Camera3D) -> void:
 	var q := MeshInstance3D.new(); q.name = "UnderwaterView"
 	var qm := QuadMesh.new(); qm.size = Vector2(2, 2); q.mesh = qm
 	var qmat := ShaderMaterial.new(); qmat.shader = load("res://look/underwater_view.gdshader"); q.material_override = qmat
+	under_mat = qmat; qmat.set_shader_parameter("god_k", 1.0 if god_rays else 0.0)
 	q.extra_cull_margin = 16384.0; q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; cam.add_child(q)
 
+func _process(_dt: float) -> void:
+	## the god rays' start point moves on each frame only where TAA averages it (Unreal: StateFrameIndexMod8 under TSR);
+	## without TAA it holds still, or the shafts would boil.
+	if under_mat == null: return
+	var vp := get_viewport()
+	under_mat.set_shader_parameter("god_frame", float(Engine.get_frames_drawn() % 8) if vp and vp.use_taa else 0.0)
+
 func set_fov(fov_deg: float) -> void:
-	## CameraAttributesPhysical owns the field of view (18 mm half sensor height)
-	cam_attr.frustum_focal_length = 18.0 / tan(deg_to_rad(fov_deg) * 0.5)
+	## CameraAttributesPhysical owns the field of view: Godot takes the vertical FOV from a 24 mm sensor height (12 mm
+	## half), so the focal length for a vertical fov is 12 / tan(fov / 2). (Was 18: every shot was ~1.5x zoomed in.)
+	cam_attr.frustum_focal_length = 12.0 / tan(deg_to_rad(fov_deg) * 0.5)
 
 func make_surface(size_m := 160.0) -> MeshInstance3D:
 	## the drawn water surface overhead (look/water_surface.gdshader), at the water's level
@@ -138,10 +192,21 @@ func apply(cam_y: float) -> Dictionary:
 	var tint: Color = SkyClock.kelvin_rgb(body.kelvin) * air_tint(body.elev)
 	if key != "sun": tint = tint * SkyClock.MOON_TINTS[key].lerp(Color(1, 1, 1), 0.5)
 	# exposure: the eye's dark end slid with the light; steady under water; place compensation
+	# sun_v184 exposure(): limits slid with the light; at night the eye opens to EV100 NIGHT_OPEN within the night
+	# floor (NIGHT_SHUT), with the dark-adapted key (night_key_stops), the night lift and dawn_dim on the compensation.
+	# Godot has no auto-exposure meter here, so the eye sits at the dark end clamped into Unreal's limits.
 	var noon_total: float = SkyClock.sky_state(12.0)["total"]
-	var ev := ev100(st.total) - (ev100(noon_total) - SkyClock.EV_MAX)
-	if under: ev -= SkyClock.STEADY_UNDER_AT
+	var dark := ev100(st.total) - (ev100(noon_total) - SkyClock.EV_MAX)
+	var nw := night_weight(st.total)
+	var hi := maxf(dark, NIGHT_FLOOR_EV + NIGHT_SHUT)
+	var lo := minf(maxf(dark - BRIGHTEN_STOPS, NIGHT_FLOOR_EV + NIGHT_SHUT - BRIGHTEN_STOPS), hi)
+	lo = minf(lo, lo + (NIGHT_FLOOR_EV + NIGHT_OPEN - lo) * nw)
+	var ev := clampf(dark, lo, hi)
+	if under: ev -= SkyClock.STEADY_UNDER_AT * (1.0 - nw)       # the steady under-water eye is a daytime rule (st_w)
 	var bias: float = SkyClock.EXPOSURE_BIAS.get(place, 0.0)
+	bias += nw * (night_key_stops(st.total) + NIGHT_LIFT)
+	bias += _dawn_dim(st.total, noon_total, nw)
+	if under: bias += under_exposure_art - NIGHT_EYE_UNDER * nw
 	# EV100 = log2(N^2 / t) at ISO 100. f/22 keeps Godot's physical depth of field out of the way (deep focus).
 	cam_attr.exposure_sensitivity = 100.0; cam_attr.exposure_aperture = 22.0
 	cam_attr.exposure_shutter_speed = pow(2.0, ev) / (22.0 * 22.0)
@@ -189,7 +254,7 @@ func apply(cam_y: float) -> Dictionary:
 		light.light_intensity_lux = beam_h / maxf(up_air.y, 0.02)
 		light.light_color = tint
 	last = {"key": key, "elev": body.elev, "total_lux": st.total, "sky_lux": st.skylux, "beam_h": beam_h,
-		"ev100": ev, "bias": bias, "under": under}
+		"ev100": ev, "bias": bias, "under": under, "night_w": nw}
 	return last
 
 func _art_k(k: Vector3) -> Vector3:
@@ -211,7 +276,10 @@ static func declare_globals() -> void:
 		"water_a": [V, Vector3.ZERO], "water_b": [V, Vector3.ZERO], "water_kd": [V, Vector3.ZERO], "water_ku": [V, Vector3.ZERO],
 		"water_sun_w": [V, Vector3.UP], "water_es0": [F, 0.0], "water_ek0": [F, 0.0], "water_exposure": [F, 1.0],
 		"water_glow_k": [F, 1.0], "water_zref": [F, 2.0], "water_sky_nits": [F, 0.0],
-		"water_sand": [RenderingServer.GLOBAL_VAR_TYPE_COLOR, Color.WHITE]}
+		"water_sand": [RenderingServer.GLOBAL_VAR_TYPE_COLOR, Color.WHITE],
+		# the light net (look/caustics.gdshaderinc): its map, and x 1 = read the map / 0 = per pixel, y the net's time (-1 = TIME)
+		"water_caus_map": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()],
+		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)]}
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)
@@ -230,7 +298,7 @@ func _push_water(water_y: float, sun_up_air: Vector3, beam_h_lux: float, sky_lux
 	rs.global_shader_parameter_set("water_es0", beam_h_lux * WaterOptics.FRESNEL_SUN)   # horizontal lux of the sun just under
 	rs.global_shader_parameter_set("water_ek0", sky_lux * WaterOptics.FRESNEL_SKY)      # horizontal lux of the sky just under
 	rs.global_shader_parameter_set("water_exposure", exposure)
-	rs.global_shader_parameter_set("water_glow_k", WaterOptics.LOOK_SET.glow_k)
+	rs.global_shader_parameter_set("water_glow_k", glow_k)
 	rs.global_shader_parameter_set("water_sand", WaterOptics.SAND)
 	rs.global_shader_parameter_set("water_sky_nits", sky_lux / PI)   # clear sky as a uniform dome (stand-in for the surface)
 	rs.global_shader_parameter_set("water_zref", z_ref)
@@ -290,9 +358,16 @@ func _push_sky(st: Dictionary) -> void:
 	mat.set_shader_parameter("moon_b_deg", SkyClock.MOONS[1].drawn_deg)
 	mat.set_shader_parameter("moon_a_albedo", SkyClock.MOON_LOOK.albedo_A)
 	mat.set_shader_parameter("moon_b_albedo", SkyClock.MOON_LOOK.albedo_B)
-	var ka := SkyClock.kelvin_rgb(SkyClock.MOONS[0].kelvin); var kb := SkyClock.kelvin_rgb(SkyClock.MOONS[1].kelvin)
-	mat.set_shader_parameter("moon_a_tint", Vector3(ka.r, ka.g, ka.b))
-	mat.set_shader_parameter("moon_b_tint", Vector3(kb.r, kb.g, kb.b))
+	mat.set_shader_parameter("moon_a_kelvin", SkyClock.MOONS[0].kelvin)
+	mat.set_shader_parameter("moon_b_kelvin", SkyClock.MOONS[1].kelvin)
+	for n in ["A", "B"]:   # MI_MoonA/B MoonTint: MOON_TINTS mixed by moon_tint_mix around luminance 1 (v83)
+		var mt: Color = SkyClock.MOON_TINTS[n]; var tmix: float = SkyClock.MOON_LOOK.moon_tint_mix
+		var ty := 0.2126 * mt.r + 0.7152 * mt.g + 0.0722 * mt.b
+		mat.set_shader_parameter("moon_%s_night" % n.to_lower(), Vector3(1.0 + tmix * (mt.r / ty - 1.0),
+			1.0 + tmix * (mt.g / ty - 1.0), 1.0 + tmix * (mt.b / ty - 1.0)))
+	mat.set_shader_parameter("moon_cap", SkyClock.MOON_LOOK.moon_cap)
+	mat.set_shader_parameter("moon_blue", SkyClock.MOON_LOOK.moon_blue)
+	mat.set_shader_parameter("moon_sat", SkyClock.MOON_LOOK.moon_sat)
 	mat.set_shader_parameter("maria", SkyClock.MOON_LOOK.maria)
 	mat.set_shader_parameter("planetshine", SkyClock.MOON_LOOK.planetshine)
 	mat.set_shader_parameter("moon_edge", SkyClock.MOON_LOOK.moon_edge)
@@ -309,3 +384,24 @@ func _push_sky(st: Dictionary) -> void:
 		_dome_sun = ds; _dome_g = ground_lux_of_dome(ds)
 	mat.set_shader_parameter("sky_norm", (st.skylux - SkyClock.NIGHT_SKY_LUX) / _dome_g if _dome_g > 1e-12 else 0.0)
 	mat.set_shader_parameter("sea_nits", SkyClock.OCEAN_ALBEDO * st.total / PI)
+	# night sky (look/sky_stars.gdshaderinc, Unreal M_Stars): what the Unreal clock wrote to MPC_Sky and the Stars actor
+	if mat.get_shader_parameter("star_cat") == null:
+		mat.set_shader_parameter("star_cat", StarCatalogue.texture())
+	var north: Vector3 = st.frame[1]                       # the sky turns about the planet's axis once a day (z-up, as the clock)
+	# Gary 27 Nov 17:44Z: the stars turn WITH the sun (Unreal turned the actor by +2 pi (days - 0.5), against the sun,
+	# though its comment said "with the sun"); the midnight sky is the same either way, only the motion's sense changes
+	var turn: float = -deg_to_rad(fmod(rad_to_deg(TAU * (float(st.days) - 0.5)), 360.0))
+	mat.set_shader_parameter("star_spin", Vector4(north.x, north.y, north.z, turn))
+	var glow: float = st.eclipse.glow
+	mat.set_shader_parameter("stars_on", 1.0 if (float(st.total) < 50.0 or glow > 0.0) else 0.0)   # STARS_BELOW_LUX
+	var ra: float = SkyClock.MOONS[0].drawn_deg; var rb: float = SkyClock.MOONS[1].drawn_deg
+	mat.set_shader_parameter("moon_a_r", deg_to_rad(ra * 0.5) if float(st.A.elev) > -(ra * 0.5 + 0.5) else 0.0)   # MoonAView.w
+	mat.set_shader_parameter("moon_b_r", deg_to_rad(rb * 0.5) if float(st.B.elev) > -(rb * 0.5 + 0.5) else 0.0)
+	mat.set_shader_parameter("star_expo", exposure)        # Unreal's EyeAdaptation: exposed units per nit
+	mat.set_shader_parameter("site_lux", float(st.total))
+	mat.set_shader_parameter("eclipse_glow", glow)
+	var key_k: float = st[key].kelvin if key != "" else SkyClock.STAR.kelvin
+	mat.set_shader_parameter("key_kelvin", key_k)
+	# the stars are aimed through AgX's night darkening (NightSky, NightDeep); without that AgX they keep their own light
+	mat.set_shader_parameter("night_sky", agx_fx.night_sky if agx_fx.enabled else 0.0)
+	mat.set_shader_parameter("deep_comp", agx_fx.night_deep if agx_fx.enabled else 0.0)

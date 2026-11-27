@@ -1,10 +1,13 @@
-// Sky 0.1.1 (engine thread; 0.1.1: twilight dome = the shape with the sun held at 1 deg, scaled to the clock's twilight sky_lux): the Unreal sky's drawn bodies, ported, over a clear-air dome.
+// Sky 0.2.1 (engine thread; 0.2.1: the moons' night face, MoonCap; 0.2.0: the night sky, M_Stars, in look/sky_stars.gdshaderinc; 0.1.1: twilight dome = the shape with the sun held at 1 deg, scaled to the clock's twilight sky_lux): the Unreal sky's drawn bodies, ported, over a clear-air dome.
 // Sun disc + corona: SUN_HLSL (sun_v184) as is: limb-darkened disc carrying the sun's whole light, drawn x5.29
 // (2.8 deg), air extinction per band (0.0862, 0.1665, 0.2961) x air mass, masked by the moons.
-// Moons A and B: MOON_HLSL as is: Lommel-Seeliger face, maria noise, planetshine, soft edge; lit by the true sun.
+// Moons A and B: MOON_HLSL as is: Lommel-Seeliger face, maria noise, planetshine, soft edge; lit by the true sun;
+// at night the face held at MoonCap (exposed), its night tint (MoonBlue, MoonTint) and MoonSat (0.2.1).
 // Dome: stand-in for Unreal's SkyAtmosphere (an engine feature, not our code): Rayleigh + sea-salt single scatter,
 // scaled by the clock so the sky's light on the ground is the clock's sky_lux (sky_norm, from WorldRoot).
-// Stars (STARS_HLSL) come next. Output in nits (background_intensity 1, physical light units).
+// Night sky: STARS_HLSL (M_Stars) in look/sky_stars.gdshaderinc, added over everything as in Unreal (an additive cube);
+// above water only, and not in the radiance cubemap passes (a star is measured in screen pixels).
+// Output in nits (background_intensity 1, physical light units).
 shader_type sky;
 render_mode use_debanding;
 
@@ -16,8 +19,14 @@ uniform vec3 moon_a_dir = vec3(0.0, -1.0, 0.0);
 uniform vec3 moon_b_dir = vec3(0.0, -1.0, 0.0);
 uniform float moon_a_deg = 2.75;
 uniform float moon_b_deg = 2.25;
-uniform vec3 moon_a_tint = vec3(1.0);
-uniform vec3 moon_b_tint = vec3(1.0);
+uniform float moon_a_kelvin = 4100.0;   // MI_MoonA/B Tint = planck(moon) / planck(sun), luminance 1
+uniform float moon_b_kelvin = 6500.0;
+uniform vec3 moon_a_night = vec3(1.0);   // MoonTint after moon_tint_mix (v41/v83): the night colour, luminance kept
+uniform vec3 moon_b_night = vec3(1.0);
+uniform float moon_cap = 3.0;            // MoonCap (v25/v86): the highlands' brightness at night, exposed units
+uniform float moon_blue = 0.2;           // MoonBlue (v37)
+uniform float moon_sat = 0.5;            // MoonSat (v86): how much colour the night face keeps
+uniform float night_cut = 0.0;           // NightCut (v83: 0)
 uniform float moon_a_albedo = 0.12;
 uniform float moon_b_albedo = 0.20;
 uniform float maria = 0.3;
@@ -28,6 +37,7 @@ uniform float sky_norm = 1.0;           // set by the driver: dome scale so its 
 uniform float sea_nits = 0.0;           // below the horizon: the sea, seen from above
 
 const vec3 EXT = vec3(0.0862, 0.1665, 0.2961);
+#include "sky_stars.gdshaderinc"
 
 float airmass(float y) {
 	float eld = degrees(asin(clamp(y, 0.0, 1.0)));
@@ -66,7 +76,7 @@ float vnoise(vec3 p) {
 	return m;
 }
 // one moon's face (MOON_HLSL), or -1 outside its disc
-vec4 moon(vec3 v, vec3 c, float deg, float albedo, vec3 tint, vec3 s) {
+vec4 moon(vec3 v, vec3 c, float deg, float real_deg, float albedo, float kelvin, vec3 night_tint, vec3 s) {
 	float R = radians(deg * 0.5);
 	float a = acos(clamp(dot(v, c), -1.0, 1.0));
 	if (a > R) return vec4(0.0);
@@ -80,7 +90,24 @@ vec4 moon(vec3 v, vec3 c, float deg, float albedo, vec3 tint, vec3 s) {
 	float ls = 2.0 * mu0 / max(mu0 + mu, 1e-4);
 	float m = vnoise(n * 3.0);
 	float alb = albedo * mix(1.0 - maria, 1.0 + 0.5 * maria, smoothstep(0.35, 0.65, m));
-	vec3 col = (alb / PI) * sun_toa * (ls + planetshine) * tint;
+	const vec3 LUM = vec3(0.2126, 0.7152, 0.0722);
+	vec3 tint = s_planck(kelvin) / s_planck(5772.0);
+	tint /= max(dot(tint, LUM), 1e-4);
+	// v21: at night the drawn disc can carry the real moon's light (NightCut; 0 since v83 = the full drawn face)
+	float dil = pow(real_deg / max(deg, real_deg), 2.0);
+	float night = clamp((3.0 - log(max(site_lux, 1e-6)) / log(10.0)) / 3.0, 0.0, 1.0);
+	float k = mix(1.0, pow(dil, night_cut), night);
+	vec3 col = (alb / PI) * sun_toa * (ls + planetshine) * tint * k;
+	// v25: at night the whole disc is scaled so its highlands sit at MoonCap (exposed), one factor so the maria keep
+	// their contrast; v37 MoonBlue, v41 MoonTint (luminance kept), v86 MoonSat. By day nothing changes.
+	float high = albedo / PI * sun_toa * k;
+	float sc = (star_expo > 0.0) ? min(1.0, moon_cap / max(high * star_expo, 1e-9)) : 1.0;
+	vec3 LightTint = s_planck(key_kelvin) / s_planck(5772.0);
+	LightTint /= max(dot(LightTint, LUM), 1e-4);                      // light_colour(): luminance 1
+	vec3 mt = night_tint / max(dot(night_tint, LUM), 1e-4);
+	col *= mix(vec3(1.0), sc * mix(LightTint, vec3(1.0), moon_blue) * mt, night);
+	float my0 = dot(col, LUM);
+	col = mix(col, vec3(my0), (1.0 - clamp(moon_sat, 0.0, 1.0)) * night);
 	float soft = clamp((1.0 - rr) / max(fwidth(rr) * moon_edge, 1e-5), 0.0, 1.0);
 	return vec4(col * exp(-EXT * airmass(max(c.y, 0.0))), soft);
 }
@@ -106,13 +133,14 @@ void sky() {
 		float r = max(x, 1.0);
 		float streak = 0.6 + 0.4 * pow(abs(cos(phi - 0.3)), 4.0) + 0.12 * sin(7.0 * phi + 1.3) + 0.08 * sin(13.0 * phi + 0.4) + 0.05 * sin(29.0 * phi + 2.1);
 		float cor = corona * 1e-6 / (6.2831853 * R * R) * pow(r, -3.0) * max(streak, 0.2) * clamp((7.0 - r) / 2.0, 0.0, 1.0);
-		vec4 ma = moon(v, normalize(moon_a_dir), moon_a_deg, moon_a_albedo, moon_a_tint, s);
-		vec4 mb = moon(v, normalize(moon_b_dir), moon_b_deg, moon_b_albedo, moon_b_tint, s);
+		vec4 ma = moon(v, normalize(moon_a_dir), moon_a_deg, 0.52, moon_a_albedo, moon_a_kelvin, moon_a_night, s);
+		vec4 mb = moon(v, normalize(moon_b_dir), moon_b_deg, 0.43, moon_b_albedo, moon_b_kelvin, moon_b_night, s);
 		float mask = (1.0 - ma.a) * (1.0 - mb.a);
 		if (s.y > -0.02) col += (inside * disc + cor * vec3(1.0, 0.97, 0.92)) * sun_toa * T * mask;
 		// B is nearer (18 km) than A (20 km): it covers A
 		col = mix(col, air + ma.rgb, ma.a * (1.0 - mb.a));   // the air in front of a moon still glows
 		col = mix(col, air + mb.rgb, mb.a);
+		if (!AT_CUBEMAP_PASS) col += stars(v, POSITION, TIME, s, normalize(moon_a_dir), normalize(moon_b_dir));
 		COLOR = col;
 	}
 }
