@@ -156,6 +156,15 @@ def cage_checks(C, V, form, rec):
     return R
 
 
+def pose_checks(C, V, rec, jaw_w=None):
+    """GP0 no crossing faces at rest; GP1 gape 0-30 deg and GF1 gill flare 0-20 deg add no crossings or flipped faces and
+    leave the eye rims in place (pose.py)."""
+    from .pose import stress
+    S = stress(C, V, rec, jaw_w=jaw_w)
+    return {'GP0_rest_crossings': S['rest_crossings'], 'GP0_pass': S['GP0_pass'], 'GP1_gape': S['gape'], 'GP1_pass': S['GP1_pass'],
+            'GF1_flare': S['flare'], 'GF1_pass': S['GF1_pass']}
+
+
 def p6(N, Mk):
     """the normal map carries the form: every third of the body has >= 10 % of texels tilted > 3 deg, the map is not
     inverted, and no isolated specks remain (> 25 deg from all 8 neighbours)."""
@@ -220,6 +229,14 @@ def planted(C0, V0, VN0, form, rec):
     PL['OP1 (one gill passage deleted)'] = not run(c, V0)['OP1_pass']
     deep = sorted(set(v for f, t in zip(C0['faces'], C0['ftag']) if t == 'cavity' for v in f) - set(v for f, t in zip(C0['faces'], C0['ftag']) if t in SKIN_TAGS for v in f))
     V = V0.copy(); V[deep[len(deep) // 2]] += np.array([0, 0, 0.2]); PL['OP2 (cavity vertex pushed out of the body)'] = not run(C0, V)['OP2_pass']
+    from .pose import jaw_weights
+    from .pose import triangles, self_intersections
+    T_ = triangles(C0['faces']); base = self_intersections(V0, T_)[0]
+    V = V0.copy(); cav = C0['openings']['cavity_rows'][3]; V[cav[len(cav) // 4]] += np.array([0, 0, 0.15])
+    PL['GP0 (cavity vertex pushed through the cheek)'] = self_intersections(V, T_)[0] > base
+    w = jaw_weights(C0, V0, rec); up = C0['openings']['mouth_rows'][1]
+    for v in up[1:C0['openings']['jr'] - 1:2]: w[v] = 1.0       # upper-lip loop vertices wrongly bound to the jaw
+    PL['GP1 (upper lip loop bound to the jaw)'] = not pose_checks(C0, V0, rec, jaw_w=w)['GP1_pass']
     PL['P6 (flat normal map)'] = not p6(np.dstack([np.zeros((64, 64)), np.zeros((64, 64)), np.ones((64, 64))]), np.ones((64, 64), bool))['P6_pass']
     PL['P1 (40k tris)'] = not export_checks('/nonexistent', dict(tris_total=40000, bones=10))['P1_pass']
     return PL
@@ -231,6 +248,7 @@ def check(out, record_path, with_planted=False):
     rec = adapt(record_path); form = Form(rec)
     C = json.load(open(os.path.join(out, 'cage.json'))); Z = np.load(os.path.join(out, 'cage.npz'))
     R = cage_checks(C, Z['V'], form, rec)
+    R.update(pose_checks(C, Z['V'], rec))
     stp = os.path.join(out, 'glb_stats.json')
     if os.path.exists(stp): R.update(export_checks(out, json.load(open(stp))))
     R['P9_form_cage_s'] = round(C['stats']['build_s'] - C['stats']['bake_s'], 1); R['P9_pass'] = R['P9_form_cage_s'] < 60

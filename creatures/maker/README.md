@@ -34,7 +34,7 @@ as a comment that says why.
 | 6 | Maps | `maps.py` | cage, UV, Form | `body_base.png`, `body_orm_pre.png`, `body_height.npy`, `body_mask.npy` |
 | 7 | Fins | `fins.py` | Form, record | fin cards + `fin_base.png`, `fin_normal.png` |
 | 8 | Export | `blender/export_glb.py` | everything above + `form_mc.npz` | normal/AO bake, rig, materials, `fish.glb`, `fish_LOD1.glb`, `fish_LOD2.glb`, `glb_stats.json` |
-| 9 | Checks | `checks.py` | build folder + record | `checks.json` |
+| 9 | Checks | `checks.py`, `pose.py` | build folder + record | `checks.json` |
 
 `build.py` runs stages 1 to 7 and writes `cage.npz` + `cage.json`; `board.py` runs it over many records.
 
@@ -56,7 +56,8 @@ check can tell a designed crease from a fault.
 
 Cage (no Blender): P2 quad share and corners, P3 manifold, P4 skin on the form, P5 skin UV stretch and folds, IC1 parts
 from the record, EY1 eye size, OP1 openings are topology (genus 2, the lips reach both gill slits through interior faces),
-OP2 interior inside the body, OP3 no fold outside designed creases. Export: P1 triangle budget and LODs, P6 normal map
+OP2 interior inside the body, OP3 no fold outside designed creases, GP0 no crossing faces at rest, GP1 gape 0-30 deg and
+GF1 gill flare 0-20 deg add no crossings or flipped faces and leave the eye rims in place (`pose.py`). Export: P1 triangle budget and LODs, P6 normal map
 carries the form, P7 bones, P8 Khronos glTF validator. Each check has a planted fault in `checks.planted`.
 
 ## Output for the engine

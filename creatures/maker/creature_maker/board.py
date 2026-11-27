@@ -5,7 +5,7 @@ message) or the check results.
 import glob, json, os, subprocess, sys, traceback
 from concurrent.futures import ThreadPoolExecutor
 
-KEEP = ('P2_worst_corner_p1_deg', 'P5_stretch_ok_area', 'P5_uv_folded_faces', 'OP1_pass', 'OP2_pass', 'OP3_folds', 'OP3_folds_by_region',
+KEEP = ('GP0_rest_crossings', 'GP1_pass', 'GF1_pass', 'P2_worst_corner_p1_deg', 'P5_stretch_ok_area', 'P5_uv_folded_faces', 'OP1_pass', 'OP2_pass', 'OP3_folds', 'OP3_folds_by_region',
         'IC1_input_faults', 'IC1_missing')
 
 
