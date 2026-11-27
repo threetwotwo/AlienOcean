@@ -1,5 +1,14 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): the Unreal night eye
+- Engine: WorldRoot.apply now has sun_v184's night eye (exposure()): night_weight (0 at 1000 lux, 1 at 1 lux), the
+  exposure limits (NIGHT_SHUT -3.25, NIGHT_OPEN -4.75, BRIGHTEN_STOPS 1.5), night_key_stops (Krawczyk key) plus
+  NIGHT_LIFT 0.5 on the compensation, dawn_dim, the steady under-water step fading out at night and NIGHT_EYE_UNDER 1.
+  Before, a moonless night was exposed about 8.7 stops over Unreal's. Now EV100 -4.75 moonless (hour 22), -3.48 under
+  two moons (hour 94), -3.69 at dusk (18.6), noon unchanged (15.5 air / 14.75 under water). Not ported: sunset_shut.
+  Open: the moon face clips white (Unreal's MoonCap not ported), and the sky is mirrored left-right against Unreal
+  (to_godot keeps handedness; being checked).
+
 ## 0.6.0-dev (28 Nov 2026): Gary's brightness pick
 - Engine: under water +1 stop (WorldRoot.under_exposure_art 1.0) and haze GlowK 1.0 (was 2.5) by default: Gary picked
   "Brighter" 17:06Z. Noon near sand L* 72, far water 48, shadow 50 (key frame 79 / 50-52 / 44).
@@ -24,6 +33,19 @@
   warm colour. WorldRoot.depth_colour / depth_colour_share: Unreal v168 depth colour give-back (sun_v184 depth_gain,
   matches the Python to 4 decimals); weak at the camera's depth (0.65 -> 0.58 at 4x share). light_neutral defaults to 1.0 (Gary
   picked "Full" 16:53Z); depth colour stays off. Shot tool: AO_LIGHT_NEUTRAL, AO_DEPTH_COLOUR, AO_DEPTH_SHARE.
+
+## 0.6.0-dev (27 Nov 2026, late night): the Unreal night sky
+- Engine: Sky 0.2.0. `look/sky_stars.gdshaderinc` is sun_v184 M_Stars (STARS_HLSL, lines 6744-7877) ported line for
+  line in the clock's z-up axes: the star field (two random stars per cube cell plus the catalogue of 1914 bright stars
+  with the five figures and the clusters), glints, the planet, the Milky Way (dust, star clouds, nebulae), faint-star
+  haze and speckle, airglow, zodiacal light, the moons' sky glow (Krisciunas & Schaefer), the eclipse glow and the night
+  haze on the horizon. Above water only (Gary's rule, Unreal v32); not drawn in the sky's radiance cubemap.
+  `look/star_catalogue.gd` holds the catalogue (CAT[2319], CATS[385], copied value for value) and builds its float
+  texture at run time. WorldRoot._push_sky feeds what the Unreal clock wrote: the sky's turn (StarSpin), the moons'
+  view radii, exposure, site lux, eclipse glow, the key light's temperature, and AgX's NightSky / NightDeep.
+  Left out, no such system here: clouds in front, scene-depth occlusion and the haze over far geometry, the tank's
+  wave refraction; dead in Unreal too: the old aureole, airglow ripples.
+  The sky now uses TIME and POSITION, so Godot runs it as a realtime sky.
 
 ## 0.6.0-dev (27 Nov 2026, night): the Unreal AgX tonemapper
 - Engine: AgX post 0.1.0 (`look/agx_post.glsl`, `adapters/godot/agx_effect.gd`): sun_v184 M_PP_AgX ported line for

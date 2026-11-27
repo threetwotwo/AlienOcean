@@ -67,6 +67,33 @@ var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
 var _dome_g := 0.0
 
+const NIGHT_FLOOR_EV := 0.0           # MPC_Sky NightFloorEV (saved 0)
+const NIGHT_OPEN := -4.75             # v72: at night the eye opens to EV100 floor + this
+const NIGHT_SHUT := -3.25             # v72: the dark end stops at EV100 floor + this
+const BRIGHTEN_STOPS := 1.5           # how far the eye may brighten from the dark end
+const NIGHT_LIFT := 0.5               # v34: floats and water +0.5 stop at night
+const NIGHT_EYE_UNDER := 1.0          # v73: stops darker under the water at night
+
+static func night_weight(total: float) -> float:
+	## v26: 0 at 1000 lux and above, 1 at 1 lux and below (log in between)
+	return clampf((3.0 - log(maxf(total, 1e-6)) / log(10.0)) / 3.0, 0.0, 1.0)
+
+static func _key(lux: float) -> float:
+	return 1.03 - 2.0 / (2.0 + log(0.18 * maxf(lux, 1e-6) / PI + 1.0) / log(10.0))
+
+static func night_key_stops(total: float) -> float:
+	## v26: compensation of a dark-adapted eye (Krawczyk, Myszkowski & Seidel 2005), never brighter than a camera
+	return minf(log(maxf(_key(total), 1e-3) / 0.18) / log(2.0), 0.0)
+
+static func _dawn_dim(total: float, noon_total: float, nw: float) -> float:
+	## v93: twilight reads dimmer than noon by the night eye's key, never darker than the night eye at 1 lux
+	if nw <= 0.0: return 0.0
+	var t := minf(nw / 0.1, 1.0)
+	var K := minf(log(maxf(_key(total), 1e-3) / _key(noon_total)) / log(2.0), 0.0) * t * t * (3.0 - 2.0 * t)
+	var O := nw * (night_key_stops(total) + NIGHT_LIFT)
+	var fl := night_key_stops(1.0) + NIGHT_LIFT
+	return minf(minf(O, maxf(K, fl)) - O, 0.0)
+
 static func to_godot(v: Vector3) -> Vector3:
 	return Vector3(v.x, v.z, -v.y)
 
@@ -142,11 +169,21 @@ func apply(cam_y: float) -> Dictionary:
 	var tint: Color = SkyClock.kelvin_rgb(body.kelvin) * air_tint(body.elev)
 	if key != "sun": tint = tint * SkyClock.MOON_TINTS[key].lerp(Color(1, 1, 1), 0.5)
 	# exposure: the eye's dark end slid with the light; steady under water; place compensation
+	# sun_v184 exposure(): limits slid with the light; at night the eye opens to EV100 NIGHT_OPEN within the night
+	# floor (NIGHT_SHUT), with the dark-adapted key (night_key_stops), the night lift and dawn_dim on the compensation.
+	# Godot has no auto-exposure meter here, so the eye sits at the dark end clamped into Unreal's limits.
 	var noon_total: float = SkyClock.sky_state(12.0)["total"]
-	var ev := ev100(st.total) - (ev100(noon_total) - SkyClock.EV_MAX)
-	if under: ev -= SkyClock.STEADY_UNDER_AT
+	var dark := ev100(st.total) - (ev100(noon_total) - SkyClock.EV_MAX)
+	var nw := night_weight(st.total)
+	var hi := maxf(dark, NIGHT_FLOOR_EV + NIGHT_SHUT)
+	var lo := minf(maxf(dark - BRIGHTEN_STOPS, NIGHT_FLOOR_EV + NIGHT_SHUT - BRIGHTEN_STOPS), hi)
+	lo = minf(lo, lo + (NIGHT_FLOOR_EV + NIGHT_OPEN - lo) * nw)
+	var ev := clampf(dark, lo, hi)
+	if under: ev -= SkyClock.STEADY_UNDER_AT * (1.0 - nw)       # the steady under-water eye is a daytime rule (st_w)
 	var bias: float = SkyClock.EXPOSURE_BIAS.get(place, 0.0)
-	if under: bias += under_exposure_art
+	bias += nw * (night_key_stops(st.total) + NIGHT_LIFT)
+	bias += _dawn_dim(st.total, noon_total, nw)
+	if under: bias += under_exposure_art - NIGHT_EYE_UNDER * nw
 	# EV100 = log2(N^2 / t) at ISO 100. f/22 keeps Godot's physical depth of field out of the way (deep focus).
 	cam_attr.exposure_sensitivity = 100.0; cam_attr.exposure_aperture = 22.0
 	cam_attr.exposure_shutter_speed = pow(2.0, ev) / (22.0 * 22.0)
@@ -194,7 +231,7 @@ func apply(cam_y: float) -> Dictionary:
 		light.light_intensity_lux = beam_h / maxf(up_air.y, 0.02)
 		light.light_color = tint
 	last = {"key": key, "elev": body.elev, "total_lux": st.total, "sky_lux": st.skylux, "beam_h": beam_h,
-		"ev100": ev, "bias": bias, "under": under}
+		"ev100": ev, "bias": bias, "under": under, "night_w": nw}
 	return last
 
 func _art_k(k: Vector3) -> Vector3:
@@ -314,3 +351,22 @@ func _push_sky(st: Dictionary) -> void:
 		_dome_sun = ds; _dome_g = ground_lux_of_dome(ds)
 	mat.set_shader_parameter("sky_norm", (st.skylux - SkyClock.NIGHT_SKY_LUX) / _dome_g if _dome_g > 1e-12 else 0.0)
 	mat.set_shader_parameter("sea_nits", SkyClock.OCEAN_ALBEDO * st.total / PI)
+	# night sky (look/sky_stars.gdshaderinc, Unreal M_Stars): what the Unreal clock wrote to MPC_Sky and the Stars actor
+	if mat.get_shader_parameter("star_cat") == null:
+		mat.set_shader_parameter("star_cat", StarCatalogue.texture())
+	var north: Vector3 = st.frame[1]                       # the sky turns about the planet's axis once a day (z-up, as the clock)
+	var turn: float = deg_to_rad(fmod(rad_to_deg(TAU * (float(st.days) - 0.5)), 360.0))
+	mat.set_shader_parameter("star_spin", Vector4(north.x, north.y, north.z, turn))
+	var glow: float = st.eclipse.glow
+	mat.set_shader_parameter("stars_on", 1.0 if (float(st.total) < 50.0 or glow > 0.0) else 0.0)   # STARS_BELOW_LUX
+	var ra: float = SkyClock.MOONS[0].drawn_deg; var rb: float = SkyClock.MOONS[1].drawn_deg
+	mat.set_shader_parameter("moon_a_r", deg_to_rad(ra * 0.5) if float(st.A.elev) > -(ra * 0.5 + 0.5) else 0.0)   # MoonAView.w
+	mat.set_shader_parameter("moon_b_r", deg_to_rad(rb * 0.5) if float(st.B.elev) > -(rb * 0.5 + 0.5) else 0.0)
+	mat.set_shader_parameter("star_expo", exposure)        # Unreal's EyeAdaptation: exposed units per nit
+	mat.set_shader_parameter("site_lux", float(st.total))
+	mat.set_shader_parameter("eclipse_glow", glow)
+	var key_k: float = st[key].kelvin if key != "" else SkyClock.STAR.kelvin
+	mat.set_shader_parameter("key_kelvin", key_k)
+	# the stars are aimed through AgX's night darkening (NightSky, NightDeep); without that AgX they keep their own light
+	mat.set_shader_parameter("night_sky", agx_fx.night_sky if agx_fx.enabled else 0.0)
+	mat.set_shader_parameter("deep_comp", agx_fx.night_deep if agx_fx.enabled else 0.0)
