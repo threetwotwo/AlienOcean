@@ -455,7 +455,7 @@ func step(env: Dictionary = {}) -> void:
 					var tc := pv.dot(rv) / rr              # her offset from the fish is -pv, closing at rv
 					var miss := (rv * tc - pv).length()
 					course = tc > 0.0 and tc < maxf(2.5, 1.2 * R / sqrt(rr)) and miss < ra + a.get("half_len", 0.0) / bl * 0.5 + 0.3
-				if (closing > p.rush_speed and (ttc < p.rush_ttc or course)) or (dp < ra + p.touch_R and closing > 0.0):     # a touch she moves into (not fish parked on her keep-out)
+				if kind != "ride" and ((closing > p.rush_speed and (ttc < p.rush_ttc or course)) or (dp < ra + p.touch_R and closing > 0.0)):   # a ridden creature parts them calmly, never a panic burst (Thalassa)     # a touch she moves into (not fish parked on her keep-out)
 					direct = true; flee = fv
 			# Katz split for the actor's push too: the sideways part turns, the along-heading part changes speed;
 			# and a fish swims away faster (an escape swim, not a C-start) the more urgent the threat (D6)
