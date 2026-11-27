@@ -8,6 +8,9 @@
 ##     handful of grid points, so the continuous band integral is not its expectation), where it carries > 1e-6 m^2;
 ##     Hs within 25 % of 4 sqrt(continuous band sum).
 ##  S4 planted fault: a sea drawn with the wrong slick (calm_k 4 instead of 16) must FAIL S3 for the 2.56 m cascade.
+##  S5 height read back (FftSea.height_at, what LagoonWaterField.water_y adds): at 300 drawn points (a still point X
+##     moved by its push, X + D(X), as the vertex shader places it) the height must be D(X).z of cascades 0 + 1 from a
+##     direct GPU read, within 2 mm; planted fault: the island y axis not flipped (Godot z = -y) must miss.
 ## Needs the renderer (compute): xvfb-run -a godot --path . --rendering-driver vulkan --script res://tests/test_fft_sea.gd
 extends SceneTree
 
@@ -64,9 +67,42 @@ func _process(_dt):
 			return false
 		print("S4 planted fault (slick calm_k 4): %s" % ("caught -> PASS" if fails > 0 else "NOT caught -> FAIL"))
 		if fails == 0: bad += 1
+		sea.set_params(SeaSpectrum.LAGOON.duplicate()); sea.time_s = 77.0; sea.step_now(); stage = 3; frame = 0
+		return false
+	if stage == 3:
+		if not sea.has_height() or frame < 8: return false
+		bad += _height_check()
 		print("FFT sea: %s" % ("PASS" if bad == 0 else "FAIL"))
 		quit(0 if bad == 0 else 1)
 	return false
+
+func _bilin(f: PackedFloat32Array, X: Vector2, L: float) -> Vector3:
+	var u := X / L * 256.0 - Vector2(0.5, 0.5)
+	var x0 := floori(u.x); var y0 := floori(u.y); var fx := u.x - x0; var fy := u.y - y0
+	var r := Vector3.ZERO
+	for dy in 2:
+		for dx in 2:
+			var i := (posmod(y0 + dy, 256) * 256 + posmod(x0 + dx, 256)) * 4
+			r += (fx if dx else 1.0 - fx) * (fy if dy else 1.0 - fy) * Vector3(f[i], f[i + 1], f[i + 2])
+	return r
+
+func _height_check() -> int:
+	var f0 := sea.read_layer("disp", 0); var f1 := sea.read_layer("disp", 1)
+	var rng := RandomNumberGenerator.new(); rng.seed = 5
+	var err := 0.0; var err_flip := 0.0; var s2 := 0.0
+	for k in 300:
+		var X := Vector2(rng.randf_range(-400.0, 400.0), rng.randf_range(-400.0, 400.0))
+		var D := _bilin(f0, X, 250.0) + _bilin(f1, X, 21.4)
+		var w := X + Vector2(D.x, D.y)
+		err = maxf(err, absf(sea.height_at(w.x, -w.y) - D.z))
+		err_flip = maxf(err_flip, absf(sea.height_at(w.x, w.y) - D.z))
+		s2 += D.z * D.z
+	var rms := sqrt(s2 / 300.0)
+	var ok := err < 0.002 and rms > 0.005
+	print("S5 height read back: max error %.5f m (crest rms %.4f m) -> %s" % [err, rms, "PASS" if ok else "FAIL"])
+	var caught := err_flip > 0.01
+	print("S5 planted fault (y axis not flipped): max error %.4f m -> %s" % [err_flip, "caught -> PASS" if caught else "NOT caught -> FAIL"])
+	return (0 if ok else 1) + (0 if caught else 1)
 
 func _parseval(report: bool) -> int:
 	var mo := SeaSpectrum.moments(SeaSpectrum.derive(SeaSpectrum.LAGOON))
