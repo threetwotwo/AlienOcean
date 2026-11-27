@@ -68,6 +68,7 @@ var key := ""
 var last := {}
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
+var caustics: CausticsMap           # the light net's map, drawn once a frame (adapters/godot/caustics_map.gd)
 var _dome_g := 0.0
 
 const NIGHT_FLOOR_EV := 0.0           # MPC_Sky NightFloorEV (saved 0)
@@ -119,6 +120,7 @@ func _init() -> void:
 	light = DirectionalLight3D.new(); light.name = "KeyLight"
 	light.shadow_enabled = true; light.directional_shadow_max_distance = 60.0
 	add_child(light)
+	caustics = CausticsMap.new(); add_child(caustics)
 	env = Environment.new()
 	var sky := Sky.new(); sky_mat = ShaderMaterial.new(); sky_mat.shader = load("res://look/sky.gdshader"); sky.sky_material = sky_mat
 	env.background_mode = Environment.BG_SKY; env.sky = sky; env.background_intensity = 1.0   # sky shader outputs nits
@@ -258,7 +260,10 @@ static func declare_globals() -> void:
 		"water_a": [V, Vector3.ZERO], "water_b": [V, Vector3.ZERO], "water_kd": [V, Vector3.ZERO], "water_ku": [V, Vector3.ZERO],
 		"water_sun_w": [V, Vector3.UP], "water_es0": [F, 0.0], "water_ek0": [F, 0.0], "water_exposure": [F, 1.0],
 		"water_glow_k": [F, 1.0], "water_zref": [F, 2.0], "water_sky_nits": [F, 0.0],
-		"water_sand": [RenderingServer.GLOBAL_VAR_TYPE_COLOR, Color.WHITE]}
+		"water_sand": [RenderingServer.GLOBAL_VAR_TYPE_COLOR, Color.WHITE],
+		# the light net (look/caustics.gdshaderinc): its map, and x 1 = read the map / 0 = per pixel, y the net's time (-1 = TIME)
+		"water_caus_map": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()],
+		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)]}
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)
@@ -337,9 +342,16 @@ func _push_sky(st: Dictionary) -> void:
 	mat.set_shader_parameter("moon_b_deg", SkyClock.MOONS[1].drawn_deg)
 	mat.set_shader_parameter("moon_a_albedo", SkyClock.MOON_LOOK.albedo_A)
 	mat.set_shader_parameter("moon_b_albedo", SkyClock.MOON_LOOK.albedo_B)
-	var ka := SkyClock.kelvin_rgb(SkyClock.MOONS[0].kelvin); var kb := SkyClock.kelvin_rgb(SkyClock.MOONS[1].kelvin)
-	mat.set_shader_parameter("moon_a_tint", Vector3(ka.r, ka.g, ka.b))
-	mat.set_shader_parameter("moon_b_tint", Vector3(kb.r, kb.g, kb.b))
+	mat.set_shader_parameter("moon_a_kelvin", SkyClock.MOONS[0].kelvin)
+	mat.set_shader_parameter("moon_b_kelvin", SkyClock.MOONS[1].kelvin)
+	for n in ["A", "B"]:   # MI_MoonA/B MoonTint: MOON_TINTS mixed by moon_tint_mix around luminance 1 (v83)
+		var mt: Color = SkyClock.MOON_TINTS[n]; var tmix: float = SkyClock.MOON_LOOK.moon_tint_mix
+		var ty := 0.2126 * mt.r + 0.7152 * mt.g + 0.0722 * mt.b
+		mat.set_shader_parameter("moon_%s_night" % n.to_lower(), Vector3(1.0 + tmix * (mt.r / ty - 1.0),
+			1.0 + tmix * (mt.g / ty - 1.0), 1.0 + tmix * (mt.b / ty - 1.0)))
+	mat.set_shader_parameter("moon_cap", SkyClock.MOON_LOOK.moon_cap)
+	mat.set_shader_parameter("moon_blue", SkyClock.MOON_LOOK.moon_blue)
+	mat.set_shader_parameter("moon_sat", SkyClock.MOON_LOOK.moon_sat)
 	mat.set_shader_parameter("maria", SkyClock.MOON_LOOK.maria)
 	mat.set_shader_parameter("planetshine", SkyClock.MOON_LOOK.planetshine)
 	mat.set_shader_parameter("moon_edge", SkyClock.MOON_LOOK.moon_edge)

@@ -11,13 +11,38 @@
   the sun (in Unreal too; sun_v184 apply_fast). Still Godot's own, not Unreal's: the moon faces' and the corona
   streaks' roll (built on Godot axes in sky.gdshader).
 
+## 0.6.0-dev (28 Nov 2026): the light net from a map, once a frame
+- Engine: caustics map 0.1.0 (`adapters/godot/caustics_map.gd`, WorldRoot.caustics; `look/caustics_slope`, `_focus`,
+  `_blur.gdshader`): lagoonwater v98's route. Each frame the net is drawn once into a 512 px tile of 2.56 m
+  (r g b = 0.8 / 2 / 5 m) in v98's three passes: the slopes in each depth's mip (128 / 64 / 32 px), CAUS_HLSL, the
+  sun's disc (8 ring taps and the centre). seabed_surface and ground_surface read it through the global sampler
+  `water_caus_map` as v98's light function did: at the sunlight's entry point, three turned copies of the tile (tile
+  break, 7 m patches), four taps over the pixel past 1 cm. caustics 0.2.0 (`look/caustics.gdshaderinc`) keeps the
+  per-pixel maths as the check path (`WorldRoot.caustics.per_pixel`, shot tool AO_CAUS=pixel; also what a scene
+  without the map node gets); `frozen_time` / AO_CAUS_T holds the net still for comparisons.
+- The 32 waves now sit on the tile (each moved to the nearest whole wave, its slope kept; 8.8 to 23.3 rad/m) and
+  live in `look/caustic_waves.gdshaderinc` (generated; CAUS_K and the new CAUS_A height amplitudes are there for
+  the surface). Offline, map / per pixel / v98: std at 0.8, 2, 5 m 0.15 / 0.32 / 0.31, 0.15 / 0.32 / 0.30,
+  0.14-0.15 / 0.29-0.31 / 0.34. The engine's map against the tool's numpy map: rms 0.0008.
+- Measured (llvmpipe, 960 x 540, ms a frame, shots 01 / 04): no net 443 / 616, map 498 / 741, per pixel as merged
+  (one copy) 965 / 1119, per pixel with the tile break 1110 / 1352. Map against per pixel on the sand: mean
+  difference under 0.3 of 255.
+
+## 0.6.0-dev (28 Nov 2026): the moons' night face
+- Engine: Sky 0.2.1. The rest of MOON_HLSL is ported: at night the face is scaled so that its highlands sit at
+  MoonCap 3 (in exposed units, so the maria keep their contrast), it takes the night tint (MoonBlue 0.2, MoonTint
+  mixed 0.5), and it keeps MoonSat 0.5 of its colour. NightCut 0 is wired. The moon's day colour is now Unreal's
+  (planck(moon) / planck(sun) at luminance 1), replacing a 6500 K-white blackbody fit. Before this, the full Moon B
+  clipped to a white disc under the night eye. Now it reads as a pale blue-white face with its maria. Day is unchanged
+  (the cap only lowers).
+
 ## 0.6.0-dev (28 Nov 2026): the Unreal night eye
 - Engine: WorldRoot.apply now has sun_v184's night eye (exposure()): night_weight (0 at 1000 lux, 1 at 1 lux), the
   exposure limits (NIGHT_SHUT -3.25, NIGHT_OPEN -4.75, BRIGHTEN_STOPS 1.5), night_key_stops (Krawczyk key) plus
   NIGHT_LIFT 0.5 on the compensation, dawn_dim, the steady under-water step fading out at night and NIGHT_EYE_UNDER 1.
   Before, a moonless night was exposed about 8.7 stops over Unreal's. Now EV100 -4.75 moonless (hour 22), -3.48 under
   two moons (hour 94), -3.69 at dusk (18.6), noon unchanged (15.5 air / 14.75 under water). Not ported: sunset_shut.
-  Open: the moon face clips white (Unreal's MoonCap not ported). (The mirrored sky: fixed, see above.)
+  Moon face cap and the mirrored sky: fixed, see the entries above.
 
 ## 0.6.0-dev (28 Nov 2026): Gary's brightness pick
 - Engine: under water +1 stop (WorldRoot.under_exposure_art 1.0) and haze GlowK 1.0 (was 2.5) by default: Gary picked

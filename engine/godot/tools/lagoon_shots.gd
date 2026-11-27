@@ -6,8 +6,9 @@
 ## 0.3.0: the world (light, sky, exposure, water) comes from adapters/godot/world_root.gd, the same node the game uses.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/lagoon_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
 ## Env: AO_UNDER_EV (art stops under water), AO_GLOW_K (haze strength, 2.5), AO_LIGHT_NEUTRAL=0..1 (art direction: sunlight keeps its colour on the way down), AO_DEPTH_COLOUR=1 (Unreal's depth colour give-back; AO_DEPTH_SHARE its share, default 0.25), AO_AGX=0 (Godot's built-in tonemapper instead of the ported Unreal AgX), AO_AGX_MODE=1 (raw buffer, for checks), AO_SHOTS (two-digit prefixes, e.g. 01,02), AO_WORLDTEX (world texture folder: the shared ground material).
+## Light net: AO_CAUS=pixel (per pixel instead of the map), AO_CAUS_T=<s> (hold the net at that second), AO_CAUS_DUMP=<file> (the map as raw float32 RGBA).
 ## Night: the Unreal night eye (WorldRoot.apply) and the Unreal stars (look/sky_stars.gdshaderinc). Try AO_HOUR=22 (moonless), 94 (moonlit).
-## Still to port: the surface's waves and tide, god rays (the light net is in: look/caustics.gdshaderinc).
+## Still to port: the surface's waves and tide, god rays (the light net is in: look/caustics.gdshaderinc, adapters/godot/caustics_map.gd).
 extends SceneTree
 
 const WATER_Y := LagoonWaterField.SURFACE_Y   # the Unreal lagoon's saved surface: SurfaceZ 400 cm (tide 0)
@@ -20,6 +21,8 @@ var fish: Node3D
 var ap: AnimationPlayer
 var wr: WorldRoot
 var ground: ShaderMaterial
+var _caus_dump := ""
+var _t8 := 0
 
 func _init():
 	args = OS.get_cmdline_user_args()
@@ -71,6 +74,9 @@ func _setup():
 	world.add_child(wr)
 	if OS.get_environment("AO_AGX") == "0": wr.set_agx(false)   # Godot's built-in AgX, for before/after
 	if OS.get_environment("AO_AGX_MODE") != "": wr.agx_fx.mode = int(OS.get_environment("AO_AGX_MODE"))
+	if OS.get_environment("AO_CAUS") == "pixel": wr.caustics.per_pixel = true   # the light net per pixel instead of from its map (checks)
+	if OS.get_environment("AO_CAUS_T") != "": wr.caustics.frozen_time = float(OS.get_environment("AO_CAUS_T"))   # hold the net at this second
+	if OS.get_environment("AO_CAUS_DUMP") != "": _caus_dump = OS.get_environment("AO_CAUS_DUMP")
 	world.add_child(wr.make_surface())
 	# hero fish, hovering near the coral heads
 	fish = _load(args[1]) as Node3D
@@ -115,6 +121,11 @@ func _next():
 func _process(_d):
 	if cam == null or i < 0 or i >= shots.size(): return false
 	wait += 1
+	if wait == 8: _t8 = Time.get_ticks_usec()
 	if wait == 24:   # let volumetric fog and SSIL settle (they accumulate over frames)
-		var p: String = args[2].path_join(shots[i][0] + ".png"); root.get_texture().get_image().save_png(p); print("SHOT ", p); _next()
+		if _caus_dump != "" and i == 0:   # the light net's map as raw floats, to check against tools/make_caustic_waves.py --dump
+			var cm: Image = wr.caustics.map_vp.get_texture().get_image(); cm.convert(Image.FORMAT_RGBAF)
+			var cf := FileAccess.open(_caus_dump, FileAccess.WRITE); cf.store_buffer(cm.get_data()); cf.close()
+			print("CAUS_DUMP ", _caus_dump, " ", cm.get_width(), " x ", cm.get_height(), " RGBAF")
+		var p: String = args[2].path_join(shots[i][0] + ".png"); root.get_texture().get_image().save_png(p); print("SHOT ", p, " frame ms ", snappedf((Time.get_ticks_usec() - _t8) / 16000.0, 0.1)); _next()
 	return false
