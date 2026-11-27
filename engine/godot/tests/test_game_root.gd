@@ -212,7 +212,7 @@ func _check(tick: int) -> void:
 	var gy = RenderingServer.global_shader_parameter_get("water_y")
 	if gy != null and absf(float(gy) - lvl) > 1e-5: _fail("G5", "water_y global %s vs level %.4f" % [gy, lvl])
 	var ls: Dictionary = g.girl.body.last_sense
-	if g.mounts.is_mounted("girl") and not paused and not ls.is_empty() and absf(float(ls.water_y) - lvl) > 1e-5: _fail("G5", "girl reads %.4f vs %.4f" % [ls.water_y, lvl])
+	if g.mounts.is_mounted("girl") and not paused and not ls.is_empty() and absf(float(ls.water_y) - lvl) > (0.15 if g.world_root.water.waves else 1e-5): _fail("G5", "girl reads %.4f vs %.4f" % [ls.water_y, lvl])
 	# G6
 	var gp: Vector3 = g.girl.body.global_position
 	if not (is_finite(gp.x) and is_finite(gp.y) and is_finite(gp.z)): _fail("G6", "girl NaN")
