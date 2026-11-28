@@ -59,6 +59,10 @@ func _ready() -> void:
 	grass.adopt(game.lagoon)
 	if OS.get_environment("AO_GRASS") == "0": grass.set_enabled(false)
 	_make_teleports()
+	# Retina (screen scale 2): render at half resolution, upscaled. Gary's M1 Pro bench, key-frame view at 2704x1696: 83 ms -> 28 ms;
+	# the picture keeps the pixel count of a non-Retina screen of the same size. AO_FULL_RES=1 keeps full resolution.
+	if DisplayServer.get_name() != "headless" and DisplayServer.screen_get_scale() >= 1.99 and OS.get_environment("AO_FULL_RES") != "1":
+		set_toggle("half_res", true)
 	ready_done = true
 
 func _asset_dir(p: String) -> String:
@@ -136,7 +140,10 @@ func set_toggle(n: String, on: bool) -> void:
 		"ssao": wr.env.ssao_enabled = on
 		"ssil": wr.env.ssil_enabled = on
 		"shadows": wr.light.shadow_enabled = on
-		"half_res": get_viewport().scaling_3d_scale = 0.5 if on else 1.0
+		"half_res":
+			# half the pixels each way, upscaled by AMD FSR 1 (spatial: safe with the AgX and water post effects)
+			get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR if on else Viewport.SCALING_3D_MODE_BILINEAR
+			get_viewport().scaling_3d_scale = 0.5 if on else 1.0
 		"grass_v2": if grass: grass.set_enabled(on)
 		"schools":
 			game.mounts.set_mount("fauna", on)
@@ -304,7 +311,7 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 	var base: Dictionary = await _bench_measure(secs)
 	rows.append({"case": "everything on", "r": base})
 	for n in BENCH_SWITCHES:
-		var on: bool = n != "half_res"            # half_res is the one switch that is off in the normal state
+		var on: bool = get_toggle(n)             # flip from the current state (half_res is on by default on Retina screens)
 		set_toggle(n, not on)
 		await get_tree().create_timer(settle).timeout
 		var r: Dictionary = await _bench_measure(secs)
