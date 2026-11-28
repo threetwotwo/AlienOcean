@@ -50,12 +50,19 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 const SUN_DISC_DEG := 0.53
 const SDFGI_RESET_STOPS := 3.0
 @export var under_white := Vector3.ZERO      # look check: the under-water camera balance (zero = the place's UNDER_WHITE)
-## The floor beyond the drawn floor (look/sea_bathy.gdshaderinc, 28 Nov): the lagoon's sand runs out to its reef
-## (lagoon_radius m round lagoon_centre, Godot x z), then falls away over fore_reef_m to ocean_depth. Radius 0 = no reef.
+## The lagoon's seabed out over the reef and down the drop-off (core/world/bathymetry.gd; the water reads it in
+## look/sea_bathy.gdshaderinc, the drop-off's seabed is adapters/godot/reef_terrain.gd): the reef flat starts
+## lagoon_radius m from lagoon_centre (Godot x z). Radius 0 = no reef (the lagoon goes on for ever).
 @export var lagoon_centre := Vector2.ZERO
-@export var lagoon_radius := 400.0
-@export var fore_reef_m := 600.0
+@export var lagoon_radius := 150.0
 @export var ocean_depth := 1000.0
+## the angle (deg, atan2(z, x)) of the reef's first stress-test sector (the vertical wall; Bathymetry.SECTOR_NAMES)
+@export var reef_sector_deg := 0.0
+func bathymetry() -> Bathymetry:
+	var b := Bathymetry.new()
+	b.centre = lagoon_centre; b.radius = lagoon_radius; b.ocean_depth = ocean_depth; b.lagoon_d = LagoonWaterField.SURFACE_Y - floor_y   # the mean level: the seabed does not follow the tide
+	b.sector_deg = reef_sector_deg
+	return b
 @export var water_type := 0.0              # 0 = the lagoon's water, 1 = the open ocean's (WaterOptics.optics); between = a blend (shelf)
 # weather (28 Nov, look thread; promised to the water surface thread, which wires foam and haze to it): cloud cover 0 clear ..
 # 1 overcast. SkyClock.overcast splits the light (Kasten-Czeplak): the sun's beam fades (shadows, caustics, glitter, the disc and
@@ -369,12 +376,14 @@ static func _moon_view(d: Vector3, drawn_deg: float) -> Vector4:
 
 static func declare_globals() -> void:
 	## global uniforms must exist before shaders compile (headless scripts can't rely on project.godot entries)
+	FftSea.declare_globals()        # sea_open_gain / sea_open_teal (the abyss, water_physics w_deep)
+	SeaFloorMap.declare_globals()   # the underwater view reads the floor map (is there a floor under this ray: lagoon or abyss)
 	if Engine.has_meta("water_globals"): return
 	var F := RenderingServer.GLOBAL_VAR_TYPE_FLOAT; var V := RenderingServer.GLOBAL_VAR_TYPE_VEC3
 	var defs := {"water_y": [F, LagoonWaterField.SURFACE_Y], "water_floor_y": [F, 0.0],
 		"water_a": [V, Vector3.ZERO], "water_b": [V, Vector3.ZERO], "water_kd": [V, Vector3.ZERO], "water_ku": [V, Vector3.ZERO],
 		"water_sun_w": [V, Vector3.UP], "water_es0": [F, 0.0], "water_ek0": [F, 0.0], "water_exposure": [F, 1.0],
-		"water_glow_k": [F, 1.0], "water_glow_ms": [F, 1.0], "water_bathy": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO], "water_ocean_depth": [F, 1000.0], "water_far_sand": [V, Vector3(0.82, 0.68, 0.44)], "water_zref": [F, 2.0], "water_sky_nits": [F, 0.0], "water_rrs": [V, Vector3.ZERO],
+		"water_glow_k": [F, 1.0], "water_glow_ms": [F, 1.0], "water_bathy": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO], "water_ocean_depth": [F, 1000.0], "water_far_sand": [V, Vector3(0.82, 0.68, 0.44)], "water_zref": [F, 2.0], "water_sky_nits": [F, 0.0], "water_rrs": [V, Vector3.ZERO], "water_rrs_deep": [V, Vector3.ZERO],
 		"water_sand": [RenderingServer.GLOBAL_VAR_TYPE_COLOR, Color.WHITE],
 		# the light net (look/caustics.gdshaderinc): its map, and x 1 = read the map / 0 = per pixel, y the net's time (-1 = TIME)
 		"water_caus_map": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()],
@@ -385,6 +394,14 @@ static func declare_globals() -> void:
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)
+
+func _sea_deep_rrs() -> Vector3:
+	## the open ocean's Rrs with look/sea_top's open-water art levers (FftSea's sea_open_gain / sea_open_teal, same env),
+	## so the far sea in the sky dome meets the drawn sea at the far plane
+	var gain := float(OS.get_environment("AO_OPEN_GAIN")) if OS.get_environment("AO_OPEN_GAIN") != "" else 2.0
+	var teal := float(OS.get_environment("AO_OPEN_TEAL")) if OS.get_environment("AO_OPEN_TEAL") != "" else 0.5
+	var r: Vector3 = WaterOptics.OCEAN.rrs
+	return r.lerp(r.z * Vector3(0.03, 0.55, 1.0), teal) * gain
 
 func _push_water(water_y: float, sun_up_air: Vector3, beam_h_lux: float, sky_lux: float) -> void:
 	var op := WaterOptics.optics(cdom, scat_k, water_type)
@@ -404,7 +421,8 @@ func _push_water(water_y: float, sun_up_air: Vector3, beam_h_lux: float, sky_lux
 	rs.global_shader_parameter_set("water_exposure", exposure)
 	rs.global_shader_parameter_set("water_glow_k", glow_k)
 	rs.global_shader_parameter_set("water_glow_ms", glow_ms)
-	rs.global_shader_parameter_set("water_bathy", Vector4(lagoon_centre.x, lagoon_centre.y, lagoon_radius, fore_reef_m))
+	rs.global_shader_parameter_set("water_bathy", Vector4(lagoon_centre.x, lagoon_centre.y, lagoon_radius, deg_to_rad(reef_sector_deg)))
+	rs.global_shader_parameter_set("water_rrs_deep", WaterOptics.OCEAN.rrs)   # the open ocean's own colour past the reef (look/sea_top)
 	rs.global_shader_parameter_set("water_ocean_depth", ocean_depth)
 	rs.global_shader_parameter_set("water_far_sand", FAR_SAND)
 	rs.global_shader_parameter_set("water_fill_ao", 1.0 if fill_occluded else 0.0)
@@ -504,6 +522,7 @@ func _push_sky(st: Dictionary) -> void:
 		_dome_sun = ds; _dome_g = ground_lux_of_dome(ds)
 	mat.set_shader_parameter("sky_norm", (st.skylux - SkyClock.NIGHT_SKY_LUX) / _dome_g if _dome_g > 1e-12 else 0.0)
 	mat.set_shader_parameter("sea_nits", SkyClock.OCEAN_ALBEDO * st.total / PI)
+	mat.set_shader_parameter("sea_deep_nits", _sea_deep_rrs() * st.total / 0.98)   # look/sky: the far sea past the far plane
 	# night sky (look/sky_stars.gdshaderinc, Unreal M_Stars): what the Unreal clock wrote to MPC_Sky and the Stars actor
 	if mat.get_shader_parameter("star_cat") == null:
 		mat.set_shader_parameter("star_cat", StarCatalogue.texture())

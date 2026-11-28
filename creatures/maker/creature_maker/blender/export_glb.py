@@ -349,7 +349,8 @@ lods = {}; lod_obs = {}; CREASES = set(v for r in C['rolls'] for v in r)
 # LOD chain = the Unreal-era intake rule (tools/optimise/creature_meter.py K2, proven on the v107 exports): level 0 is needed only
 # inside reach0, the distance where its own triangle count gives 2-pixel edges (1920 px, 90 deg view); each later level has 4 x fewer
 # triangles and starts at twice the distance, down to about 300 triangles. Targets are triangle counts, met by scaling the ratio
-# down until the level is inside its count (5 % margin); the switch distances ride in the extras for the engine's LOD ranges.
+# down until the level is inside its count; the switch distances ride in the extras for the engine's LOD ranges. The simplifier's error
+# bound doubles per level with the distance, so the error stays the same size on screen at each level's first distance.
 T0 = tris_of(LOD0)
 def area_of(objs):
     a = 0.0
@@ -367,7 +368,7 @@ for lod, ratio, budget in [(c['lod'], 0.4 if c['lod'] == 1 else 0.14, c['tris'])
     for attempt in range(6):
         obs = []
         for o in [body] + list(fin_obs.values()):
-            lo, nt = LODS.simplify(o, ratio if o is body else max(ratio * 1.6, 0.3 * min(1.0, ratio / 0.14)), f'{o.name}_LOD{lod}', lock=CREASES if (o is body and lod == 1) else ()); lo.hide_render = True; obs.append(lo)
+            lo, nt = LODS.simplify(o, ratio if o is body else max(ratio * 1.6, 0.3 * min(1.0, ratio / 0.14)), f'{o.name}_LOD{lod}', error=0.02 * 2 ** (lod - 1), lock=CREASES if (o is body and lod == 1) else ()); lo.hide_render = True; obs.append(lo)
         got = tris_of(obs + (eye_obs if lod == 1 else []))
         if got <= budget or attempt == 5: break
         for lo in obs: bpy.data.objects.remove(lo, do_unlink=True)

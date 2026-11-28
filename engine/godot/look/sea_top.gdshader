@@ -1,4 +1,4 @@
-// Sea seen from above 0.6.0 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
+// Sea seen from above 0.7.0 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
 // 0.2.0 (28 Nov): the water's own colour, one model from the lagoon's sand to the open sea (Rrs x Ed where the floor
 // fades; it read jet black: the lagoon's path only saw the floor).
 // 0.5.0 (28 Nov): the sun's glitter sparkles (the tank's moon sparkle, run for the sun).
@@ -33,11 +33,11 @@ uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 // floor leads; past the shelf H grows and the colour runs smoothly into the open sea's (the tank v374 SEA_SHADE's
 // "light coming out of the water", Rrs x Ed (1 - F) / 0.98); with no floor at all it is the open sea's colour. The
 // water's Rrs is WorldRoot's water_rrs (WaterOptics.optics: the lagoon's from its own optics, the ocean's the tank's).
-global uniform vec3 water_rrs;
+// water_rrs: declared in water_physics.gdshaderinc
+// water_rrs_deep (the open ocean's Rrs, WaterOptics.OCEAN): declared in water_physics.gdshaderinc (the abyss under water blends to it too)
 // art levers on the deep water's colour (1, 0 = physical; FftSea sets 2, 0.5): x brightness, and a share pulled toward
 // a turquoise of the same blue (Abzu's lighter sea; art direction over the physical ink-navy)
-global uniform float sea_open_gain;     // FftSea adds both
-global uniform float sea_open_teal;
+// sea_open_gain / sea_open_teal: declared in water_physics.gdshaderinc (the abyss under water uses them too)
 global uniform float sea_crest_sd;      // the crests' height spread, m (cascades 1-2; the tank's SeaK.x; FftSea)
 global uniform float sea_sparkle;       // 1 = the sparkling glitter (0.5.0), 0 = one smooth lobe as before (FftSea, AO_SPARKLE)
 global uniform float sea_crest_glow;    // art lever on the light through the crests (1 = the tank's; FftSea)
@@ -147,19 +147,29 @@ void fragment() {
 	vec3 q = sea_isl(qg);
 	float h = clamp(wi.z - q.z, 0.0, 60.0);                // its depth under this bit of surface
 	vec2 shift = (T.xy / max(-T.z, 0.05) + V.xy / max(V.z, 0.05)) * h;   // bent landing - straight landing
-	vec3 qb = q + vec3(shift, 0.0);
-	vec4 cs = PROJECTION_MATRIX * VIEW_MATRIX * vec4(sea_gdt(qb), 1.0);
-	vec2 uvb = cs.xy / cs.w * 0.5 + 0.5;
-	// near the screen edge (the screen may not hold the bent point) the shift is squeezed: it goes at most half way
-	// to the edge along its line, so rows stay in order (a clamp smears the edge row into streaks)
-	vec2 du = uvb - SCREEN_UV;
-	vec2 room = mix((vec2(1.0) - SCREEN_UV) / max(du, vec2(1e-6)), -SCREEN_UV / min(du, vec2(-1e-6)), step(du, vec2(0.0)));
-	uvb = SCREEN_UV + du * clamp(min(room.x, room.y) * 0.5, 0.0, 1.0);   // at most half way to the edge: a smooth squeeze
-	float db = texture(depth_tex, uvb).r;
-	vec4 vb = INV_PROJECTION_MATRIX * vec4(uvb * 2.0 - 1.0, db, 1.0);
-	vb.xyz /= vb.w;
-	float hb = wi.z - sea_isl((INV_VIEW_MATRIX * vec4(vb.xyz, 1.0)).xyz).z;
-	if (hb < 0.0) uvb = SCREEN_UV;                         // the bent point is above the water (an edge): no shift
+	// 0.7.0: two passes. The bend assumes the floor lies at the straight view's depth h; where the floor rises toward the
+	// eye (looking down past a reef wall) the bent point lands on the shallow reef flat and its sand glowed cyan over
+	// the deep (water surface thread, 28 Nov). The second pass bends again by the depth found there (a fixed-point step).
+	vec2 uvb = SCREEN_UV; float hb = h;
+	for (int it = 0; it < 2; it++) {
+		float hs = it == 0 ? h : clamp(hb, 0.0, h);
+		vec3 qb = q + vec3(shift * (hs / max(h, 1e-4)), 0.0);
+		vec4 cs = PROJECTION_MATRIX * VIEW_MATRIX * vec4(sea_gdt(qb), 1.0);
+		uvb = cs.xy / cs.w * 0.5 + 0.5;
+		// near the screen edge (the screen may not hold the bent point) the shift is squeezed: it goes at most half way
+		// to the edge along its line, so rows stay in order (a clamp smears the edge row into streaks)
+		vec2 du = uvb - SCREEN_UV;
+		vec2 room = mix((vec2(1.0) - SCREEN_UV) / max(du, vec2(1e-6)), -SCREEN_UV / min(du, vec2(-1e-6)), step(du, vec2(0.0)));
+		uvb = SCREEN_UV + du * clamp(min(room.x, room.y) * 0.5, 0.0, 1.0);   // at most half way to the edge: a smooth squeeze
+		float db = texture(depth_tex, uvb).r;
+		vec4 vb = INV_PROJECTION_MATRIX * vec4(uvb * 2.0 - 1.0, db, 1.0);
+		vb.xyz /= vb.w;
+		hb = wi.z - sea_isl((INV_VIEW_MATRIX * vec4(vb.xyz, 1.0)).xyz).z;
+		if (hb < 0.0 || hb > h - 0.5) break;                  // above the water (an edge), or the floor where it was assumed
+	}
+	// the bent point is above the water (an edge), or still on something far shallower than the floor it was bent for
+	// (a body or rock between: sampling it there drew it twice, Gary 28 Nov "a doubling of the player body"): no shift
+	if (hb < 0.0 || hb < 0.5 * h - 0.25) uvb = SCREEN_UV;
 	vec3 scene = textureLod(screen_tex, uvb, 0.0).rgb;
 	float Lp = min(h / max(-T.z, 0.05), 400.0);
 	vec3 c = water_a + water_b;
@@ -176,7 +186,10 @@ void fragment() {
 		under = (sea_bathy_sand(H) * exp(-c * Lb) + w_glow(sea_gdt(T), 0.0, Lb)) * water_exposure;
 	}
 	float Ed = water_sun_lux * max(water_sun_air.y, 0.0) + PI * water_sky_nits;   // lux on the level sea
-	vec3 rrs = mix(water_rrs, water_rrs.z * vec3(0.03, 0.55, 1.0), sea_open_teal) * sea_open_gain;
+	// 0.7.0: past the reef the water is the open ocean's, not the lagoon's (an atoll's lagoon water is its own; out over
+	// the drop-off the deep's royal blue takes over as the floor falls away: the deep read near-black navy from the air)
+	vec3 rrs0 = mix(water_rrs, max(water_rrs, water_rrs_deep), sea_bathy_ss(20.0, 120.0, H));
+	vec3 rrs = mix(rrs0, rrs0.z * vec3(0.03, 0.55, 1.0), sea_open_teal) * sea_open_gain;
 	under += rrs * Ed / 0.98 * (vec3(1.0) - exp(-(water_kd + water_ku) * H)) * water_exposure;
 	// 0.4.0: light through the crests (tank v374 SEA_SHADE, Gary's "subsurface scattering to catch the light from the
 	// other side"): the sun shines into the back of a wave and comes out through its thin top toward you. hn: height
