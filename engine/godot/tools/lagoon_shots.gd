@@ -108,9 +108,9 @@ func _setup():
 	if OS.get_environment("AO_GOD") == "0": wr.god_rays = false   # the god rays off (before/after)
 	if OS.get_environment("AO_TAA") == "1": root.use_taa = true
 	# AO_UPSCALE=fsr1|fsr2|metalfx (+ AO_SCALE, default 0.5): the Mac's half-resolution path, spatial or temporal
-	var up := OS.get_environment("AO_UPSCALE")
-	if up != "":
-		root.scaling_3d_mode = {"fsr1": Viewport.SCALING_3D_MODE_FSR, "fsr2": Viewport.SCALING_3D_MODE_FSR2, "metalfx": Viewport.SCALING_3D_MODE_METALFX_TEMPORAL}[up]
+	var upscale := OS.get_environment("AO_UPSCALE")
+	if upscale != "":
+		root.scaling_3d_mode = {"fsr1": Viewport.SCALING_3D_MODE_FSR, "fsr2": Viewport.SCALING_3D_MODE_FSR2, "metalfx": Viewport.SCALING_3D_MODE_METALFX_TEMPORAL}[upscale]
 		root.scaling_3d_scale = float(OS.get_environment("AO_SCALE")) if OS.get_environment("AO_SCALE") != "" else 0.5
 	if OS.get_environment("AO_CAUS_DUMP") != "": _caus_dump = OS.get_environment("AO_CAUS_DUMP")
 	var sea := wr.make_surface() as SeaSurface
