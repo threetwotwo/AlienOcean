@@ -54,3 +54,16 @@ Run everything: `GODOT=<godot 4.7> tests/run_all.sh [monkey_runs] [monkey_secs]`
 Always pass `--fixed-fps` when running a harness script by hand: without it Godot runs in real time.
 Known: Jolt prints "job system exceeded the maximum number of jobs" once while the body pushes a wall for seconds (step 50 cm case);
 it waits and continues, no result changes. Watch it when real scenes load.
+
+## Blockout kit (blockout thread, 28 Nov 2026): grey shapes for testing and fast iteration
+Gary 28 Nov: motion, terrain-contact and any other stress work runs on blockouts first; only passing cases are re-run in the
+dressed lagoon; look work stays in the key-frame scenes.
+| What | Where | Use |
+|---|---|---|
+| Kit 0.1.0 | `blockout/blockout_kit.gd` | `BlockoutKit.build(world, kind, p)` -> {env, markers, pois, rider}; kinds listed in its header; `tests/harness/test_worlds.gd` is a shim over it |
+| Rider 0.1.0 | `blockout/blockout_rider.gd` | `ride` kind: `rider.marker("saddle")`, hand_l/r, foot_l/r, `rider.velocity`; collision layer 2 |
+| Points of interest | `blockout/blockout_poi.gd` | `senses` kind; `BlockoutKit.pois(world)` -> [{pos, kind, name, alive, velocity}] |
+| Grey mode 0.1.0 | `blockout/grey_mode.gd`, `grey_mode_toggle.gd` | `GreyMode.apply(roots, on)`; F7 in the game (GameRoot: lagoon + streamed cells), AO_GREY=1 |
+| Gym (stress scene) | `blockout/blockout_gym.gd`, `blockout_play.gd` | AO_BLOCKOUT=1 (AO_STATION=<label>), `run_blockout.command`; F6 next station |
+| Test | `tests/test_blockout.gd`, `tests/run_blockout.sh` | kit measured by rays, rider, senses, grey mode, motor cases in the gym, 30/60/120 Hz, planted faults |
+| Pictures | `tools/blockout_shots.gd` | gym stations + grey mode before/after |

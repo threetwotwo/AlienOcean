@@ -58,5 +58,7 @@ for r in 30 120; do
 done
 "$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --monkey "${1:-4}" --monkey-secs 60 --only BM > "$OUT/m04_monkey.txt" 2>&1 || { [ "${M04_STRICT:-0}" = 1 ] && rc=1; }
 echo "monkey: $(tail -1 "$OUT/m04_monkey.txt")"
+echo "== Blockout kit + blockout stress scene (30/60/120 Hz)"
+OUT="$OUT" bash tests/run_blockout.sh || rc=1
 echo "== result: $([ $rc = 0 ] && echo ALL GREEN || echo FAILURES)"
 exit $rc
