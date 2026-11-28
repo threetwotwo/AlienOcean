@@ -5,7 +5,8 @@
 ## over smooth pixels (spatial step under 3 levels: silhouettes are left out) of the frame and of the AO-shadowed areas. Compare a mode against "off" (TAA jitter + geometry edges are in both):
 ## the AO's own flicker is mode minus off.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --fixed-fps 30 --script res://tools/ao_motion_check.gd -- <out dir>
-## Env: AO_MODE=cortao|gtao|vbao|ssao|off (default cortao), AO_TAA=0 (no TAA, full resolution), AO_FRAMES (default 40).
+## Env: AO_MODE=cortao|gtao|vbao|ssao|off (default cortao), AO_TAA=0 (no TAA, full resolution), AO_FRAMES (default 40),
+## AO_UP=fsr1|fsr1_taa|fsr2|metalfx (the half-resolution chain; default the game's).
 extends SceneTree
 
 var out := "/tmp"
@@ -31,9 +32,15 @@ func _initialize() -> void:
 	DirAccess.make_dir_recursive_absolute(out)
 	root.size = Vector2i(960, 540)
 	if taa:
-		root.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
+		# AO_UP picks the half-resolution chain (look thread): default the game's own (TestLevel.upscaler(), TAA with a spatial one),
+		# fsr1 = FSR 1 alone, fsr1_taa = FSR 1 + TAA, fsr2, metalfx (MetalFX temporal, Apple silicon only)
+		var up := OS.get_environment("AO_UP")
+		var m: int = {"fsr1": Viewport.SCALING_3D_MODE_FSR, "fsr1_taa": Viewport.SCALING_3D_MODE_FSR, "fsr2": Viewport.SCALING_3D_MODE_FSR2,
+			"metalfx": Viewport.SCALING_3D_MODE_METALFX_TEMPORAL}.get(up, TestLevel.upscaler())
+		root.scaling_3d_mode = m
 		root.scaling_3d_scale = 0.5
-		root.use_taa = true
+		root.use_taa = up == "fsr1_taa" or (up == "" and TestLevel.needs_taa(m))
+		print("AO_MOTION chain mode ", m, " taa ", root.use_taa)
 	WorldRoot.declare_globals()
 	_run.call_deferred()
 
