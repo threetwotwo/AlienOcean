@@ -15,6 +15,7 @@ Started 27 Nov 2026 from Gary's list (proven open-source libraries, 27 Nov 18:35
 | meshoptimizer | MIT | LOD chains, mesh simplification | export pipeline | exporter thread |
 | CoACD | MIT | convex collision hulls before import | tools/collision/ | FUNDAMENTALS "collision before import" |
 | Khronos glTF validator | Apache 2.0 | export checks | export pipeline | exporter thread |
+| CORTAO (Circular Occluder Ray-Traced AO, v1.0.3, github.com/theagentd/CORTAO) | MIT | screen-space ambient occlusion + bent normals in place of Godot's SSAO (switch, trial) | engine/godot/third_party/cortao (headers unchanged + 16-ray occluder table); look/cortao/*.glsl wrappers; adapters/godot/cortao_effect.gd; look/screen_ao.gdshaderinc | ao thread 28 Nov: tools/cortao_check.gd C1-C4 + planted flip fault; key-frame SSAO vs CORTAO comparison on the thread |
 
 ## Recast and swimming (game root thread, 27 Nov)
 Recast builds walkable SURFACE meshes. It does not path through open water in 3D, so swimmers (fish schools, megafauna,

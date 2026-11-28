@@ -121,6 +121,7 @@ void fragment() {
 	AO_LIGHT_AFFECT = 0.6;
 	float z = max(water_y - wpos.y, 0.0);
 	if (water_fill_ao > 0.5) {
+		AO = min(AO, screen_ao(SCREEN_UV));   // CORTAO when on (look/screen_ao.gdshaderinc)
 		ALBEDO *= w_fill_ratio(z, 0.8);
 	} else {
 		EMISSION = ALBEDO * AO * w_fill(z, 0.8);

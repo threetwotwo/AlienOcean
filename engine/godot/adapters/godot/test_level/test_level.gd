@@ -113,7 +113,7 @@ func worst_frame_ms(seconds := 10.0) -> float:
 # ---- switches: every one has a getter and a setter, so the test can prove each one returns to where it was ----
 
 func toggle_names() -> Array:
-	return ["sdfgi", "god_rays", "caustics", "agx", "taa", "ssao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider"]
+	return ["sdfgi", "god_rays", "caustics", "agx", "taa", "ssao", "cortao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider"]
 
 func get_toggle(n: String) -> bool:
 	var wr := game.world_root
@@ -124,6 +124,7 @@ func get_toggle(n: String) -> bool:
 		"agx": return wr.agx_fx.enabled
 		"taa": return get_viewport().use_taa
 		"ssao": return wr.env.ssao_enabled
+		"cortao": return wr.ao_mode == "cortao"
 		"ssil": return wr.env.ssil_enabled
 		"shadows": return wr.light.shadow_enabled
 		"half_res": return get_viewport().scaling_3d_scale < 0.99
@@ -143,7 +144,8 @@ func set_toggle(n: String, on: bool) -> void:
 		"caustics": wr.caustics.enabled = on
 		"agx": wr.set_agx(on)
 		"taa": get_viewport().use_taa = on
-		"ssao": wr.env.ssao_enabled = on
+		"ssao": wr.set_ao("ssao" if on else ("off" if wr.ao_mode != "cortao" else "cortao"))
+		"cortao": wr.set_ao("cortao" if on else "ssao")   # CORTAO in place of SSAO (ao thread 28 Nov); off = back to SSAO
 		"ssil": wr.env.ssil_enabled = on
 		"shadows": wr.light.shadow_enabled = on
 		"half_res":
@@ -296,7 +298,7 @@ func stats() -> Dictionary:
 
 # ---- benchmark (F9 in the panel, or AO_BENCH=1 at start: run_benchmark.command): the cost of each system on this machine ----
 
-const BENCH_SWITCHES := ["ssao", "ssil", "shadows", "god_rays", "caustics", "agx", "grass_v2", "sea", "schools", "lagoon", "half_res", "sdfgi"]   # sdfgi last: it rebuilds for seconds after it comes back
+const BENCH_SWITCHES := ["ssao", "cortao", "ssil", "shadows", "god_rays", "caustics", "agx", "grass_v2", "sea", "schools", "lagoon", "half_res", "sdfgi"]   # sdfgi last: it rebuilds for seconds after it comes back
 var bench_running := false
 signal bench_done(path: String)
 
@@ -316,7 +318,8 @@ func _bench_measure(secs: float) -> Dictionary:
 	return {"frame_ms": snappedf(srt[srt.size() / 2] if srt.size() > 0 else 0.0, 0.01), "mean_frame_ms": snappedf(mean.call(fr), 0.01), "gpu_ms": snappedf(mean.call(gpu), 0.01), "cpu_render_ms": snappedf(mean.call(cpu), 0.01),
 		"p95_frame_ms": snappedf(srt[int(srt.size() * 0.95)] if srt.size() > 0 else 0.0, 0.01), "frames": fr.size(),
 		"tick_ms": snappedf(game.stats.tick_ms, 0.01), "draw_calls": P.get_monitor(P.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
-		"triangles": P.get_monitor(P.RENDER_TOTAL_PRIMITIVES_IN_FRAME)}
+		"triangles": P.get_monitor(P.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
+		"cortao_gpu_ms": snappedf(game.world_root.cortao_fx.gpu_ms, 0.001) if game.world_root.ao_mode == "cortao" else 0.0}
 
 func _bench_floor(secs: float) -> Dictionary:
 	## as _bench_measure, holding the camera on the floor while it measures
@@ -378,7 +381,7 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 			DisplayServer.window_set_size(win0)
 			await get_tree().create_timer(settle).timeout
 	for n in BENCH_SWITCHES:
-		if not n in ["half_res", "lagoon", "grass_v2"]: set_toggle(n, false)
+		if not n in ["half_res", "lagoon", "grass_v2", "cortao"]: set_toggle(n, false)
 	await get_tree().create_timer(settle).timeout
 	rows.append({"case": "all effects off (lagoon kept)", "r": await _bench_measure(secs)})
 	apply_state(s0)
