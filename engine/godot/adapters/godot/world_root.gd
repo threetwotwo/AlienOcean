@@ -47,6 +47,7 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 ## the sea's RMS slope for the sun's spread under water (calm lagoon ~0.06, as the key frame rig; surface thread may feed the FFT's own)
 @export var sea_rms_slope := 0.06
 const SUN_DISC_DEG := 0.53
+const SDFGI_RESET_STOPS := 3.0
 @export var under_white := Vector3.ZERO      # look check: the under-water camera balance (zero = the place's UNDER_WHITE)
 @export var water_type := 0.0              # 0 = the lagoon's water, 1 = the open ocean's (WaterOptics.optics); between = a blend (shelf)
 # weather (28 Nov, look thread; promised to the water surface thread, which wires foam and haze to it): cloud cover 0 clear ..
@@ -93,8 +94,10 @@ var cam_attr: CameraAttributesPhysical
 var sky_mat: ShaderMaterial
 var key := ""
 var last := {}
+var _gi_reset := 0   # frames left with SDFGI off to drop its cache after a jump in the light (apply)
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
+var _surface: SeaSurface          # make_surface's: its floor map is captured again when the light changes (apply)
 var under_mat: ShaderMaterial       # the underwater view quad's material (attach_camera)
 var caustics: CausticsMap           # the light net's map, drawn once a frame (adapters/godot/caustics_map.gd)
 var _dome_g := 0.0
@@ -202,9 +205,11 @@ func make_surface(_size_m := 160.0) -> Node3D:
 	## rings, seen from above and below. Its level is water_y (the tide); nothing to place or stream.
 	var s := SeaSurface.new()
 	water.waves = s.fft            # water.water_y(x, z) follows the drawn crests
+	_surface = s
 	return s
 
 func apply(cam_y: float) -> Dictionary:
+	if is_instance_valid(_surface) and _surface.floor_map: _surface.floor_map.refresh()   # its radiance was lit by the old light
 	if tide_on: water.set_clock(hours)   # the sea level follows the two moons (core/world/tide.gd)
 	var water_y := water.level
 	var st := SkyClock.overcast(SkyClock.sky_state(hours, noon_yaw), sky_overcast)
@@ -283,7 +288,7 @@ func apply(cam_y: float) -> Dictionary:
 	sky_mat.set_shader_parameter("under_k", 1.0)
 	sky_mat.set_shader_parameter("under_down", ek / PI)
 	sky_mat.set_shader_parameter("under_up", eu / PI)
-	RenderingServer.global_shader_parameter_set("water_amb_sky", 1.0 if env.sdfgi_enabled else 0.0)
+	RenderingServer.global_shader_parameter_set("water_amb_sky", 1.0 if env.sdfgi_enabled or _gi_reset > 0 else 0.0)
 	if under:
 		light.look_at_from_position(Vector3.ZERO, -tr, Vector3.FORWARD if absf(tr.y) > 0.99 else Vector3.UP)
 		light.light_intensity_lux = beam_h * WaterOptics.FRESNEL_SUN / tr.y
@@ -317,9 +322,21 @@ func apply(cam_y: float) -> Dictionary:
 		# not the air's full beam (Godot's indirect energy is one scalar: the luminance of that loss)
 		var lum_att := att.r * 0.2126 + att.g * 0.7152 + att.b * 0.0722
 		light.light_indirect_energy = WaterOptics.FRESNEL_SUN * maxf(up_air.y, 0.02) / tr.y * lum_att
+	# SDFGI keeps its probes' light over many frames: after a jump in the light (the hour slider, a teleport across day and night)
+	# that cache is the old light, shown at the new exposure (surface thread, 28 Nov: noon-lit sand blown out at 23:00).
+	# A jump of more than SDFGI_RESET_STOPS in EV100 drops the cache: GI off until two frames have been drawn without it, then
+	# on again, rebuilt from the new light (Godot has no reset call; a toggle inside one frame is never drawn and changes nothing).
+	if env.sdfgi_enabled and last.has("ev100") and absf(ev - float(last.ev100)) > SDFGI_RESET_STOPS:
+		env.sdfgi_enabled = false; _gi_reset = 2
+		if not RenderingServer.frame_post_draw.is_connected(_gi_reset_tick): RenderingServer.frame_post_draw.connect(_gi_reset_tick)
 	last = {"key": key, "elev": body.elev, "total_lux": st.total, "sky_lux": st.skylux, "beam_h": beam_h,
 		"ev100": ev, "bias": bias, "under": under, "night_w": nw, "overcast": st.overcast, "beam_k": st.oc_beam_k, "oc_zenith": oc_zenith}
 	return last
+
+func _gi_reset_tick() -> void:
+	_gi_reset -= 1
+	if _gi_reset <= 0:
+		RenderingServer.frame_post_draw.disconnect(_gi_reset_tick); env.sdfgi_enabled = true
 
 func _art_k(k: Vector3) -> Vector3:
 	## light_neutral: the light's per-band loss pulled toward its luminance-weighted mean (colour only)

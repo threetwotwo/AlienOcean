@@ -77,6 +77,7 @@ static func declare_globals() -> void:
 	rs.global_shader_parameter_add("sea_mom_r", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
 	rs.global_shader_parameter_add("sea_on", rs.GLOBAL_VAR_TYPE_FLOAT, 0.0)
 	rs.global_shader_parameter_add("sea_crest_sd", rs.GLOBAL_VAR_TYPE_FLOAT, 0.35)
+	rs.global_shader_parameter_add("sea_sparkle", rs.GLOBAL_VAR_TYPE_FLOAT, float(OS.get_environment("AO_SPARKLE")) if OS.get_environment("AO_SPARKLE") != "" else 1.0)   # look/sea_top 0.5.0
 	rs.global_shader_parameter_add("sea_crest_glow", rs.GLOBAL_VAR_TYPE_FLOAT, float(OS.get_environment("AO_CREST_GLOW")) if OS.get_environment("AO_CREST_GLOW") != "" else 1.0)   # art lever, 1 = the tank
 	rs.global_shader_parameter_add("sea_foam", rs.GLOBAL_VAR_TYPE_SAMPLER2D, null)
 	rs.global_shader_parameter_add("sea_foam_org", rs.GLOBAL_VAR_TYPE_VEC4, Vector4(0, 0, FOAM_SIZE, 0))
