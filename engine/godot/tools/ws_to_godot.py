@@ -47,18 +47,26 @@ BAKE_SUBS = (
     ("fbm2v(Wg_, float3(p/1.2, 41.))", "WS_F_PR(p)"),
     ("fo3(Wg_, float3(p/2.1, 29.))", "WS_F_DL(p)"),
 )
-BAKE_BLOCK = r"""// ---------- WS_BAKED hooks (Godot side, tools/ws_to_godot.py): the sand's fixed world-xy noise fields, baked or procedural ----------
+BAKE_BLOCK = r"""// ---------- WS_BAKED hooks v2 (Godot side, tools/ws_to_godot.py): the sand's fixed world-xy noise fields, baked or procedural ----------
+// v2 (28 Nov, Mac bisect: +5 ms at the low key-frame view only): each texture is read ONCE per pixel (memo in Wg_), with ONE trilinear
+// tap at the level of the footprint's SHORT axis (textureLod). v1 read a texture per field through anisotropic filtering: at grazing
+// views that was up to 6 x 16 taps of half floats per pixel. The fields' finest lattice is 6.5 texels, so the sharp level never aliases
+// where the ripples it feeds are still drawn.
 float wsWarpC(inout WsG Wg_, float2 p){ return 1.2*(fbm2n(Wg_, float3(p/0.8, 3.)) - 0.5)*2. + 10.*fo3(Wg_, float3(p/2.0, 0.)); }
 #ifdef WS_BAKED
 float wsBkK(float2 p){ float2 e = min(p - sand_box.xy, sand_box.xy + sand_box.zw - p); return sand_on * clamp(min(e.x, e.y), 0., 1.); }
-float4 wsBkRead(inout WsG Wg_, sampler2D t, float2 p){ float2 s = (sand_px - 1.)/sand_box.zw, g = s/sand_px; WS_COUNT_READ
-  return textureGrad(t, ((p - sand_box.xy)*s + 0.5)/sand_px, Wg_.gDP.xy*g, Wg_.gDP.zw*g); }
+void wsBkFetch(inout WsG Wg_, float2 p){
+  if (Wg_.bkOk > 0.5 && p == Wg_.bkP) return;
+  float2 s = (sand_px - 1.)/sand_box.zw; float2 dx = Wg_.gDP.xy*s, dy = Wg_.gDP.zw*s;
+  float lod = max(0.5*log2(max(min(dot(dx, dx), dot(dy, dy)), 1e-8)), 0.);
+  float2 uv = ((p - sand_box.xy)*s + 0.5)/sand_px; WS_COUNT_READ WS_COUNT_READ
+  Wg_.bkA = textureLod(sandA, uv, lod); Wg_.bkB = textureLod(sandB, uv, lod); Wg_.bkP = p; Wg_.bkOk = 1.; }
 float wsBk1(inout WsG Wg_, float2 p, int c){ float k = wsBkK(p); float b = 0.;
-  if (k > 0.) { float4 v = c < 4 ? wsBkRead(Wg_, sandA, p) : wsBkRead(Wg_, sandB, p); b = c == 0 ? v.x : c == 1 ? v.y/7. : c == 2 ? v.z/7. : c == 3 ? v.w/7. : v.x - 8.; }
+  if (k > 0.) { wsBkFetch(Wg_, p); float4 v = c < 4 ? Wg_.bkA : Wg_.bkB; b = c == 0 ? v.x : c == 1 ? v.y/7. : c == 2 ? v.z/7. : c == 3 ? v.w/7. : v.x - 8.; }
   if (k >= 1.) return b;
   float f = c == 0 ? fbm2n(Wg_, float3(p/1.4, 19.)) : c == 1 ? fo3(Wg_, float3(p/2.5, 71.)) : c == 2 ? fo3(Wg_, float3(p/2.2, 83.)) : c == 3 ? fo3(Wg_, float3(p/2.1, 29.)) : wsWarpC(Wg_, p);
   return lerp(f, b, k); }
-float2 wsBkPr(inout WsG Wg_, float2 p){ float k = wsBkK(p); float2 b = f2(Wg_, 0.); if (k > 0.) b = wsBkRead(Wg_, sandB, p).yz;
+float2 wsBkPr(inout WsG Wg_, float2 p){ float k = wsBkK(p); float2 b = f2(Wg_, 0.); if (k > 0.) { wsBkFetch(Wg_, p); b = Wg_.bkB.yz; }
   if (k >= 1.) return b; return lerp(fbm2v(Wg_, float3(p/1.2, 41.)), b, k); }
 #define WS_F_RDG(p) wsBk1(Wg_, p, 0)
 #define WS_F_CW(p) wsBk1(Wg_, p, 1)
@@ -76,14 +84,22 @@ float2 wsBkPr(inout WsG Wg_, float2 p){ float k = wsBkK(p); float2 b = f2(Wg_, 0
 #endif
 """
 
-def bake_hooks(body):
-    if "WS_BAKED hooks" in body: return body
-    for a, b in BAKE_SUBS:
-        assert body.count(a) == 1, "bake hook source changed: " + a
-        body = body.replace(a, b)
-    anchor = "struct WsRipple {"
-    assert body.count(anchor) == 1
-    return body.replace(anchor, BAKE_BLOCK + anchor)
+BAKE_FIELDS = "  float4 bkA;\n  float4 bkB;\n  float2 bkP;\n  float bkOk;\n"   # WS_BAKED memo (one read per texture per pixel)
+BAKE_INIT = "  Wg_.bkA = float4(0.);\n  Wg_.bkB = float4(0.);\n  Wg_.bkP = float2(0.);\n  Wg_.bkOk = 0.;\n"
+
+def bake_hooks(text):
+    """on the WHOLE generated file (struct and init included); also upgrades a file carrying older hooks"""
+    if "WS_BAKED hooks v2" in text: return text
+    if "WS_BAKED hooks (Godot side" in text:   # v1: take its block out, keep its substitutions
+        a = text.index("// ---------- WS_BAKED hooks (Godot side"); b = text.index("struct WsRipple {")
+        text = text[:a] + text[b:]
+    if "WS_F_RDG(p)" not in text:
+        for a, b in BAKE_SUBS:
+            assert text.count(a) == 1, "bake hook source changed: " + a
+            text = text.replace(a, b)
+    assert text.count("struct WsRipple {") == 1 and text.count("struct WsG {\n") == 1 and text.count("WsG wsNewG() { WsG Wg_;\n") == 1
+    text = text.replace("struct WsG {\n", "struct WsG {\n" + BAKE_FIELDS).replace("WsG wsNewG() { WsG Wg_;\n", "WsG wsNewG() { WsG Wg_;\n" + BAKE_INIT)
+    return text.replace("struct WsRipple {", BAKE_BLOCK + "struct WsRipple {")
 
 def main(src, dst):
     text = open(src).read()
@@ -119,8 +135,7 @@ def main(src, dst):
     init = "WsG wsNewG() { WsG Wg_;\n" + "".join("  Wg_.%s = %s;\n" % (n, i if i else ("0." if t == "float" else "%s(0.)" % t))
                                             for t, n, i in globs) + "  return Wg_; }\n"
     # the struct must come after other struct definitions it might use and before the first function: put it after the head
-    body = bake_hooks(body)
-    open(dst, "w").write(HEAD % md5 + struct + init + body)
+    open(dst, "w").write(bake_hooks(HEAD % md5 + struct + init + body))
     print("globals %d, functions %d -> %s" % (len(globs), len(names), dst))
 
 if __name__ == "__main__":

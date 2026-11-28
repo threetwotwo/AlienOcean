@@ -22,6 +22,10 @@
 vec3 WsUnpackBC5(vec4 c){ vec2 xy = c.rg*2. - 1.; return vec3(xy, sqrt(clamp(1. - dot(xy, xy), 0., 1.))); }
 #define WS_UNPACKN(c) WsUnpackBC5(c)
 struct WsG {
+  float4 bkA;
+  float4 bkB;
+  float2 bkP;
+  float bkOk;
   float cR;
   float cH;
   float3 gP;
@@ -36,6 +40,10 @@ struct WsG {
   float gStochOff;
 };
 WsG wsNewG() { WsG Wg_;
+  Wg_.bkA = float4(0.);
+  Wg_.bkB = float4(0.);
+  Wg_.bkP = float2(0.);
+  Wg_.bkOk = 0.;
   Wg_.cR = 0.;
   Wg_.cH = 0.;
   Wg_.gP = float3(0.);
@@ -254,18 +262,26 @@ float4 Glitter(inout WsG Wg_, float3 P, float3 N, float3 V, float3 L, float4 dP,
   float wsun = 0.6 + 0.8*exp(-t2);
   float pc = dens*1e-6*(s*s/ad)*wsun/max(Pm, 1e-7);    // glints per pixel wanted x pixels per cell / chance the facet mirrors: dens = glints per Mpx
   return float4(disc*on*step(h.z, pc)*fd, H); }
-// ---------- WS_BAKED hooks (Godot side, tools/ws_to_godot.py): the sand's fixed world-xy noise fields, baked or procedural ----------
+// ---------- WS_BAKED hooks v2 (Godot side, tools/ws_to_godot.py): the sand's fixed world-xy noise fields, baked or procedural ----------
+// v2 (28 Nov, Mac bisect: +5 ms at the low key-frame view only): each texture is read ONCE per pixel (memo in Wg_), with ONE trilinear
+// tap at the level of the footprint's SHORT axis (textureLod). v1 read a texture per field through anisotropic filtering: at grazing
+// views that was up to 6 x 16 taps of half floats per pixel. The fields' finest lattice is 6.5 texels, so the sharp level never aliases
+// where the ripples it feeds are still drawn.
 float wsWarpC(inout WsG Wg_, float2 p){ return 1.2*(fbm2n(Wg_, float3(p/0.8, 3.)) - 0.5)*2. + 10.*fo3(Wg_, float3(p/2.0, 0.)); }
 #ifdef WS_BAKED
 float wsBkK(float2 p){ float2 e = min(p - sand_box.xy, sand_box.xy + sand_box.zw - p); return sand_on * clamp(min(e.x, e.y), 0., 1.); }
-float4 wsBkRead(inout WsG Wg_, sampler2D t, float2 p){ float2 s = (sand_px - 1.)/sand_box.zw, g = s/sand_px; WS_COUNT_READ
-  return textureGrad(t, ((p - sand_box.xy)*s + 0.5)/sand_px, Wg_.gDP.xy*g, Wg_.gDP.zw*g); }
+void wsBkFetch(inout WsG Wg_, float2 p){
+  if (Wg_.bkOk > 0.5 && p == Wg_.bkP) return;
+  float2 s = (sand_px - 1.)/sand_box.zw; float2 dx = Wg_.gDP.xy*s, dy = Wg_.gDP.zw*s;
+  float lod = max(0.5*log2(max(min(dot(dx, dx), dot(dy, dy)), 1e-8)), 0.);
+  float2 uv = ((p - sand_box.xy)*s + 0.5)/sand_px; WS_COUNT_READ WS_COUNT_READ
+  Wg_.bkA = textureLod(sandA, uv, lod); Wg_.bkB = textureLod(sandB, uv, lod); Wg_.bkP = p; Wg_.bkOk = 1.; }
 float wsBk1(inout WsG Wg_, float2 p, int c){ float k = wsBkK(p); float b = 0.;
-  if (k > 0.) { float4 v = c < 4 ? wsBkRead(Wg_, sandA, p) : wsBkRead(Wg_, sandB, p); b = c == 0 ? v.x : c == 1 ? v.y/7. : c == 2 ? v.z/7. : c == 3 ? v.w/7. : v.x - 8.; }
+  if (k > 0.) { wsBkFetch(Wg_, p); float4 v = c < 4 ? Wg_.bkA : Wg_.bkB; b = c == 0 ? v.x : c == 1 ? v.y/7. : c == 2 ? v.z/7. : c == 3 ? v.w/7. : v.x - 8.; }
   if (k >= 1.) return b;
   float f = c == 0 ? fbm2n(Wg_, float3(p/1.4, 19.)) : c == 1 ? fo3(Wg_, float3(p/2.5, 71.)) : c == 2 ? fo3(Wg_, float3(p/2.2, 83.)) : c == 3 ? fo3(Wg_, float3(p/2.1, 29.)) : wsWarpC(Wg_, p);
   return lerp(f, b, k); }
-float2 wsBkPr(inout WsG Wg_, float2 p){ float k = wsBkK(p); float2 b = f2(Wg_, 0.); if (k > 0.) b = wsBkRead(Wg_, sandB, p).yz;
+float2 wsBkPr(inout WsG Wg_, float2 p){ float k = wsBkK(p); float2 b = f2(Wg_, 0.); if (k > 0.) { wsBkFetch(Wg_, p); b = Wg_.bkB.yz; }
   if (k >= 1.) return b; return lerp(fbm2v(Wg_, float3(p/1.2, 41.)), b, k); }
 #define WS_F_RDG(p) wsBk1(Wg_, p, 0)
 #define WS_F_CW(p) wsBk1(Wg_, p, 1)
