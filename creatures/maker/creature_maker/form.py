@@ -50,7 +50,23 @@ SECT_FAIR_TOL = 0.02  # DEFAULT: a traced cross-section row is faired by at most
                       # off a scan every 0.1 of the height to about 2 % of the width: plateaus and steps between rows are the reading)
 COL_HEAD, COL_BLEND = 0.04, 0.20   # DEFAULTS: the columns round the body keep the head's even angles to this far behind the gill
                       # cover's rear edge (SL), and reach the trunk's spacing over this length (see Form._asp)
-PLATE_CHAMFER = 0.004   # DEFAULT: the edge of a plate drawn from below rises to full thickness over two cells of the dense form (0.2 % SL each)
+PLATE_CHAMFER = 0.004   # DEFAULT: a plate's free edge rises to its full step over two cells of the dense form (0.2 % SL each). An edge
+                        # sharper than the bake source can carry comes out of marching cubes as a staircase, and the bake writes
+                        # the staircase into the normal map: saw-toothed plate edges (export r6, trevally: 6.5 % of the head's
+                        # dense-form normals more than 10 deg off the form's own gradient; check FM2)
+PLATE_SLOPE = 1.0       # DEFAULT: and no steeper than this (rise over run, 45 deg) at its steepest: a bone's edge under skin is a bevel, and
+                        # a wall in the normal map is the cage's shape in the map (P6). The crisp line of a gill cover is the cage's
+                        # own flap edge at the slit, not this bevel
+PLATE_STRIP = 0.07      # DEFAULT: the preopercle shows as a strip this wide in front of its free margin (SL)
+PLATE_SHELL = 0.012     # DEFAULT: plates are worked out within this distance of the bare body's surface (SL), twice the thickest
+                        # step a record carries (cover.step 0.6 % SL): further out or in, the solid is the bare body's
+SKIN_OVER = 0.0003      # DEFAULT: the skin's outer face is taken this far outside the loft that the mouth and gill linings are laid out in
+                        # (SL). Up to export r6 it was a by-product, never stated: two smooth unions of plates with the body each lowered
+                        # the whole solid by a quarter of their 0.06 % SL blend. The unions are gone; the clearance is not yet
+                        # spare: without it the lip loops of narrow mouths cross their own lining (8 traced fish: rest crossings
+                        # 147 -> 200; moorish idol 34 -> 80, blenny 113 -> 119, pufferfish 0 -> 1). It stays, as a stated number,
+                        # until the mouth's own clearances carry it (mouth round 3)
+PLATE_P = 4.0           # DEFAULT: where plates overlap their thicknesses join as a p-norm: the thicker one, with a round fillet
 
 
 def fair(x, y, tol, length, hold=()):
@@ -92,6 +108,27 @@ def poly_sd2(px, py, poly):
         c1 = py >= a[1]; c2 = py < b[1]; c3 = e[0] * wy > e[1] * wx
         flip = (c1 & c2 & c3) | (~c1 & ~c2 & ~c3); s = np.where(flip, -s, s)
     return s * np.sqrt(d)
+
+
+def line_d(P, lines):
+    """smooth distance from points P (n, 3) to a set of open polylines (each (m, 3)): the distance d at which a straight
+    line of infinite length would have the same pull, pull = integral of ds / r^3 along the lines (= 2 / d^2 for that
+    line; closed form per segment). Beside a long edge it is the plain distance. It has no ridge where two edges are
+    equally near (the plain nearest-edge distance has one along every corner's bisector, and a thickness made from it
+    carried the ridges into the skin as faint creases from each corner of a plate)."""
+    I = np.zeros(len(P))
+    for A in lines:
+        A = np.asarray(A, float)
+        for a, b in zip(A[:-1], A[1:]):
+            e = b - a; L = np.linalg.norm(e)
+            if L < 1e-9: continue
+            e = e / L; w = P - a; s1 = -(w @ e); s2 = s1 + L; d2 = np.maximum((w * w).sum(1) - s1 * s1, 0) + 1e-14
+            I += (s2 / np.sqrt(d2 + s2 * s2) - s1 / np.sqrt(d2 + s1 * s1)) / d2
+    return np.sqrt(2 / np.maximum(I, 1e-12))
+
+
+def sstep(u):
+    u = np.clip(u, 0, 1); return u * u * (3 - 2 * u)
 
 
 def smooth_curve(pts, n=24):
@@ -137,62 +174,125 @@ class Form:
         _xm = np.linspace(0, self._seam[-1, 0], 60)
         self.JAW_LIFT = float(max(np.max(self.TOP(_xm) - self._top_orbit(_xm)), np.max(self._BOT0(_xm) - self.BOT(_xm))))
         self._orb = None; self.ORBIT = self._orbit()
-        # bone plates: (name, outline, thickness, free (stepped) edge curve or None, buried-side fade width, provenance)
         self.rear, self.preop = smooth_curve(CV['rear']), smooth_curve(CV['preop'])
         self.ring_x = float(np.mean([p[0] for p in smooth_curve(CV['edge_all'])]))      # where the slit's ring goes (see record.py)
-        OPERCLE = self.rear + self.preop[::-1]                                         # between preopercle margin and cover rear edge
-        PREOPERCLE = self.preop + [[p[0] - 0.07, p[1]] for p in self.preop[::-1]]      # strip in front of the margin
-        self.ml = ml = np.array(MO['line']); mh = MO['maxilla_h']
-        MAXILLA = [list(p + [0.004, 0.002]) for p in ml] + [list(p + [0.0, mh]) for p in ml[::-1]]
-        self.PLATES = [
-            ('opercle', OPERCLE, CV['step'], self.rear, 0.05, 'opercle bone: record cover.rear + cover.preop, thickness cover.step'),
-            ('preopercle', PREOPERCLE, CV['step'] * 0.55, self.preop, 0.05, 'preopercle bone: record cover.preop margin'),
-            ('maxilla', MAXILLA, CV['step'] * 0.6, None, 0, 'maxilla bone: record mouth.line + mouth.maxilla_h'),
-        ]
-        self.VPLATES = self.ventral_plates(rec)
+        self.ml = np.array(MO['line'])
+        self.PLATES = self._plates(rec)
 
-    def ventral_plates(self, rec):
-        """plates seen from below: (name, outline in the bottom view (x, |z|), thickness, free edge (front x, |z| at x) or None, fade,
-        side-view line the plate stays under, provenance). Sets self.vedge, the gill V's free edge (None: no V)."""
-        CV, MO = self.CV, self.MO; out = []; xj, yj = rec['jaw_joint']; on = lambda x, y: 0.92 * float(self.z_on(x, y))
-        # lower jaw: each ramus lies between the dentary line (outer) and the mandible's lower edge (inner); the two meet
-        # at the chin, so from below they read as a V with the throat skin between
-        JW = rec.get('jaw') or {}; dn, lo = JW.get('dentary'), JW.get('low'); tip = self.ml[np.argmin(self.ml[:, 0])]
-        if not dn: dn = [[x, y, on(x, y)] for x, y in zip(np.linspace(tip[0] + 0.001, xj, 5), np.linspace(tip[1] - 0.004, yj, 5))]
-        dn = sorted(dn, key=lambda p: p[0])
-        if xj > dn[-1][0] + 1e-4: dn = dn + [[xj, yj, max(on(xj, yj), dn[-1][2])]]          # the ramus ends at the jaw joint
-        if not lo: lo = [[p[0], 0, 0.5 * p[2] * k / (len(dn) - 1)] for k, p in enumerate(dn)]
-        lo = sorted(lo, key=lambda p: p[0]); d_ = np.array(dn)
-        if len(dn) >= 2 and dn[-1][0] - dn[0][0] > 0.01:
-            poly = [[p[0], p[2]] for p in dn] + [[p[0], p[2]] for p in lo[::-1]]
-            # the plate keeps under the lips (two lip thicknesses below the mouth line), or the first loops round the mouth cross
-            lip = lambda x: np.interp(x, self.ml[:, 0], self.ml[:, 1] - 0.006, right=1e9)
-            out.append(('mandible', poly, CV['step'] * 0.6, None, 0, lambda x: np.minimum(np.interp(x, d_[:, 0], d_[:, 1]), lip(x)),
-                        'lower jaw rami: record jaw.dentary + jaw.mandibleLow (to the jaw joint)'))
+    # ---- level 1: bone plates. Structure rule: a bone under the skin shapes the skin as ONE surface. Each plate is a patch
+    # of the skin with an outline whose stretches are either FREE (the bone's margin shows: gill cover rear edge and
+    # membrane edge, preopercle margin, the maxilla's lower edge) or BURIED (the bone runs on under its neighbours, or the
+    # outline is only where the record stops describing it). Its thickness over the bare body is a field on the skin:
+    #   with a free margin:  step x bevel(distance to the free margin) x share(buried -> free)
+    #   with none (lower jaw rami):  step x a round ridge between its two lines
+    # so it is 0 on every outline (no wall anywhere), full only just inside a free margin, and the solid is
+    # body - thickness: no stacked unions. Before (up to export r6) each plate was a slab cut off square at its outline and
+    # joined with a 0.06 % SL smooth union, in two projections: side-view plates had a wall round all four sides
+    # (embossed rectangles; opercle, preopercle, maxilla and membrane stacked on each other), and plates drawn from below
+    # were tested in the bottom view on skin that is edge-on to it under the jaw (the lower jaw's outer line: scallops).
+    # Walls 0.06 % SL wide came out of the 0.2 % SL dense form as staircases (saw-tooth edges in the normal map, r6).
+    # Outlines live in (x, theta) on the skin, where a side-view line and a from-below line are both well placed, and
+    # distances are measured along the skin (between the points' feet on the loft).
+    def th_side(self, x, y):
+        """theta of the left-flank skin point seen at (x, y) in the side view; y is held inside the outline."""
+        x = np.clip(np.atleast_1d(np.asarray(x, float)), 0, self.XEND); c, a, _ = self.sec(x); y = np.clip(y, c - a, c + a)
+        lo, hi = np.zeros(len(x)), np.full(len(x), np.pi)
+        for _ in range(20):      # to 3e-6 rad
+            m = 0.5 * (lo + hi); up = self.loft_point(x, m)[:, 1] > y; lo, hi = np.where(up, m, lo), np.where(up, hi, m)
+        return 0.5 * (lo + hi)
+
+    def th_below(self, x, z):
+        """theta on the underside where the loft is as wide as z, seen from below."""
+        x = np.clip(np.atleast_1d(np.asarray(x, float)), 0, self.XEND); lo, hi = np.full(len(x), np.pi / 2), np.full(len(x), np.pi)
+        for _ in range(20):      # to 3e-6 rad
+            m = 0.5 * (lo + hi); out = self.loft_point(x, m)[:, 2] > z; lo, hi = np.where(out, m, lo), np.where(out, hi, m)
+        return 0.5 * (lo + hi)
+
+    def vedge_th(self, x):
+        """theta of the gill V's free edge at x: where the loft is as wide as the edge seen from below, and never nearer
+        the ventral midline than the isthmus leaves room for. The cage cuts the slit's ventral leg on the same line."""
+        x = np.atleast_1d(np.asarray(x, float)); th = self.th_below(x, self.vedge_z(x))
+        return np.minimum(th, self.isthmus_th(np.clip(x, 0, self.XEND)))
+
+    def _plates(self, rec):
+        """the plates: dicts name, step (SL), poly (outline in (x, theta)), free / buried (lists of polylines on the loft, 3D),
+        bevel (width of the free margin's rise) or ridge (half-width of a plate with no free margin), source.
+        Sets self.vedge (the gill V's free edge; None: no V) and self.vunder (the side-view line the membrane stays under)."""
+        CV, MO = self.CV, self.MO; xj, yj = rec['jaw_joint']; step = CV['step']; out = []
+        side = lambda pts: np.c_[np.clip([p[0] for p in pts], 0, self.XEND), self.th_side([p[0] for p in pts], np.array([p[1] for p in pts]))]
+
+        def plate(name, t0, free, buried, source, ridge=None):
+            """free, buried: lists of (x, theta) polylines that together close the outline, given in order round it."""
+            runs = sorted([(k, 0, np.asarray(a, float)) for k, a in free] + [(k, 1, np.asarray(a, float)) for k, a in buried], key=lambda r: r[0])
+            poly = np.concatenate([r[2] for r in runs]); P3 = lambda a: self.loft_point(a[:, 0], a[:, 1])
+            runs = [(k, b, np.r_[runs[i - 1][2][-1:], a]) for i, (k, b, a) in enumerate(runs)]     # each stretch starts where the one before it ended: no gap in the outline
+
+            def fine(a):       # an outline edge is straight in (x, theta); its chord through the body is not on the skin, so long edges are cut up
+                n = np.maximum(1, np.ceil(np.linalg.norm(np.diff(P3(a), axis=0), axis=1) / PLATE_CHAMFER)).astype(int)
+                return np.concatenate([a[i] + (a[i + 1] - a[i]) * np.arange(k)[:, None] / k for i, k in enumerate(n)] + [a[-1:]])
+            runs = [(k, b, fine(a)) for k, b, a in runs]
+            if len(poly) < 3 or np.ptp(poly[:, 0]) < 0.01: return
+            if ridge is not None: t0 = min(t0, ridge * PLATE_SLOPE / 1.5)        # a narrow ridge is a low one: its flanks keep to the same slope
+            out.append(dict(name=name, step=float(t0), poly=poly, free=[P3(r[2]) for r in runs if r[1] == 0], buried=[P3(r[2]) for r in runs if r[1] == 1],
+                            bevel=max(PLATE_CHAMFER, 1.5 * t0 / PLATE_SLOPE), ridge=ridge, source=source))
+
         # gill V: from the cover's lower corner the free edge runs straight (seen from below) to the isthmus at the apex.
         # A cover whose corner stays above the membrane's top ray has no free membrane: a side slit only (puffers).
-        self.vedge = None
+        self.vedge = None; self.vunder = None
         xc, yc = self.rear[-1]; zc = float(self.z_on(xc, yc)); xa = CV.get('apex_x'); xa = xj if xa is None else xa
         # the fan's angles are taken round the section scaled to its half-width: |z| = half-width x cos(angle)
         if zc <= float(self.HW(xc)) * np.cos(np.radians(CV.get('membrane_top_deg', 25))) and xa < xc - 0.03:
             za = max(float(self.HW(xa)) * np.sin(np.radians(CV.get('isthmus_deg', 20))), self.isthmus_z(xa))
             if za < zc:
                 self.vedge = dict(xa=xa, za=za, xc=xc, zc=zc, fa=za / float(self.HW(xa)), fc=zc / float(self.HW(xc)))
-                px, py = self.preop[int(np.argmin([p[0] for p in self.preop]))]          # under the opercle plate's lower side
+                px, py = self.preop[int(np.argmin([p[0] for p in self.preop]))]          # under the opercle's lower side
                 self.vunder = [[float(min(px, xc - 1e-3)), float(py)], [float(xc), float(yc)]]
-                under = lambda x: np.minimum(np.interp(x, *zip(*self.vunder)), self.sec(np.clip(x, 0, self.XEND))[0])
-                poly = [[float(x), float(self.vedge_z(x))] for x in np.linspace(xa, xc, 16)] + [[xc, 1.0], [xa, 1.0]]
-                out.append(('branchiostegal', poly, CV['step'], (xa, self.vedge_z), 0.05, under,
-                            'interopercle + branchiostegal membrane: cover corner to the isthmus at the interopercle front; angles from branchiostegals th0, dth, n'))
+        # gill cover: opercle, subopercle and (with a V) the branchiostegal membrane are one cover with one free margin, from
+        # the top of the rear edge round the lower corner to the isthmus; it is buried along the preopercle margin, at its
+        # top, and under the head along the line from the preopercle's front to the apex
+        rear, pre = side(self.rear), side(self.preop)
+        if self.vedge is not None:
+            xv = np.linspace(xc, xa, 16)[1:]; V = np.c_[xv, self.vedge_th(xv)]; k0 = int(np.argmin([p[0] for p in self.preop]))
+            under = lambda x: np.minimum(np.interp(x, *zip(*self.vunder)), self.sec(np.clip(x, 0, self.XEND))[0])
+            xu = np.linspace(xa, self.vunder[0][0], 8); U = np.c_[xu, np.minimum(self.th_side(xu, under(xu)), V[-1, 1])]
+            plate('gill cover', step, [(0, rear), (1, V)], [(2, np.r_[U, pre[:k0 + 1][::-1], rear[:1]])],
+                  'opercle to branchiostegal membrane, one cover: free margin = record cover.rear, then cover corner to the isthmus at the interopercle front '
+                  '(angles from branchiostegals th0, dth, n); buried along cover.preop; step cover.step')
+        else:
+            plate('gill cover', step, [(0, rear)], [(1, np.r_[pre[::-1], rear[:1]])],
+                  'opercle: free margin = record cover.rear; buried along cover.preop; step cover.step')
+        strip = side([[p[0] - PLATE_STRIP, p[1]] for p in self.preop])
+        plate('preopercle', step * 0.55, [(0, pre)], [(1, np.r_[strip[::-1], pre[:1]])], 'preopercle bone: free margin = record cover.preop, a strip in front of it')
+        ml = self._seam; mh = MO['maxilla_h']; lower, upper = side(ml + [0.004, 0.002]), side(ml + [0.0, mh])
+        plate('maxilla', step * 0.6, [(0, np.r_[lower, upper[-1:]])], [(1, np.r_[upper[::-1], lower[:1]])],
+              'maxilla bone: record mouth.line + mouth.maxilla_h; free along its lower edge and rear end')
+        # lower jaw: each ramus lies between the dentary line (outer, seen from the side) and the mandible's lower edge
+        # (inner, seen from below); the two meet at the chin, so from below they read as a V with the throat skin between
+        JW = rec.get('jaw') or {}; dn, lo = JW.get('dentary'), JW.get('low'); tip = self.ml[np.argmin(self.ml[:, 0])]
+        on = lambda x, y: 0.92 * float(self.z_on(x, y))
+        if not dn: dn = [[x, y, on(x, y)] for x, y in zip(np.linspace(tip[0] + 0.001, xj, 5), np.linspace(tip[1] - 0.004, yj, 5))]
+        dn = sorted(dn, key=lambda p: p[0])
+        if xj > dn[-1][0] + 1e-4: dn = dn + [[xj, yj, max(on(xj, yj), dn[-1][2])]]          # the ramus ends at the jaw joint
+        if not lo: lo = [[p[0], 0, 0.5 * p[2] * k / (len(dn) - 1)] for k, p in enumerate(dn)]
+        lo = sorted(lo, key=lambda p: p[0]); d_, l_ = np.array(dn, float), np.array(lo, float)
+        if len(dn) >= 2 and dn[-1][0] - dn[0][0] > 0.01:
+            # the ramus keeps under the lips (two lip thicknesses below the mouth line), or the first loops round the mouth cross
+            lip = lambda x: np.interp(x, self.ml[:, 0], self.ml[:, 1] - 0.006, right=1e9)
+            xs = np.linspace(d_[0, 0], d_[-1, 0], 16); up = np.c_[xs, self.th_side(xs, np.minimum(np.interp(xs, d_[:, 0], d_[:, 1]), lip(xs)))]
+            xl = np.linspace(l_[0, 0], l_[-1, 0], 16); low = np.c_[xl, np.maximum(self.th_below(xl, np.interp(xl, l_[:, 0], l_[:, 2])), np.interp(xl, xs, up[:, 1]))]
+            half = 0.5 * np.linalg.norm(self.loft_point(up[:, 0], up[:, 1]) - self.loft_point(low[:, 0], low[:, 1]), axis=1)
+            plate('mandible', step * 0.6, [], [(0, np.r_[up, low[::-1], up[:1]])], 'lower jaw rami: record jaw.dentary + jaw.mandibleLow (to the jaw joint), a round ridge between the two lines',
+                  ridge=max(float(np.median(half)), PLATE_CHAMFER))
         return out
 
     def isthmus_th(self, x, room=0.012):
         """the angle nearest the ventral midline that still leaves `room` (SL) of skin to it: on a keeled belly a small |z|
-        lies almost on the keel, and the two openings would meet."""
-        mid = self.loft_point(np.array(x), np.array(np.pi)); lo, hi = np.pi / 2, np.pi; room = min(room, 0.5 * float(self.HW(x)))
+        lies almost on the keel, and the two openings would meet. x: one station or an array of them."""
+        xs = np.atleast_1d(np.asarray(x, float)); mid = self.loft_point(xs, np.full(len(xs), np.pi))
+        lo, hi = np.full(len(xs), np.pi / 2), np.full(len(xs), np.pi); room = np.minimum(room, 0.5 * self.HW(xs))
         for _ in range(30):
-            m = 0.5 * (lo + hi); lo, hi = (m, hi) if np.linalg.norm(self.loft_point(np.array(x), np.array(m)) - mid) > room else (lo, m)
-        return lo
+            m = 0.5 * (lo + hi); far = np.linalg.norm(self.loft_point(xs, m) - mid, axis=1) > room; lo, hi = np.where(far, m, lo), np.where(far, hi, m)
+        return lo if np.ndim(x) else float(lo[0])
 
     def isthmus_z(self, x):
         return float(self.loft_point(np.array(x), np.array(self.isthmus_th(x)))[2])
@@ -490,35 +590,35 @@ class Form:
         return k
 
     # ---- level 1: bone plates, orbit ring, mouth cleft
+    def plates(self, P, d0=None):
+        """bone over the bare body at P: (thickness (SL), plate number (1-based, 0 = none), share of that plate's step 0..1).
+        A function of where P's foot lies on the skin (x, theta) only, so the solid has one surface over every point."""
+        P = np.asarray(P, float); sh = P.shape[:-1]; Q = P.reshape(-1, 3); d0 = self.sd_body(Q) if d0 is None else np.asarray(d0).reshape(-1)
+        T = np.zeros(len(Q)); ids = np.zeros(len(Q), np.int8); W = np.zeros(len(Q))
+        if not self.PLATES: return T.reshape(sh), ids.reshape(sh), W.reshape(sh)
+        x0 = min(p['poly'][:, 0].min() for p in self.PLATES); x1 = max(p['poly'][:, 0].max() for p in self.PLATES)
+        m = np.where((np.abs(d0) < max(PLATE_SHELL, 2 * max(p['step'] for p in self.PLATES))) & (Q[:, 0] >= x0) & (Q[:, 0] <= x1))[0]
+        if not len(m): return T.reshape(sh), ids.reshape(sh), W.reshape(sh)
+        x = Q[m, 0]; th = self.theta_of(x, Q[m, 1], np.abs(Q[m, 2])); S = self.loft_point(x, th); acc = np.zeros(len(m)); best = np.zeros(len(m))
+        for k, p in enumerate(self.PLATES):
+            poly = p['poly']; c = np.where((x >= poly[:, 0].min()) & (x <= poly[:, 0].max()) & (th >= poly[:, 1].min()) & (th <= poly[:, 1].max()))[0]
+            if not len(c): continue
+            c = c[poly_sd2(x[c], th[c], poly) < 0]
+            if not len(c): continue
+            db = line_d(S[c], p['buried'])
+            if p['free']:
+                df = line_d(S[c], p['free']); t = sstep(df / p['bevel']) * sstep(db / (db + df + 1e-12))
+            else:
+                t = sstep(db / p['ridge'])
+            acc[c] += (p['step'] * t) ** PLATE_P
+            new = t > best[c]; ids[m[c[new]]] = k + 1; best[c[new]] = t[new]
+        T[m] = acc ** (1 / PLATE_P); W[m] = best; ids[W < 1e-3] = 0
+        return T.reshape(sh), ids.reshape(sh), W.reshape(sh)
+
     def sd_full(self, P, parts=False, cleft=True):
         XEND, HW, EY = self.XEND, self.HW, self.EY
-        d0 = self.sd_body(P); d = d0.copy(); ids = np.zeros(d.shape, np.int8)
+        d0 = self.sd_body(P); T, ids, _ = self.plates(P, d0); d = d0 - T - SKIN_OVER
         x, y, z = P[..., 0], P[..., 1], P[..., 2]
-        for k, (name, poly, t0, free, fade, _) in enumerate(self.PLATES):
-            # bone plates thin out toward their buried (front) side and keep full thickness at the free edge
-            t = t0 * (np.clip((x - (edge_x(free, y) - fade)) / fade, 0.15, 1) if free is not None else 1)
-            inside2 = poly_sd2(x, y, poly)
-            side = np.clip((np.abs(z) - 0.25 * HW(np.clip(x, 0, XEND))) / 0.02, 0, 1)  # plates are on the flanks
-            # plate solid = shell between the body surface and t above it, bounded by its outline (hard edge, small round)
-            plate = np.maximum(np.maximum(d0 - t, -d0 - 0.004), inside2 + (1 - side) * 0.05)
-            nd = smin(d, plate, 0.0006)
-            ids = np.where(nd < d - 1e-5, k + 1, ids); d = nd
-        az = np.abs(z)
-        for k, (name, poly, t0, free, fade, under, _) in enumerate(self.VPLATES):
-            t = t0
-            if free is not None:      # full thickness at the free edge, thinning away from it and running out at its front end
-                x0, ez = free; t = t0 * np.clip(1 - np.abs(az - ez(x)) / fade, 0.15, 1) * np.clip((x - x0) / (0.6 * fade), 0, 1)
-            # the plate's edges are chamfers, not walls: its outline is drawn from below and its upper limit in the side view,
-            # so a wall there stands along y or along z, not along the skin's normal; where the head rounds from the
-            # underside into the flank such a wall leans over the skin (a ledge) and the bake sees it from behind
-            t = t * np.clip(np.minimum(-poly_sd2(x, az, poly), under(x) - y) / PLATE_CHAMFER, 0, 1)
-            plate = np.maximum(d0 - t, -d0 - 0.004)
-            nd = smin(d, plate, 0.0006)
-            # where the chamfer has run t out to 0 the plate IS the body surface, and the smooth union still lowers d there by
-            # its bias: that labelled the whole flank as this plate (maps: no scale relief, metal dimmed; export r5). A point
-            # belongs to the plate only where the plate has thickness. (The 0.15 mm bias itself stays for now: removing it
-            # raised rest crossings 208 -> 333 on the traced board, moorish idol 47 -> 144; round 3 owns that.)
-            ids = np.where((nd < d - 1e-5) & (t > 1e-5), len(self.PLATES) + k + 1, ids); d = nd
         # orbit: circumorbital ring (bone) around the eye opening, a low torus in the side plane
         ex, eyy, er = self.ex, self.eyy, self.er
         ring = np.abs(np.sqrt((x - ex) ** 2 + (y - eyy) ** 2) - max(EY['orbit'], er * 1.08)) - 0.25 * (EY['orbit'] - er * 0.8 + 0.01)
@@ -532,7 +632,7 @@ class Form:
         return (d, ids) if parts else d
 
     def provenance(self):
-        return [dict(region=p[0], source=p[5]) for p in self.PLATES] + [dict(region=p[0], source=p[6]) for p in self.VPLATES] + [
+        return [dict(region=p['name'], source=p['source'] + f"; free margin bevelled over {p['bevel'] * 100:.2f} % SL" if p['free'] else p['source']) for p in self.PLATES] + [
             dict(region='orbit ring', source='circumorbital bone ring: record skeleton.eye.orbitR'),
             dict(region='mouth cleft', source='gape between jaws: record mouth.line'),
             dict(region='eye aim', source=f"{self.ORBIT['aim_source']}: {self.ORBIT['aim_up_deg']} deg up, {self.ORBIT['aim_fwd_deg']} deg forward "

@@ -16,6 +16,8 @@ Cage checks (no Blender):
   OP3 no fold (> 60 deg between neighbouring faces) outside the designed creases (rolls, junctions, commissures)
   FM1 the body loft is fair: no crease round a section and no ripple of the flank along the body (what the normal bake
       would write as stripes and bands)
+  FM2 bone plates shape the skin as one surface: no wall anywhere on a plate (what the dense form would turn into a
+      staircase and the bake into saw-toothed plate edges)
 Export checks (after Blender): P1 triangle budget + LODs, P6 the normal map carries the form, faces out, is the same on
 both sides and is clean (1st percentile of normal z >= 0.8, at most 2 specks), P7 bones, P8 Khronos
 validator, P11 silhouette against the ceiling frame (info), and the export stage's own rows:
@@ -26,6 +28,7 @@ validator, P11 silhouette against the ceiling frame (info), and the export stage
   EX5 collision: at least 3 hulls (a body that bends), >= 99 % of the form's inside covered, hull volume <= 1.3 x form volume
   EX6 the swim settings ride in the glTF (rig node extras alien_ocean.swim: envelope with phase, envelopes at >= 2 speeds, wavelength, beat law, clips)
   EX8 the eye shells (iris, lens, cornea, both eyes) stay inside their triangle budget: the eye's look is in its maps
+  EX9 a lining carries the skin's colour where it meets the skin (lips, gill slits): no pink or black line at a closed opening
   EX7 LOD chain by the Unreal-era intake rule (creature_meter K2 + export round trip X4): each level 2.5-6 x fewer triangles, switch distances stated
 """
 import json, os, sys, math, copy, hashlib, subprocess
@@ -241,6 +244,54 @@ def _form_fair(form):
                 FM1_pass=crease <= FM1_CREASE_MAX and ripple <= FM1_RIPPLE_MAX)
 
 
+FM2_STEP = 0.001        # DEFAULT: the skin is sampled half a cell of the dense form apart (SL)
+FM2_SLOPE_MAX = 1.25    # DEFAULT: steepest rise of bone over the bare body, rise over run: form.PLATE_SLOPE (45 deg) and a quarter. A plate
+                        # cut off square at its outline measures its whole step over one sample (6 for a 0.6 % SL step)
+
+
+def plate_fair(form):
+    """FM2: bone plates shape the skin as one surface. Thickness of bone over the bare body, sampled on the skin every
+    FM2_STEP along the body and round the section across every plate: nowhere may it rise faster than FM2_SLOPE_MAX. A
+    wall (a plate cut off square, an outline edge left out of its fade) is sharper than the dense form's 0.2 % SL cells
+    carry: marching cubes makes a staircase of it and the bake writes saw teeth along the plate (export r6)."""
+    if not getattr(form, 'PLATES', None): return dict(FM2_plate_slope_max=0.0, FM2_pass=True)
+    x0 = max(min(p['poly'][:, 0].min() for p in form.PLATES) - 0.01, FM2_STEP); x1 = min(max(p['poly'][:, 0].max() for p in form.PLATES) + 0.01, form.XEND)
+    xs = np.arange(x0, x1, FM2_STEP); X, TH = np.meshgrid(xs, np.linspace(0.01, np.pi - 0.01, 400), indexing='ij')
+    S = form.loft_point(X.ravel(), TH.ravel()); T = form.plates(S)[0].reshape(X.shape); S = S.reshape(X.shape + (3,)); worst = 0.0; at = None
+    for ax in (0, 1):
+        q = np.abs(np.diff(T, axis=ax)) / np.maximum(np.linalg.norm(np.diff(S, axis=ax), axis=-1), 0.25 * FM2_STEP)
+        if q.max() > worst: i, j = np.unravel_index(int(np.argmax(q)), q.shape); worst = float(q.max()); at = [round(float(X[i, j]), 4), round(float(np.degrees(TH[i, j])), 1)]
+    return dict(FM2_plate_slope_max=round(worst, 2), FM2_plate_slope_at_x_theta=at, FM2_plate_step_max_pctSL=round(float(T.max()) * 100, 3),
+                FM2_pass=worst <= FM2_SLOPE_MAX)
+
+
+EX9_DIFF_MAX = 0.06     # DEFAULT: most a lining's texel at a rim may differ from the skin's texel at the same vertex (linear RGB, 95th percentile)
+
+
+def rim_colour(C, body_lin, int_lin, margin=0.02):
+    """EX9: where a lining meets the skin (lips, gill slits) it carries the skin's colour. For every vertex shared by a skin
+    face and an interior face: the interior map at that vertex's place in the interior island (remapped as blender/interior.py
+    lays it out) against the skin map at its place in the skin island. Images: linear RGB, row 0 at the top."""
+    inner = [t in INNER_TAGS for t in C['ftag']]
+    rim = set(v for f, i in zip(C['faces'], inner) if i for v in f) & set(v for f, i in zip(C['faces'], inner) if not i for v in f)
+    U = np.array([uv for f, i, u in zip(C['faces'], inner, C['uv']) if i for uv in u]); lo, hi = U.min(0), U.max(0)
+    px = lambda img, u, v: img[int(np.clip((1 - v) * img.shape[0], 0, img.shape[0] - 1)), int(np.clip(u * img.shape[1], 0, img.shape[1] - 1)), :3]
+    skin, own = {}, {}
+    for f, uv, i in zip(C['faces'], C['uv'], inner):
+        for v, (u_, v_) in zip(f, uv):
+            if v not in rim: continue
+            if i: own.setdefault(v, []).append(px(int_lin, margin + (1 - 2 * margin) * (u_ - lo[0]) / (hi[0] - lo[0]), margin + (1 - 2 * margin) * (v_ - lo[1]) / (hi[1] - lo[1])))
+            else: skin.setdefault(v, []).append(px(body_lin, u_, v_))
+    d = np.array([np.abs(np.mean(own[v], 0) - np.mean(skin[v], 0)).max() for v in rim if v in own and v in skin])
+    if not len(d): return dict(EX9_rim_vertices=0, EX9_pass=False)
+    return dict(EX9_rim_vertices=len(d), EX9_rim_colour_diff_p95=round(float(np.percentile(d, 95)), 3), EX9_rim_colour_diff_max=round(float(d.max()), 3),
+                EX9_pass=float(np.percentile(d, 95)) <= EX9_DIFF_MAX)
+
+
+def _lin(path):
+    a = np.asarray(Image.open(path).convert('RGB'), float) / 255; return np.where(a <= 0.04045, a / 12.92, ((a + 0.055) / 1.055) ** 2.4)
+
+
 def cage_checks(C, V, form, rec):
     R = {}; faces, tags = C['faces'], C['ftag']
     skin = [k for k, t in enumerate(tags) if t in SKIN_TAGS]
@@ -299,7 +350,7 @@ def cage_checks(C, V, form, rec):
     by, dmax = folds(C, V)
     R['OP3_folds_by_region'] = by; R['OP3_folds'] = int(sum(by.values())); R['OP3_designed_crease_max_deg'] = round(dmax)
     R['OP3_pass'] = R['OP3_folds'] == 0
-    R.update(form_fair(form))
+    R.update(form_fair(form)); R.update(plate_fair(form))
     return R
 
 
@@ -363,6 +414,26 @@ def p6(N, Mk, H=None):
                 P6_pass=min(t for t, r in zip(thirds + [max(thirds)], relief + [True]) if r) >= 0.10 and specks <= P6_SPECKS_MAX and zp1 >= P6_Z_P1_MIN and back <= P6_BACK_MAX * Mk.sum() and side <= P6_SIDE_MAX and twins >= 0.95)
 
 
+P6_RIM_Z_MED_MIN = 0.985    # DEFAULT: the middle texel of the skin faces at a rim tilts at most 10 deg. Baked right: 4.4-6.8 deg (trevally, grouper,
+                            # pufferfish, blenny, needlefish at 1024-2048 px, the proof record at 256); lips shaded with the lining: 15.2 deg
+
+
+def rim_lean(C, V, VN, N):
+    """P6, at the rims: the median tangent-normal z over the texels of skin faces that share a vertex with a lining (lips,
+    gill slit lips; not the orbit linings, which are flat by design). Lip vertices shaded with the lining lean into the
+    opening and the bake writes the opposite lean over all of every such face. The map-wide 1st percentile caught that
+    only while plate walls used up most of its 1 %: with the walls gone the planted fault sat at 0.801 against the 0.8
+    gate on the proof record. N: the normal map as saved (row 0 at the top)."""
+    from .maps import raster
+    sk = [k for k, t in enumerate(C['ftag']) if t in SKIN_TAGS]; iv = set(v for f, t in zip(C['faces'], C['ftag']) if t in INNER_TAGS for v in f)
+    tuck = set(v for rings in C['openings'].get('eye_rings', []) for v in rings[-1])
+    F = raster([C['faces'][k] for k in sk], [np.array(C['uv'][k]) for k in sk], V, VN, N.shape[0])[3][::-1]
+    rim = np.isin(F, [i for i, k in enumerate(sk) if iv & set(C['faces'][k]) and not (C['ftag'][k] == 'eye' and tuck & set(C['faces'][k]))])
+    if not rim.any(): return dict(P6_rim_texels=0, P6_rim_z_median=None, P6_rim_pass=False)
+    z = N[..., 2][rim] / (np.linalg.norm(N[rim][:, :3], axis=1) + 1e-9); med = float(np.median(z))
+    return dict(P6_rim_texels=int(rim.sum()), P6_rim_z_median=round(med, 3), P6_rim_pass=med >= P6_RIM_Z_MED_MIN)
+
+
 def validator(path):
     js = ("const v=require('gltf-validator');const fs=require('fs');v.validateBytes(new Uint8Array(fs.readFileSync(process.argv[1])))"
           ".then(r=>{console.log(JSON.stringify({errors:r.issues.numErrors,warnings:r.issues.numWarnings,infos:r.issues.numInfos,"
@@ -383,10 +454,15 @@ def export_checks(out, st):
         N = np.asarray(Image.open(npath)).astype(float) / 127.5 - 1
         hp = os.path.join(out, 'body_height.npy')
         R.update(p6(N, np.load(os.path.join(out, 'body_mask.npy'))[::-1], np.load(hp)[::-1] if os.path.exists(hp) else None))
+        cj, cz = os.path.join(out, 'cage.json'), os.path.join(out, 'cage.npz')
+        if os.path.exists(cj) and os.path.exists(cz):
+            Zc = np.load(cz); R.update(rim_lean(json.load(open(cj)), Zc['V'], Zc['VN'], N[..., :3])); R['P6_pass'] = R['P6_pass'] and R['P6_rim_pass']
     for name in ('fish.glb', 'fish_LOD1.glb', 'fish_LOD2.glb'):
         if os.path.exists(os.path.join(out, name)): R[f'P8_validator_{name}'] = validator(os.path.join(out, name))
     R['P8_pass'] = all(v.get('errors', 1) == 0 for k, v in R.items() if k.startswith('P8_validator'))
     R.update(ex_checks(out, st))
+    bp, ip, cp = (os.path.join(out, n) for n in ('body_base.png', 'interior_base.png', 'cage.json'))
+    if all(os.path.exists(p_) for p_ in (bp, ip, cp)): R.update(rim_colour(json.load(open(cp)), _lin(bp), _lin(ip)))
     return R
 
 
@@ -486,6 +562,9 @@ def planted(C0, V0, VN0, form, rec):
     n2 = nm.copy()
     for y_, x_ in ((5, 5), (9, 20), (14, 40)): n2[y_, x_] = n2[y_ + 32, x_] = [0.9, 0.9, 0.3]
     PL['P6 (three specks left on each side)'] = p6(n2, np.ones((64, 64), bool))['P6_specks'] > P6_SPECKS_MAX
+    flat_ = np.dstack([np.zeros((256, 256)), np.zeros((256, 256)), np.ones((256, 256))]); a_ = math.radians(15.2)
+    PL['P6 rim planted baseline passes'] = rim_lean(C0, V0, VN0, flat_)['P6_rim_pass']
+    PL['P6 (rim faces leaning 15 deg: lips shaded with the lining)'] = not rim_lean(C0, V0, VN0, flat_ * 0 + [math.sin(a_), 0, math.cos(a_)])['P6_rim_pass']
     from .form import Form
     PL['FM1 planted baseline passes'] = form_fair(form)['FM1_pass']
     r2 = copy.deepcopy(rec); xk = np.arange(0.0, form.XEND + 1e-9, 0.02); hw0 = np.array(rec['outline']['hw'])
@@ -497,6 +576,16 @@ def planted(C0, V0, VN0, form, rec):
     PL['FM1 (section with a corner on the flank)'] = form_fair(f2)['FM1_crease_deg'] > FM1_CREASE_MAX
     flat = np.dstack([np.zeros((64, 64)), np.zeros((64, 64)), np.ones((64, 64))]); n2 = nm.copy(); n2[:, 22:42] = [0, 0, 1.0]
     Hs = np.ones((64, 64)); Hn = Hs.copy(); Hn[:, 22:42] = 0
+    PL['FM2 planted baseline passes'] = plate_fair(form)['FM2_pass']
+    f3 = Form(rec)
+    for p_ in f3.PLATES: p_['bevel'] = 0.0006                     # the old plates' edge: a wall rounded over 0.06 % SL
+    PL['FM2 (plates cut off square at their free margins)'] = plate_fair(f3)['FM2_plate_slope_max'] > FM2_SLOPE_MAX
+    f3 = Form(rec)
+    for p_ in f3.PLATES: p_['buried'] = [l[:max(2, len(l) // 2)] for l in p_['buried']]      # half of each buried outline has no fade: a wall there
+    PL['FM2 (a stretch of outline left out of the fade)'] = plate_fair(f3)['FM2_plate_slope_max'] > FM2_SLOPE_MAX
+    sk_ = np.zeros((64, 64, 3)) + [0.45, 0.42, 0.30]
+    PL['EX9 planted baseline passes'] = rim_colour(C0, sk_, sk_.copy())['EX9_pass']
+    PL['EX9 (lining mucosa pink right from the rim)'] = not rim_colour(C0, sk_, np.zeros((64, 64, 3)) + [0.62, 0.42, 0.40])['EX9_pass']
     PL['P6 naked trunk (no relief in the height map) may bake flat'] = p6(n2, np.ones((64, 64), bool), Hn)['P6_pass']
     PL['P6 (scaled trunk baked flat)'] = not p6(n2, np.ones((64, 64), bool), Hs)['P6_pass']
     PL['P6 (flat normal map on naked skin all over)'] = not p6(flat, np.ones((64, 64), bool), np.zeros((64, 64)))['P6_pass']
