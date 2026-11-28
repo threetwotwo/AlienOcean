@@ -35,6 +35,7 @@ uniform float moon_edge = 1.5;
 uniform vec3 dome_sun = vec3(0.0, 1.0, 0.0);   // the sun for the dome's shape: lifted to >= 1 deg (twilight stand-in)
 uniform float sky_norm = 1.0;           // set by the driver: dome scale so its ground light = clock sky_lux
 uniform float sea_nits = 0.0;           // below the horizon: the sea, seen from above
+uniform float sky_oc_beam = 1.0;        // the share of the clear sky's direct beam that cloud cover lets through (WorldRoot)
 // Under water, the sky Godot's lighting reads (the radiance cubemap: SDFGI's escaping rays) is the water's own light field at
 // water_zref, not the air above: two uniform hemispheres whose irradiance on a normal is exactly w_fill(z_ref, up)
 // (look/water_physics.gdshaderinc): the sky's light through the water from above, the sand's bounce from below. Set by WorldRoot.
@@ -53,6 +54,7 @@ float airmass(float y) {
 // counterpart of Unreal's SkyAtmosphere; only its shape is used, the clock sets its brightness (sky_norm). One copy,
 // shared with the water shaders (look/sky_dome.gdshaderinc); mirrored on the CPU in WorldRoot.dome().
 #include "sky_dome.gdshaderinc"
+#include "sky_overcast.gdshaderinc"
 vec3 dome(vec3 v, vec3 s) { return sky_dome_shape(v, s); }
 float h31(vec3 q) { return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
 float vnoise(vec3 p) {
@@ -107,7 +109,7 @@ void sky() {
 	else if (v.y < -0.02) { COLOR = vec3(sea_nits); }
 	else {
 		vec3 s = normalize(sun_dir);
-		vec3 air = dome(v, normalize(dome_sun)) * sky_norm;
+		vec3 air = sky_overcast_air(dome(v, normalize(dome_sun)) * sky_norm, v);
 		vec3 col = air;
 		// sun disc + corona (SUN_HLSL)
 		float th = acos(clamp(dot(v, s), -1.0, 1.0));
@@ -127,11 +129,12 @@ void sky() {
 		vec4 ma = moon(v, normalize(moon_a_dir), moon_a_deg, 0.52, moon_a_albedo, moon_a_kelvin, moon_a_night, s);
 		vec4 mb = moon(v, normalize(moon_b_dir), moon_b_deg, 0.43, moon_b_albedo, moon_b_kelvin, moon_b_night, s);
 		float mask = (1.0 - ma.a) * (1.0 - mb.a);
-		if (s.y > -0.02) col += (inside * disc + cor * vec3(1.0, 0.97, 0.92)) * sun_toa * T * mask;
+		// the sun disc behind the cloud: its beam share (WorldRoot sky_oc_beam, Kasten-Czeplak)
+		if (s.y > -0.02) col += sky_oc_beam * (inside * disc + cor * vec3(1.0, 0.97, 0.92)) * sun_toa * T * mask;
 		// B is nearer (18 km) than A (20 km): it covers A
-		col = mix(col, air + ma.rgb, ma.a * (1.0 - mb.a));   // the air in front of a moon still glows
-		col = mix(col, air + mb.rgb, mb.a);
-		if (!AT_CUBEMAP_PASS) col += stars(v, POSITION, TIME, s, normalize(moon_a_dir), normalize(moon_b_dir));
+		col = mix(col, air + ma.rgb * sky_oc_beam, ma.a * (1.0 - mb.a));   // the air in front of a moon still glows
+		col = mix(col, air + mb.rgb * sky_oc_beam, mb.a);
+		if (!AT_CUBEMAP_PASS) col += sky_oc_beam * stars(v, POSITION, TIME, s, normalize(moon_a_dir), normalize(moon_b_dir));
 		COLOR = col;
 	}
 }

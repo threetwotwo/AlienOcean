@@ -154,6 +154,24 @@ static func sky_state(hours: float, noon_yaw := 0.0, day_hours := 24.0, months :
 	st["skylux"] = st.sun.sky + st.A.sky + st.B.sky + NIGHT_SKY_LUX
 	return st
 
+static func overcast(st: Dictionary, n: float) -> Dictionary:
+	## Cloud cover n (0 clear .. 1 overcast) on the clear sky_state, after Kasten & Czeplak (1980, Solar Energy 24:177):
+	## light on level ground G = G_clear (1 - 0.75 n^3.4); the diffuse share rises from the clear sky's own f0 to 1 as n^2
+	## (their D/G = 0.3 + 0.7 n^2, with f0 = 0.3). So the direct beam keeps (1 - 0.75 n^3.4)(1 - n^2) of itself (oc_beam_k),
+	## and the sky's light is G f. Adds "oc_beam_k" and "overcast"; total and skylux become the cloudy ones.
+	var out := st.duplicate()
+	var c := clampf(n, 0.0, 1.0)
+	var g_k := 1.0 - 0.75 * pow(c, 3.4)
+	var lit: float = st.total - NIGHT_SKY_LUX
+	var sky: float = st.skylux - NIGHT_SKY_LUX
+	var f0 := sky / lit if lit > 0.0 else 1.0
+	var f := f0 + (1.0 - f0) * c * c
+	out["total"] = lit * g_k + NIGHT_SKY_LUX
+	out["skylux"] = lit * g_k * f + NIGHT_SKY_LUX
+	out["oc_beam_k"] = g_k * (1.0 - c * c)
+	out["overcast"] = c
+	return out
+
 static func white_now(st: Dictionary) -> float:
 	## white balance that follows the light: illuminance-weighted mean in mireds (sun_v184 white_now)
 	var w: float = st.sun.horiz + st.A.horiz + st.B.horiz

@@ -17,6 +17,9 @@ echo "== Thalassa port checks (golden traces from the v20.19 JS)"
 echo "== GI light field (look)"
 "$G" --headless --path . --script res://tests/test_gi_light_field.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_gi_light_field.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_gi_light_field.gd -- --fault >/dev/null 2>&1 && { echo "GI PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "GI planted fault caught"
+echo "== Overcast (look)"
+"$G" --headless --path . --script res://tests/test_overcast.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_overcast.gd >/dev/null 2>&1 || rc=1
+"$G" --headless --path . --script res://tests/test_overcast.gd -- --fault >/dev/null 2>&1 && { echo "OVERCAST PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Overcast planted fault caught"
 echo "== M29 buoyancy"
 for r in 30 60 120; do
   "$G" --headless --fixed-fps $r --path . --script res://tests/test_buoyancy.gd -- --rate $r --out "$OUT/m29_$r.json" 2>&1 | grep -E "FAIL|M29" || true

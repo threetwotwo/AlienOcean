@@ -93,6 +93,11 @@ static func load_species(species: String, look := {}) -> Dictionary:
 		out.meshes.append(am)
 	return out
 
+## The maker's PBR material for one fish outside a school (a hero drawn as a skinned MeshInstance3D): the same shader, so it is
+## lit the same way (look/creature_light.gdshaderinc: caustics, the fill's depth change), with the shader's swim wave off.
+static func creature_material(src: Material) -> ShaderMaterial:
+	return _material(src, {}, {"swim_on": 0.0})
+
 ## The maker's PBR material, with the swim wave from its extras.
 static func _material(src: Material, swim: Dictionary, look: Dictionary) -> ShaderMaterial:
 	var sm := ShaderMaterial.new(); sm.shader = SHADER
