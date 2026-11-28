@@ -321,3 +321,10 @@ def test_scale_relief_covers_the_trunk(tmp_path):
     out = str(tmp_path / 'beryx'); build(REC, out, res=256, dense_form=False, log=lambda *a: None)
     h = np.load(os.path.join(out, 'body_height.npy')); m = np.load(os.path.join(out, 'body_mask.npy')).astype(bool)
     assert (np.abs(h - np.median(h)) > 1e-4)[m].mean() > 0.4
+
+
+def test_lateral_line_height_falls_back_when_the_record_holds_none(tmp_path):
+    from creature_maker.record import adapt, LL_FRAC
+    D = json.load(open(REC)); D['record'].setdefault('scales', {}).setdefault('grow', {})['lateral_line'] = {'ll_frac': None}
+    p = str(tmp_path / 'r.json'); json.dump(D, open(p, 'w'))
+    assert adapt(p)['scales']['ll_frac'] == LL_FRAC
