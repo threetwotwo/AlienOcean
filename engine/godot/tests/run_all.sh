@@ -61,6 +61,11 @@ echo "monkey: $(tail -1 "$OUT/m04_monkey.txt")"
 echo "== Test level T1 (stand-in floor when the lagoon assets are absent)"
 OUT="$OUT" bash tests/run_test_level.sh 600 | grep -vE "^PASS" || rc=1
 [ "${PIPESTATUS[0]}" = "0" ] || rc=1
+echo "== Grass no-jitter (30/60/120/144 Hz against a continuous reference; planted fault: tick stepping)"
+"$G" --headless --path . --script res://tests/test_grass_jitter.gd > "$OUT/grass_jitter.txt" 2>&1 || rc=1
+tail -1 "$OUT/grass_jitter.txt"
+"$G" --headless --path . --script res://tests/test_grass_jitter.gd -- stepped > "$OUT/grass_jitter_fault.txt" 2>&1 || rc=1
+tail -1 "$OUT/grass_jitter_fault.txt" | cut -c1-60
 echo "== Blockout kit + blockout stress scene (30/60/120 Hz)"
 OUT="$OUT" bash tests/run_blockout.sh || rc=1
 echo "== result: $([ $rc = 0 ] && echo ALL GREEN || echo FAILURES)"

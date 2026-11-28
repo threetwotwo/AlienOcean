@@ -440,3 +440,14 @@ def test_blockout_follows_the_record_and_catches_planted_faults(tmp_path):
     ok = checks(form, segs, x_end, fins, rec)['BK3_fin_iou'][m['name']]; assert ok >= 0.85, ok
     big = copy.deepcopy(fins); V = np.asarray(big[m['name']]['V']); c = V[:, :2].mean(0); V[:, :2] = c + (V[:, :2] - c) * 1.25; big[m['name']]['V'] = V
     assert checks(form, segs, x_end, big, rec)['BK3_fin_iou'][m['name']] < ok - 0.1
+
+
+def test_clips_have_no_jitter_at_any_tick_rate():
+    """JT1 (Gary 28 Nov: no jitter anywhere): a clip keyed 24 times a beat and played by straight lines between keys kinks at every
+    key (peak acceleration ~3x the smooth curve's at 120 Hz); keyed at KEY_HZ it is smooth at 30/60/120/144 Hz."""
+    from creature_maker.swim_clip import jitter, JT_MAX
+    f = 1.8; t = lambda fps: np.arange(int(round(fps / f)) + 1) / fps
+    clip = lambda fps: np.stack([np.zeros_like(t(fps)), np.zeros_like(t(fps)), np.sin(2 * np.pi * f * t(fps))], -1)[:, None, :]
+    sparse = jitter(clip(24 * f), 24 * f); dense = jitter(clip(67 * f), 67 * f)
+    assert not sparse['pass'] and sparse['120Hz'] > 2, sparse
+    assert dense['pass'] and max(v for k, v in dense.items() if k.endswith('Hz')) <= JT_MAX, dense

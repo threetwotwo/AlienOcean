@@ -25,7 +25,10 @@ const DRY := [
 const WET := [
 	["lagoon pool 2.4 m", "lagoon_pool", {"size": 60.0}], ["pool 20 m", "pool", {"size": 40.0}],
 	["ceiling slab -5 m", "ceiling", {"size": 30.0}], ["tube 0.8", "tube", {"s": 0.8, "size": 40.0}],
-	["tube 1.0", "tube", {"s": 1.0, "size": 40.0}], ["ride", "ride", {"size": 50.0}], ["shore", "shore", {}],
+	["tube 1.0", "tube", {"s": 1.0, "size": 40.0}], ["ride", "ride", {"size": 50.0}], ["ride dolphin", "ride", {"species": "dolphin", "size": 70.0}],
+	["ride turtle", "ride", {"species": "turtle", "size": 40.0}], ["ride manta", "ride", {"species": "manta", "size": 60.0}],
+	["ride whale shark", "ride", {"species": "whale_shark", "size": 120.0, "depth": 25.0}],
+	["ride humpback", "ride", {"species": "humpback", "size": 140.0, "depth": 30.0}], ["shore", "shore", {}],
 ]
 
 static func build(parent: Node3D, water_level: float = 0.0, dry: Array = DRY, wet: Array = WET) -> Dictionary:

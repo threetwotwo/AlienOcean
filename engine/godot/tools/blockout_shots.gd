@@ -1,7 +1,9 @@
 ## Blockout shots 0.1.0 (blockout kit): pictures of the blockout gym and of grey mode on a real level piece, for the
 ## picture page. Plain daylight, no water drawn, so the shapes read. Marker frames (saddle, hands, feet, seats, lie)
 ## are drawn as small red/green/blue axes (x/y/z; -Z blue tip = facing).
-## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/blockout_shots.gd -- <out_dir> [w h]
+## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/blockout_shots.gd -- <out_dir> [w h] [species]
+##   'species' as 4th argument: each creature stand-in, 4 frames across one beat from the view that shows its swim
+##   (side for up-down, top for side-to-side, front for wings, above for flippers) + a 3/4 view with its grab frames.
 extends SceneTree
 
 const Gym := preload("res://blockout/blockout_gym.gd")
@@ -16,7 +18,8 @@ func _initialize() -> void:
 	if a.size() > 0: out = a[0]
 	DirAccess.make_dir_recursive_absolute(out)
 	root.size = Vector2i(int(a[1]) if a.size() > 1 else 1280, int(a[2]) if a.size() > 2 else 720)
-	_run.call_deferred()
+	if a.size() > 3 and a[3] == "species": _run_species.call_deferred()
+	else: _run.call_deferred()
 
 func _env() -> void:
 	var we := WorldEnvironment.new(); var e := Environment.new()
@@ -100,4 +103,42 @@ func _run() -> void:
 	var rep := Grey.apply([lvl], true)
 	print("GREY ", rep)
 	await _shot("14_reef_grey", from, at, 60)
+	quit(0)
+
+func _run_species() -> void:
+	const Sp := preload("res://blockout/blockout_species.gd")
+	const Kit := preload("res://blockout/blockout_kit.gd")
+	_env()
+	for sp in Sp.names():
+		var w := Node3D.new(); root.add_child(w)
+		var r := Kit.build(w, "ride", {"species": sp})
+		var rd = r.rider
+		rd.paused = true; rd.t = 0.3
+		for i in 2: await physics_frame
+		for slot in rd.slots():
+			for part in ["hand_l", "hand_r", "body"]:
+				var mk = rd._mk_nodes[slot + "_" + part]
+				var h := Node3D.new(); mk.add_child(h); _axes(h, Transform3D.IDENTITY, clampf(rd.LENGTH * 0.04, 0.12, 0.4))
+		var L: float = rd.LENGTH
+		var span: float = float(Sp.PROFILES[sp].get("span", 0.0))
+		var mode := String(Sp.PROFILES[sp].mode)
+		var period: float = TAU / rd.omega
+		for k in 4:
+			rd.t = 0.3 + period * k / 4.0
+			for i in 2: await physics_frame
+			var b: Basis = rd.global_transform.basis; var c: Vector3 = rd.global_position
+			var dist := maxf(L, span) * 1.25
+			var from: Vector3
+			match mode:
+				"vertical": from = c + b.x * dist
+				"lateral": from = c + b.y * dist + b.z * 0.01
+				"flap": from = c - b.z * dist + b.y * dist * 0.08
+				_: from = c + b.y * dist * 0.8 + b.x * dist * 0.5
+			await _shot("sp_%s_%d" % [sp, k], from, c, 50)
+		rd.t = 0.3
+		for i in 2: await physics_frame
+		var b2: Basis = rd.global_transform.basis; var c2: Vector3 = rd.global_position
+		var d2 := maxf(L, span) * 0.9
+		await _shot("sp_%s_grips" % sp, c2 + b2.x * d2 * 0.7 + b2.y * d2 * 0.55 - b2.z * d2 * 0.5, c2 - b2.z * L * 0.05, 50)
+		root.remove_child(w); w.free()
 	quit(0)
