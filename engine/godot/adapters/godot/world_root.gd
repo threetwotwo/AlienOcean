@@ -71,6 +71,12 @@ func bathymetry() -> Bathymetry:
 @export_range(0.0, 1.0) var sky_overcast := 0.0
 @export var motes := true                 # marine snow under water (blind critique r1 row 6); AO_MOTES=0 in the shot tool
 @export var gi_k := 1.0                    # art lever: GI strength (SDFGI energy). 1 = physical (the water's fill + the sand's real bounce)
+## Bloom (bloom thread, 28 Nov): the key frame's camera veiling glare, done in the AgX pass (look/bloom.glsl).
+## bloom 1 = the key frame's glare (develop_v7.py bloom 1), 0 = off; bloom_thr in exposed units (0.18 = middle grey).
+@export var bloom := 1.0
+@export var bloom_thr := 4.5
+## vignette: light lost at the frame corners (0.15 = corners keep 85 %), natural falloff in scene light; 0 = off
+@export var vignette := 0.0
 @export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
 ## the haze keeps its forward-scattered light (similarity relation, 28 Nov): 1 = on, 0 = as ported (AO_GLOW_MS=0)
 ## the drawn sand's colour (world_textures BIBLE sand f0e1c0 and sand_d e3cca2, linear, their mean): the floor beyond
@@ -190,6 +196,10 @@ func _init() -> void:
 	agx_fx = AgxEffect.new(); cortao_fx = CortaoEffect.new(); cortao_fx.enabled = false
 	var comp := Compositor.new(); comp.compositor_effects = [cortao_fx, agx_fx]; we.compositor = comp
 	set_agx(true)
+	# bloom / vignette levers for benches and shots (any runner): AO_BLOOM (1 key frame, 0 off), AO_BLOOM_THR, AO_VIG
+	if OS.get_environment("AO_BLOOM") != "": bloom = float(OS.get_environment("AO_BLOOM"))
+	if OS.get_environment("AO_BLOOM_THR") != "": bloom_thr = float(OS.get_environment("AO_BLOOM_THR"))
+	if OS.get_environment("AO_VIG") != "": vignette = float(OS.get_environment("AO_VIG"))
 	cam_attr = CameraAttributesPhysical.new(); cam_attr.auto_exposure_enabled = false
 	cam_attr.frustum_near = 0.02; cam_attr.frustum_far = 400.0
 
@@ -203,7 +213,8 @@ func set_ao(mode: String) -> void:
 
 func set_agx(on: bool) -> void:
 	## on: the Unreal AgX tonemapper (look/agx_post.glsl) replaces Godot's; LINEAR leaves only the sRGB encoding and
-	## Godot's glow is off (Unreal bloom not ported yet). off: Godot's built-in AgX with its glow, as before 27 Nov.
+	## Godot's glow is off (its glow would land after our tone curve); our bloom (WorldRoot.bloom) runs inside the AgX pass.
+	## off: Godot's built-in AgX with its glow, as before 27 Nov.
 	agx_fx.enabled = on
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR if on else Environment.TONE_MAPPER_AGX
 	env.glow_enabled = not on
@@ -298,6 +309,7 @@ func apply(cam_y: float) -> Dictionary:
 	rsw.global_shader_parameter_set("water_sun_air", up_air)
 	rsw.global_shader_parameter_set("water_sun_lux", beam_h / maxf(up_air.y, 0.02) if up_air.y > 0.0 else 0.0)
 	if agx_fx.enabled:
+		agx_fx.bloom = bloom; agx_fx.bloom_thr = bloom_thr; agx_fx.vignette = vignette
 		agx_fx.exposure = exposure; agx_fx.buf_scale = exposure   # Godot's buffer arrives already exposed (measured 27 Nov)
 		agx_fx.white_now = SkyClock.white_now(st)
 		agx_fx.sun_dir = to_godot(st.sun.dir); agx_fx.under = under
