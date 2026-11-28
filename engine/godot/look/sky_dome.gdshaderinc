@@ -5,12 +5,14 @@
 // the water is the sky overhead.
 global uniform vec3 water_dome_sun;
 global uniform float water_sky_norm;
+global uniform float sky_turbidity;   // Preetham turbidity (WorldRoot.turbidity)
+global uniform vec3 sky_rayleigh;     // the air's Rayleigh colour (WorldRoot.rayleigh)
 vec3 sky_dome_shape(vec3 v, vec3 s) {
 	float zenith_angle = clamp(s.y, -1.0, 1.0);
 	float sun_energy = max(0.0, 1.0 - exp(-((PI * 0.5) - acos(zenith_angle))));
 	float sun_fade = 1.0 - clamp(1.0 - exp(s.y), 0.0, 1.0);
-	vec3 rayleigh_beta = (2.0 - (1.0 - sun_fade)) * vec3(0.3, 0.405, 0.6) * 0.0001;
-	vec3 mie_beta = 10.0 * 0.005 * vec3(0.69, 0.729, 0.812) * 0.000434;
+	vec3 rayleigh_beta = (2.0 - (1.0 - sun_fade)) * sky_rayleigh * 0.0001;
+	vec3 mie_beta = sky_turbidity * 0.005 * vec3(0.69, 0.729, 0.812) * 0.000434;
 	float zenith = acos(max(0.0, v.y));
 	float optical_mass = 1.0 / (cos(zenith) + 0.15 * pow(93.885 - degrees(zenith), -1.253));
 	vec3 extinction = exp(-(rayleigh_beta * 8.4e3 * optical_mass + mie_beta * 1.25e3 * optical_mass));

@@ -234,6 +234,8 @@ func apply(cam_y: float) -> Dictionary:
 	var rsw := RenderingServer
 	rsw.global_shader_parameter_set("water_dome_sun", sky_mat.get_shader_parameter("dome_sun"))
 	rsw.global_shader_parameter_set("water_sky_norm", sky_mat.get_shader_parameter("sky_norm"))
+	rsw.global_shader_parameter_set("sky_turbidity", turbidity)
+	rsw.global_shader_parameter_set("sky_rayleigh", rayleigh)
 	rsw.global_shader_parameter_set("water_sun_air", up_air)
 	rsw.global_shader_parameter_set("water_sun_lux", beam_h / maxf(up_air.y, 0.02) if up_air.y > 0.0 else 0.0)
 	if agx_fx.enabled:
@@ -321,7 +323,7 @@ static func declare_globals() -> void:
 		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)],
 		# the sea surface (water surface thread): the sky dome's shape sun and scale, the key body in air and its beam lux
 		"water_amb_ref": [V, Vector3.ONE], "water_fill_ao": [F, 1.0], "water_amb_sky": [F, 0.0],
-		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
+		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "sky_turbidity": [F, turbidity], "sky_rayleigh": [V, rayleigh], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)
@@ -354,13 +356,20 @@ static func _airmass(y: float) -> float:
 	var yy := clampf(y, 0.0, 1.0)
 	return 1.0 / (yy + 0.50572 * pow(rad_to_deg(asin(yy)) + 6.07995, -1.6364))
 
+# The dome's air (28 Nov, water surface thread, Gary: "horizon seems off, very grey"): Godot's PhysicalSkyMaterial defaults
+# drew a grey sky: turbidity 10 is a hazy inland sky, and its Rayleigh colour (0.3, 0.405, 0.6) is far less blue than
+# lambda^-4 scattering (680/550/440 nm: 0.105, 0.246, 0.6). Clean tropical sea air (aerosol depth 0.05-0.1) is about
+# turbidity 2.5. Pushed as sky_turbidity / sky_rayleigh. AO_TURB, AO_RAY=0 (Godot's colour) for checks.
+static var turbidity := float(OS.get_environment("AO_TURB")) if OS.get_environment("AO_TURB") != "" else 2.5
+static var rayleigh := Vector3(0.3, 0.405, 0.6) if OS.get_environment("AO_RAY") == "0" else Vector3(0.105, 0.246, 0.6)
+
 static func dome(v: Vector3, s: Vector3) -> Vector3:
-	## mirror of sky.gdshader dome(): Godot's PhysicalSkyMaterial shape at its defaults
+	## mirror of sky.gdshader dome(): Godot's PhysicalSkyMaterial shape at its defaults (turbidity: sky_turbidity)
 	var za := clampf(s.y, -1.0, 1.0)
 	var sun_energy := maxf(0.0, 1.0 - exp(-((PI * 0.5) - acos(za))))
 	var sun_fade := 1.0 - clampf(1.0 - exp(s.y), 0.0, 1.0)
-	var rb := (2.0 - (1.0 - sun_fade)) * Vector3(0.3, 0.405, 0.6) * 0.0001
-	var mb := 10.0 * 0.005 * Vector3(0.69, 0.729, 0.812) * 0.000434
+	var rb := (2.0 - (1.0 - sun_fade)) * rayleigh * 0.0001
+	var mb := turbidity * 0.005 * Vector3(0.69, 0.729, 0.812) * 0.000434
 	var zenith := acos(maxf(0.0, v.y))
 	var om := 1.0 / (cos(zenith) + 0.15 * pow(93.885 - rad_to_deg(zenith), -1.253))
 	var ct := v.dot(s)
