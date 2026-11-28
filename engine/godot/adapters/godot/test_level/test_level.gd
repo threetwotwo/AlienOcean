@@ -146,7 +146,7 @@ func worst_frame_ms(seconds := 10.0) -> float:
 # ---- switches: every one has a getter and a setter, so the test can prove each one returns to where it was ----
 
 func toggle_names() -> Array:
-	return ["sdfgi", "god_rays", "caustics", "agx", "taa", "ssao", "cortao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider"]
+	return ["sdfgi", "god_rays", "caustics", "agx", "taa", "ssao", "cortao", "gtao", "vbao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider"]
 
 func get_toggle(n: String) -> bool:
 	var wr := game.world_root
@@ -158,6 +158,8 @@ func get_toggle(n: String) -> bool:
 		"taa": return get_viewport().use_taa
 		"ssao": return wr.env.ssao_enabled
 		"cortao": return wr.ao_mode == "cortao"
+		"gtao": return wr.ao_mode == "gtao"
+		"vbao": return wr.ao_mode == "vbao"
 		"ssil": return wr.env.ssil_enabled
 		"shadows": return wr.light.shadow_enabled
 		"half_res": return get_viewport().scaling_3d_scale < 0.99
@@ -177,14 +179,16 @@ func set_toggle(n: String, on: bool) -> void:
 		"caustics": wr.caustics.enabled = on
 		"agx": wr.set_agx(on)
 		"taa": get_viewport().use_taa = on
-		"ssao": wr.set_ao("ssao" if on else ("off" if wr.ao_mode != "cortao" else "cortao"))
-		"cortao": wr.set_ao("cortao" if on else "ssao")   # CORTAO in place of SSAO (ao thread 28 Nov); off = back to SSAO
+		"ssao", "cortao", "gtao", "vbao": _set_ao_toggle(wr, n, on)
 		"ssil": wr.env.ssil_enabled = on
 		"shadows": wr.light.shadow_enabled = on
 		"half_res":
-			# half the pixels each way, upscaled (upscaler(): AMD FSR 1 by default; AO_UPSCALER picks another)
-			get_viewport().scaling_3d_mode = upscaler() if on else Viewport.SCALING_3D_MODE_BILINEAR
+			# half the pixels each way, upscaled (upscaler(): AMD FSR 1 + Godot TAA by default; AO_UPSCALER picks another).
+			# A spatial upscaler brings TAA with it, so thin edges (grass) stay anti-aliased.
+			var m := upscaler()
+			get_viewport().scaling_3d_mode = m if on else Viewport.SCALING_3D_MODE_BILINEAR
 			get_viewport().scaling_3d_scale = 0.5 if on else 1.0
+			if on and needs_taa(m): get_viewport().use_taa = true
 		"grass_v2": if grass: grass.set_enabled(on)
 		"schools":
 			game.mounts.set_mount("fauna", on)
@@ -199,7 +203,7 @@ func set_toggle(n: String, on: bool) -> void:
 	_relight()
 
 ## The upscaler behind half_res. AO_UPSCALER = fsr | fsr2 | metalfx | metalfx_temporal picks one; by default AMD FSR 2, a temporal
-## upscaler that does its own anti-aliasing (TAA stays off). FSR 1 was the default (8.8 ms vs MetalFX temporal 11.5 ms on the M1 Pro),
+## upscaler that does its own anti-aliasing (TAA stays off); now FSR 1 + Godot TAA, the best look per ms on the Mac (below). FSR 1 was the default (8.8 ms vs MetalFX temporal 11.5 ms on the M1 Pro),
 ## but it is spatial, with no anti-aliasing: Gary's fullscreen playtest (28 Nov) showed stair-stepped grass, pixelation and shimmer.
 ## At 2704x1756 FSR 2 draws the grass clean where FSR 1 aliases (look thread, plans/godot_look/iq_28nov.jpg); Gary approved the cost.
 static func upscaler() -> int:
@@ -211,7 +215,14 @@ static func upscaler() -> int:
 		"fsr2": return Viewport.SCALING_3D_MODE_FSR2
 		"metalfx": return Viewport.SCALING_3D_MODE_METALFX_SPATIAL if mfx_s else Viewport.SCALING_3D_MODE_FSR
 		"metalfx_temporal": return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR
-	return Viewport.SCALING_3D_MODE_FSR2  # default FSR 2 (28 Nov, image quality): temporal, anti-aliased
+	# default FSR 1 + Godot TAA (needs_taa). Mac matrix 28 Nov, 2704x1696 all on, key-frame / floor ms: FSR 1 + TAA 31.7 / 31.1 (soft,
+	# no stair-steps), MetalFX temporal 37.6 / 37.6 (as soft), FSR 2 42.6 / 37.2 (crispest, grainy grass), FSR 1 alone 28.5 / 35.1
+	# (jagged). Best look per ms.
+	return Viewport.SCALING_3D_MODE_FSR
+
+static func needs_taa(mode: int) -> bool:
+	## a spatial upscaler does no anti-aliasing of its own: TAA goes with it
+	return mode == Viewport.SCALING_3D_MODE_FSR or mode == Viewport.SCALING_3D_MODE_METALFX_SPATIAL or mode == Viewport.SCALING_3D_MODE_BILINEAR
 
 func _set_collider(on: bool) -> void:
 	_show_collider = on
@@ -354,7 +365,7 @@ func _bench_measure(secs: float) -> Dictionary:
 		"p95_frame_ms": snappedf(srt[int(srt.size() * 0.95)] if srt.size() > 0 else 0.0, 0.01), "frames": fr.size(),
 		"tick_ms": snappedf(game.stats.tick_ms, 0.01), "draw_calls": P.get_monitor(P.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 		"triangles": P.get_monitor(P.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
-		"cortao_gpu_ms": snappedf(game.world_root.cortao_fx.gpu_ms, 0.001) if game.world_root.ao_mode == "cortao" else 0.0}
+		"cortao_gpu_ms": snappedf(game.world_root.cortao_fx.gpu_ms, 0.001) if game.world_root.ao_mode in ["cortao", "gtao", "vbao"] else 0.0}
 
 func _bench_floor(secs: float) -> Dictionary:
 	## as _bench_measure, holding the camera on the floor while it measures
@@ -430,7 +441,7 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 			DisplayServer.window_set_size(win0)
 			await get_tree().create_timer(settle).timeout
 	for n in BENCH_SWITCHES:
-		if not n in ["half_res", "lagoon", "grass_v2", "cortao"]: set_toggle(n, false)
+		if not n in ["half_res", "lagoon", "grass_v2", "cortao", "gtao", "vbao"]: set_toggle(n, false)
 	await get_tree().create_timer(settle).timeout
 	rows.append({"case": "all effects off (lagoon kept)", "r": await _bench_measure(secs)})
 	apply_state(s0)
@@ -471,3 +482,13 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 	bench_running = false
 	bench_done.emit(path)
 	return path
+
+var _ao_prev := "off"
+func _set_ao_toggle(wr: WorldRoot, mode: String, on: bool) -> void:
+	## the AO switches are one choice (ssao / cortao (default) / gtao / vbao): on = that one, off = back to the one before it
+	if on:
+		if wr.ao_mode != mode: _ao_prev = wr.ao_mode
+		wr.set_ao(mode)
+	elif wr.ao_mode == mode:
+		wr.set_ao(_ao_prev if _ao_prev != mode else "off")
+

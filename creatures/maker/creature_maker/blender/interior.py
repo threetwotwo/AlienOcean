@@ -18,6 +18,43 @@ MUCOSA = (0.62, 0.42, 0.40)     # STAND-IN: pale pink buccal lining (teleost mou
 GILL_RED = (0.42, 0.05, 0.05)   # STAND-IN: gill filaments (blood in the lamellae)
 ROUGH_WET = 0.35                # DEFAULT: wet mucosa, rougher than the eye, smoother than skin
 INNER = ('cavity', 'gill')
+# Structure rule: skin turns in round a rim. The underside of a gill cover's margin, the body lip tucked under it and the
+# roll of a lip are skin (pigmented epidermis); the lining's own tissue starts further in. A lining coloured mucosa pink
+# and shaded with the passage's occlusion right from the rim showed through every opening that is a lens at rest: a pink
+# line along the closed mouth and along the belly's silhouette under the gill cover, a black sliver under the cover
+# (export r6). So within RIM_SKIN of a rim (along the lining) the lining carries its rim's skin colour and no occlusion
+# of its own, and by RIM_FADE it has gone over to its tissue.
+RIM_SKIN = 0.006                # DEFAULT (SL): the slit's first passage row lies 0.47-0.52 % SL in from the flap edge and the lip (cage/gill.py):
+                                # what can be seen through the closed lens. A lip's roll is one lip thickness (0.3 % SL)
+RIM_FADE = 0.014                # DEFAULT (SL): tissue colour from here in (the second passage row)
+
+
+def rim_blend(C, V, out):
+    """per vertex: (share of its own tissue 0..1, the skin colour (linear RGB) of the rim it is nearest to along the lining).
+    Rim vertices are the ones shared by a skin face and an interior face; distance runs along the interior's edges."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import dijkstra
+    from PIL import Image
+    nv = len(V); inner = [t in INNER for t in C['ftag']]
+    vin = set(v for f, i in zip(C['faces'], inner) if i for v in f); vsk = set(v for f, i in zip(C['faces'], inner) if not i for v in f)
+    rim = sorted(vin & vsk); w = np.ones(nv); col = np.zeros((nv, 3))
+    if not rim: return w, col, rim
+    img = np.asarray(Image.open(os.path.join(out, 'body_base.png')).convert('RGB'), float) / 255
+    img = np.where(img <= 0.04045, img / 12.92, ((img + 0.055) / 1.055) ** 2.4); H, W = img.shape[:2]
+    acc = np.zeros((nv, 3)); cnt = np.zeros(nv); rs = set(rim)
+    for f, uv, i in zip(C['faces'], C['uv'], inner):
+        if i: continue
+        for v, (u_, v_) in zip(f, uv):
+            if v in rs: acc[v] += img[int(np.clip((1 - v_) * H, 0, H - 1)), int(np.clip(u_ * W, 0, W - 1))]; cnt[v] += 1
+    E = set()
+    for f, i in zip(C['faces'], inner):
+        if i: E |= {tuple(sorted((f[k], f[(k + 1) % len(f)]))) for k in range(len(f))}
+    E = np.array(sorted(E)); L = np.linalg.norm(V[E[:, 0]] - V[E[:, 1]], axis=1)
+    G = coo_matrix((np.r_[L, L], (np.r_[E[:, 0], E[:, 1]], np.r_[E[:, 1], E[:, 0]])), shape=(nv, nv)).tocsr()
+    dist, _, src = dijkstra(G, indices=rim, min_only=True, return_predecessors=True)
+    ok = np.isfinite(dist); u = np.clip((dist[ok] - RIM_SKIN) / (RIM_FADE - RIM_SKIN), 0, 1)
+    w[ok] = u * u * (3 - 2 * u); col[ok] = (acc / np.maximum(cnt, 1)[:, None])[src[ok]]
+    return w, col, rim
 
 
 def island_box(C):
@@ -51,7 +88,7 @@ def slot(body, C):
     return idx, skip
 
 
-def setup(body, body_m, C, out, idx, skip, res=512):
+def setup(body, body_m, C, out, idx, skip, res=512, V=None):
     """remaps the interior UV island to fill its own texture, bakes its maps and returns (slot index, stats). idx and skip come
     from slot()."""
     me = body.data
@@ -70,6 +107,9 @@ def setup(body, body_m, C, out, idx, skip, res=512):
     em = nt.nodes.new('ShaderNodeEmission'); nt.links.new(at.outputs['Color'], em.inputs['Color'])
     outn = nt.nodes['Material Output']; nt.links.new(em.outputs['Emission'], outn.inputs['Surface'])
     t = tissue(C, len(me.vertices)); col = (1 - t)[:, None] * np.array(MUCOSA) + t[:, None] * np.array(GILL_RED)
+    plant = os.environ.get('CREATURE_PLANT_BAKE_FAULT', '') == 'lining_pink_at_rim'      # tests only: the fault back, to show EX9 catches it
+    rw, rcol, rim = rim_blend(C, np.asarray(V, float), out) if V is not None and not plant else (np.ones(len(col)), col, [])
+    col = rw[:, None] * col + (1 - rw)[:, None] * rcol
     ca = me.color_attributes.new('tissue', 'FLOAT_COLOR', 'POINT'); ca.data.foreach_set('color', np.c_[col, np.ones(len(col))].ravel())
     me.materials[0] = skip; me.materials[idx] = tmp
     scn = bpy.context.scene
@@ -82,7 +122,8 @@ def setup(body, body_m, C, out, idx, skip, res=512):
         bpy.ops.object.bake(type=kind, use_selected_to_active=False, margin=8, use_clear=True)
         return np.array(img.pixels[:], np.float32).reshape(H, W, 4)
     base = bake('EMIT', 'interior_emit', 1)[..., :3]
-    ao = bake('AO', 'interior_ao', 64)[..., 0]
+    ca.data.foreach_set('color', np.c_[rw, rw, rw, np.ones(len(rw))].ravel()); own = bake('EMIT', 'interior_own', 1)[..., 0]
+    ao = bake('AO', 'interior_ao', 64)[..., 0]; ao = np.where(ao > 0, 1 - own * (1 - ao), ao)      # a rim is lit as the skin it is
     me.color_attributes.remove(me.color_attributes['tissue'])
     from PIL import Image
     srgb = lambda c: np.where(c <= 0.0031308, 12.92 * c, 1.055 * np.clip(c, 0, 1) ** (1 / 2.4) - 0.055)
@@ -90,4 +131,5 @@ def setup(body, body_m, C, out, idx, skip, res=512):
     orm = np.dstack([np.clip(ao[::-1], 0.15, 1), np.full_like(ao, ROUGH_WET), np.zeros_like(ao)])
     Image.fromarray((orm * 255 + 0.5).astype(np.uint8)).save(os.path.join(out, 'interior_orm.png'))
     me.materials[0] = body_m
-    return idx, dict(interior_faces=int(inner.sum()), interior_tex=[W, H], interior_ao_mean=round(float(ao[ao > 0].mean()) if (ao > 0).any() else 0, 3))
+    return idx, dict(rim_vertices=len(rim),
+                     interior_faces=int(inner.sum()), interior_tex=[W, H], interior_ao_mean=round(float(ao[ao > 0].mean()) if (ao > 0).any() else 0, 3))

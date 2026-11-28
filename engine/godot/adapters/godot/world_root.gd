@@ -116,7 +116,7 @@ var _gi_reset := 0   # frames left with SDFGI off to drop its cache after a jump
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
 var cortao_fx: CortaoEffect      # CORTAO screen AO (adapters/godot/cortao_effect.gd); set_ao picks it or Godot's SSAO
-var ao_mode := "ssao"
+var ao_mode := "cortao"   # Gary picked CORTAO (Style choices, 28 Nov 08:42Z); "ssao" = Godot's, the look before
 var _surface: SeaSurface          # make_surface's: its floor map is captured again when the light changes (apply)
 var under_mat: ShaderMaterial       # the underwater view quad's material (attach_camera)
 var caustics: CausticsMap           # the light net's map, drawn once a frame (adapters/godot/caustics_map.gd)
@@ -170,13 +170,16 @@ func _init() -> void:
 	declare_globals()
 	light = DirectionalLight3D.new(); light.name = "KeyLight"
 	light.shadow_enabled = true; light.directional_shadow_max_distance = 60.0
+	# shadow levers for benches (project.godot holds the defaults: 8192 map, soft filter high): AO_SHADOW_SIZE, AO_SHADOW_Q 0-5
+	if OS.get_environment("AO_SHADOW_SIZE") != "": RenderingServer.directional_shadow_atlas_set_size(int(OS.get_environment("AO_SHADOW_SIZE")), true)
+	if OS.get_environment("AO_SHADOW_Q") != "": RenderingServer.directional_soft_shadow_filter_set_quality(int(OS.get_environment("AO_SHADOW_Q")))
 	add_child(light)
 	caustics = CausticsMap.new(); add_child(caustics)
 	env = Environment.new()
 	var sky := Sky.new(); sky_mat = ShaderMaterial.new(); sky_mat.shader = load("res://look/sky.gdshader"); sky.sky_material = sky_mat
 	env.background_mode = Environment.BG_SKY; env.sky = sky; env.background_intensity = 1.0   # sky shader outputs nits
 	env.tonemap_mode = Environment.TONE_MAPPER_AGX
-	env.ssao_enabled = true; env.ssao_radius = 1.2; env.ssao_intensity = 1.6
+	env.ssao_enabled = false; env.ssao_radius = 1.2; env.ssao_intensity = 1.6   # SSAO settings kept for set_ao("ssao")
 	env.ssil_enabled = true; env.ssil_radius = 4.0
 	# GI (28 Nov, look thread): SDFGI on by default. Its escaping rays read the water's light field under water (look/sky.gdshader
 	# under_*), so the fill is occluded by the real shapes (arch, table coral) and the sun's bounce off the sand comes for free.
@@ -184,8 +187,9 @@ func _init() -> void:
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	env.glow_enabled = true; env.glow_intensity = 0.3
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
-	agx_fx = AgxEffect.new(); cortao_fx = CortaoEffect.new(); cortao_fx.enabled = false
+	agx_fx = AgxEffect.new(); cortao_fx = CortaoEffect.new(); cortao_fx.enabled = true
 	var comp := Compositor.new(); comp.compositor_effects = [cortao_fx, agx_fx]; we.compositor = comp
+	set_ao(ao_mode)
 	set_agx(true)
 	cam_attr = CameraAttributesPhysical.new(); cam_attr.auto_exposure_enabled = false
 	cam_attr.frustum_near = 0.02; cam_attr.frustum_far = 400.0
@@ -193,10 +197,14 @@ func _init() -> void:
 func set_ao(mode: String) -> void:
 	## "ssao" = Godot's SSAO (the look until now), "cortao" = CORTAO (third_party/cortao) through look/screen_ao.gdshaderinc, "off" = none.
 	## Both occlude only the ambient / GI fill (ao = min(ao, x)), never the sun. SSIL is separate and stays as it is.
+	## "gtao" (XeGTAO) / "vbao" (visibility bitmask): the head to head's other screen AO methods, run in CORTAO's place on the same
+	## inputs, filter and material path (adapters/godot/cortao_effect.gd algo).
 	ao_mode = mode
+	var screen := mode in ["cortao", "gtao", "vbao"]
 	env.ssao_enabled = mode == "ssao"
-	cortao_fx.enabled = mode == "cortao"
-	RenderingServer.global_shader_parameter_set("cortao_on", 1.0 if mode == "cortao" else 0.0)
+	cortao_fx.enabled = screen
+	if screen: cortao_fx.algo = mode
+	RenderingServer.global_shader_parameter_set("cortao_on", 1.0 if screen else 0.0)
 
 func set_agx(on: bool) -> void:
 	## on: the Unreal AgX tonemapper (look/agx_post.glsl) replaces Godot's; LINEAR leaves only the sRGB encoding and
@@ -413,7 +421,7 @@ static func declare_globals() -> void:
 		"water_amb_ref": [V, Vector3.ONE], "water_fill_ao": [F, 1.0], "water_amb_sky": [F, 0.0],
 		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "sky_turbidity": [F, turbidity], "sky_overcast": [F, 0.0], "sky_oc_zenith": [F, 0.0], "sky_rayleigh": [V, rayleigh], "sky_horizon_k": [F, horizon_k], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0],
 		# CORTAO screen AO (look/screen_ao.gdshaderinc): the result texture and 1 = on
-		"cortao_ao": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()], "cortao_on": [F, 0.0]}
+		"cortao_ao": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()], "cortao_on": [F, 0.0]}   # set_ao turns it on once the effect runs
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)

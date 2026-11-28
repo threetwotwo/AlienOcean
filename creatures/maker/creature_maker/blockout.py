@@ -18,8 +18,9 @@ are tested on it. Muscle, skin and face detail come only after the blockout move
 Checks (in blockout.json, all from the record, no picture):
   BK1  side outline: IoU of the ellipsoids' side view against the record's traced outline (top and bottom), snout to caudal base
   BK2  top view: the same against the record's half-width
-  BK3  fins: each fin plate seen from the side covers the record's traced fin outline (true size); for a traced paired fin, the plate's
-       side view is its traced outline by construction, so this catches a plate that is rescaled or set off its base line
+  BK3  fins: each fin plate seen from the side covers the record's traced fin outline (true size); for a traced paired fin the plate is compared
+       in its own plane (fins.paired_sheet's flat sheet, before the fold to rest and the turn out), so this catches a plate that is rescaled
+       or set off its base line
   BK4-BK6 fin roots inside, bend gap, sections (below); CT1-CT3 jaw in its cut, slits under the covers, eyes in sockets (blockout_cut)
 """
 import json, os, time
@@ -175,7 +176,7 @@ def checks(form, segs, x_end, fins, rec, n=600):
     fin_iou = {}; xb = np.linspace(0, form.XEND, 400)
     body = np.vstack([np.c_[xb, form.TOP(xb)], np.c_[xb, form.BOT(xb)][::-1]])
     for k, f in fins.items():
-        V = np.asarray(f['V'])[:, :2]; edge = _fin_outline(rec, k, form)
+        V = np.asarray(f['flat'] if 'flat' in f else f['V'])[:, :2]; edge = _fin_outline(rec, k, form)    # a traced paired fin in its own plane (the full build folds it to rest and turns it out by its out angle: its side view is no longer the trace)
         if edge is None: continue
         lo2 = np.minimum(V.min(0), edge.min(0)); sc = 400 / max(float((np.maximum(V.max(0), edge.max(0)) - lo2).max()), 1e-9)
         px = lambda P: [tuple(q) for q in ((np.asarray(P) - lo2) * sc).tolist()]

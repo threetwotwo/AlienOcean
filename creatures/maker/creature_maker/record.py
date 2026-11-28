@@ -31,7 +31,7 @@ def dget(d, key, default, where):
     if isinstance(d, dict) and key in d: return d[key]       # a record may hold a bare number where a block is expected (0 = none)
     DEFAULTS.append(dict(input=f'{where}.{key}', source='DEFAULT', value=default)); return default
 
-EYE_BULGE, EYE_OVER, EYE_GROOVE = 0.12, 0.14, 0.1     # DEFAULTS: the old builder's periorbital bulge, brow overhang and groove, the values every Species record carries in record.eye
+EYE_BULGE, EYE_GROOVE = 0.12, 0.1     # DEFAULTS: the old builder's periorbital bulge and groove, the values every Species record carries in record.eye
 EYE_AXIAL, EYE_LENS_ED, EYE_PUPIL_ED = 0.704, 0.405, 0.484   # DEFAULTS: medians of Species' 31 scan fills (plans/species_system/gapfill/eye_r2.zip)
 EYE_SILVER = 0.42      # DEFAULT: mirror share of the iris (the argentea), the old iris shine designer's reflect (cage/parts/eye_shine.js, handover/eyes.md)
 GAZE_UNMEASURED = [0.15, 0.1, 0.98]    # the stand-in gaze Species writes where none was measured (gapfill README "Eye aim, round 1": fieldmap _unmeasured)
@@ -84,12 +84,12 @@ def adapt(path, style=None):
     out['eye'] = dict(x=E['u'] * f, y=E['y'] * f, d=2 * E['R'] * f, orbit=dget(E, 'orbitR', E['R'] / 0.8, 'skeleton.eye') * f,
                       iris=eye_iris(R, E), pupil=get(E, 'pupil', None, need=False))     # a pupil stated as a share of the visible eye wins over pupil_ED (cage.eye.optics)
     P('eye opening', 'record.skeleton.eye.u/y/R (R = visible eye, 0.8 orbitR); orbit ring from orbitR')
-    # tissue round the eye (form.Form._orbit): record.eye.bulge = how far the periorbital tissue stands the eye's edge proud
-    # of the skin, record.eye.over = how far the brow carries on above the eye; record.eye.groove = how far the
-    # eye's edge may lie under the skin (the furrow between tissue and globe); all read as shares of the eye radius.
+    # the swelling round the eye (form.Form._orbit): record.eye.bulge = how far it stands the eye's edge proud of the skin,
+    # record.eye.groove = how far the eye's edge may lie under the skin (the furrow between swelling and globe); both read as
+    # shares of the eye radius. (record.eye.over, the brow's height, belonged to PR #109's skull roof and is not read.)
     PO = R.get('eye') if isinstance(R.get('eye'), dict) else {}
-    for k_, v_ in (('bulge', EYE_BULGE), ('over', EYE_OVER), ('groove', EYE_GROOVE)): out['eye'][k_] = float(dget(PO, k_, v_, 'eye'))
-    P('periorbital tissue', 'record.eye.bulge, record.eye.over, record.eye.groove (x eye radius)')
+    for k_, v_ in (('bulge', EYE_BULGE), ('groove', EYE_GROOVE)): out['eye'][k_] = float(dget(PO, k_, v_, 'eye'))
+    P('swelling round the eye', 'record.eye.bulge, record.eye.groove (x eye radius)')
     # the eye's aim, degrees: skeleton.eye.aim {up, fwd} when a record carries a measured one. Else the elevation of
     # skeleton.eye.gaze where a record states its own (the stand-in GAZE_UNMEASURED on most records is no measurement, and
     # the sign of its x is not settled between the old builder and the scans, so only the elevation is read). Else the
@@ -195,14 +195,18 @@ def adapt(path, style=None):
     fins['pectoral'] = dict(x=PE['base']['u'] * f, y=PE['base']['y'] * f, len=PE['length'], span=[s * f for s in dget(PE, 'span', [3, -3], 'skeleton.pectoral')],
                             sweep=dget(PE, 'sweep', [20, -30], 'skeleton.pectoral'), out=dget(PE, 'out', 30, 'skeleton.pectoral'), prof=dget(PE, 'prof', [[0, 1], [1, 0.4]], 'skeleton.pectoral'), rays=dget(PE, 'rays', 14, 'skeleton.pectoral'),
                             edge=fin_edge(PE), base_line=sc(PE['base_line']) if PE.get('edge') and PE.get('base_line') else None)
+    fins['pectoral']['fan'] = 90.0 + fins['pectoral']['sweep'][0]    # rest angle from its base (drawn down the flank) to its first ray (sweep: deg above the body axis)
     P('pectoral fin', 'record.skeleton.pectoral ' + ('(edge + base_line traced: side-view outline root to root; out)' if fins['pectoral']['edge'] else '(base, length (SL), span, sweep, out, prof)'))
     if 'pelvic' in R['skeleton']:            # puffers, porcupinefish, filefish have no pelvic fins (anatomy, not a gap)
         PV = R['skeleton']['pelvic']
         fins['pelvic'] = dict(x=PV['base']['u'] * f, y=PV['base']['y'] * f, len=PV['length'], sweep=dget(PV, 'sweep', [40, -10], 'skeleton.pelvic'), out=dget(PV, 'out', 30, 'skeleton.pelvic'),
                               prof=dget(PV, 'prof', [[0, 1], [1, 0.6]], 'skeleton.pelvic'), rays=dget(PV, 'rays', 6, 'skeleton.pelvic') + dget(PV, 'spines', 0, 'skeleton.pelvic'),
                               edge=fin_edge(PV), base_line=sc(PV['base_line']) if PV.get('edge') and PV.get('base_line') else None)
+        fins['pelvic']['fan'] = float(fins['pelvic']['sweep'][0])   # rest angle from its base (drawn along the belly) to its first ray (sweep: deg below the body axis)
         P('pelvic fin', 'record.skeleton.pelvic ' + ('(edge + base_line traced: side-view outline root to root; out)' if fins['pelvic']['edge'] else '(base, length (SL), sweep, out, prof)'))
     else: P('pelvic fin', 'absent in record.skeleton (no pelvic fins)')
+    for key, PF in (('pectoral', PE), ('pelvic', R['skeleton'].get('pelvic'))):
+        if key in fins and isinstance(PF.get('baseBand'), dict) and PF['baseBand'].get('w'): fins[key]['base_w'] = float(PF['baseBand']['w'])
     out['fins'] = fins
     S = R.get('scales', {})
     # pored scales: older records hold them at scales.lateral_line, grown ones at scales.grow.lateral_line, as a [lo, hi]
