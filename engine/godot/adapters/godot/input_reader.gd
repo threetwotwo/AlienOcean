@@ -1,11 +1,15 @@
-## M01 Input, Godot adapter 0.1.0. Installs the action table into InputMap, fills one InputPacket per physics tick,
-## tracks the last used device family (glyph swap), pauses on controller loss, and saves/loads remaps.
+## M01 Input, Godot adapter 0.2.0. Installs the action table into InputMap, fills one InputPacket per physics tick,
+## tracks the last used device family (glyph swap), pauses on controller loss, saves/loads remaps and options, and plays
+## rumble (0.2.0: core/m01_input/haptics.gd events through Input.start_joy_vibration on the last used pad).
+## Pads reach Godot 4.7 through SDL3 with its controller database (Xbox, PlayStation, Switch Pro and Apple MFi pads all
+## arrive in the same standard layout), so one table serves every family; only the glyphs differ.
 ## Add as a child Node (or autoload). Camera yaw/pitch come from the camera module through set_camera().
 extends Node
 
 const Packet := preload("res://core/m01_input/input_packet.gd")
 const Table := preload("res://core/m01_input/action_table.gd")
 const LookFilter := preload("res://core/m01_input/look_filter.gd")
+const Haptics := preload("res://core/m01_input/haptics.gd")
 
 signal device_family_changed(family: String)
 signal controller_lost(device: int)
@@ -21,6 +25,9 @@ var look_filter = LookFilter.new()
 var sprint_latch := false
 var invert_y := false
 var remap_path := "user://input_remap.cfg"
+var haptics = Haptics.new()
+var last_pad := -1                 # device id of the pad used last (rumble goes there)
+var rumbles: Array = []            # [event, pulse] played (tests and the issue report read it), last 32
 
 func _ready() -> void:
 	install()
@@ -51,6 +58,11 @@ func install() -> void:
 		if b.has("mouse"):
 			var mb := InputEventMouseButton.new(); mb.button_index = b.mouse
 			InputMap.action_add_event(a, mb)
+	# menus: Godot's ui_accept / ui_cancel ship with keys only. Cross / A confirms and Circle / B backs out on every pad
+	# (fixed, not remappable, so a bad remap can never lock the player out of the menu)
+	for pair in [["ui_accept", JOY_BUTTON_A], ["ui_cancel", JOY_BUTTON_B]]:
+		var j := InputEventJoypadButton.new(); j.button_index = pair[1]; j.device = -1
+		if not InputMap.action_has_event(pair[0], j): InputMap.action_add_event(pair[0], j)
 
 ## Remap one action's pad button (refused if it is a system button or already taken: the caller shows why).
 func rebind_pad_button(action: String, button: int) -> String:
@@ -70,7 +82,14 @@ func save_remap() -> void:
 		cf.set_value("bindings", a, bindings[a])
 	cf.set_value("options", "look_sensitivity", look_sensitivity)
 	cf.set_value("options", "invert_y", invert_y)
+	cf.set_value("options", "vibration", haptics.enabled)
+	cf.set_value("options", "vibration_strength", haptics.strength)
 	cf.save(remap_path)
+
+## Back to the shipped table (options menu "Reset controls").
+func reset_bindings() -> void:
+	bindings = Table.ACTIONS.duplicate(true)
+	install()
 
 func load_remap() -> void:
 	var cf := ConfigFile.new()
@@ -80,7 +99,19 @@ func load_remap() -> void:
 		bindings[a] = cf.get_value("bindings", a, bindings[a])
 	look_sensitivity = cf.get_value("options", "look_sensitivity", look_sensitivity)
 	invert_y = cf.get_value("options", "invert_y", invert_y)
+	haptics.enabled = cf.get_value("options", "vibration", haptics.enabled)
+	haptics.strength = cf.get_value("options", "vibration_strength", haptics.strength)
+	if not Table.validate(bindings).is_empty(): bindings = Table.ACTIONS.duplicate(true)   # a broken file never locks the pad
 	install()
+
+## Play one rumble event on the last used pad. Returns the pulse played ({} = skipped: keyboard, switched off, too soon).
+func rumble(event: String, scale := 1.0) -> Dictionary:
+	var p: Dictionary = haptics.pulse(event, Time.get_ticks_msec(), family != "keyboard" and last_pad >= 0, scale)
+	if p.is_empty(): return p
+	Input.start_joy_vibration(last_pad, p.weak, p.strong, p.sec)
+	rumbles.append([event, p])
+	if rumbles.size() > 32: rumbles.pop_front()
+	return p
 
 func set_camera(yaw: float, pitch: float) -> void:
 	cam_yaw = yaw; cam_pitch = pitch
@@ -92,6 +123,7 @@ func note_event(event: InputEvent) -> void:
 	var f := family
 	if event is InputEventJoypadButton or (event is InputEventJoypadMotion and absf(event.axis_value) > 0.3):
 		f = Table.family_from_name(Input.get_joy_name(event.device))
+		last_pad = event.device
 	elif event is InputEventKey or event is InputEventMouseButton or (event is InputEventMouseMotion and event.relative.length() > 2.0):
 		f = "keyboard"
 	if f != family:
@@ -101,6 +133,8 @@ func note_event(event: InputEvent) -> void:
 func _on_joy_connection(device: int, connected: bool) -> void:
 	if connected:
 		controller_returned.emit(device)
+		last_pad = device; family = Table.family_from_name(Input.get_joy_name(device)); device_family_changed.emit(family)
+		rumble("controller_connected")
 	elif family != "keyboard":
 		paused_by_disconnect = true   # the game pauses and shows the reconnect prompt; only an explicit confirm unpauses
 		controller_lost.emit(device)
