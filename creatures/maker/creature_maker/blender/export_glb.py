@@ -312,24 +312,43 @@ glb = os.path.join(OUT, 'fish.glb'); LOD0 = [body, rig] + list(fin_obs.values())
 _exp(glb, LOD0); finish(glb, 0)
 # LOD chain: meshoptimizer on seam-split copies (blender/lods.py); eyes dropped at LOD2, collision only on LOD0
 lods = {}; lod_obs = {}; CREASES = set(v for r in C['rolls'] for v in r)
-# targets are budgets (P1: LOD1 <= 60 % of LOD0, LOD2 <= 1,000 tris), not fixed ratios: a fish with bigger traced fins or more cage
-# rows gets a lower ratio. Start from the usual ratio, then scale it down until the LOD is inside its budget with a 5 % margin.
+# LOD chain = the Unreal-era intake rule (tools/optimise/creature_meter.py K2, proven on the v107 exports): level 0 is needed only
+# inside reach0, the distance where its own triangle count gives 2-pixel edges (1920 px, 90 deg view); each later level has 4 x fewer
+# triangles and starts at twice the distance, down to about 300 triangles. Targets are triangle counts, met by scaling the ratio
+# down until the level is inside its count (5 % margin); the switch distances ride in the extras for the engine's LOD ranges.
 T0 = tris_of(LOD0)
-for lod, ratio, budget in ((1, 0.4, 0.57 * T0), (2, 0.14, 950)):
-    for attempt in range(4):
+def area_of(objs):
+    a = 0.0
+    for o in objs:
+        if o.type != 'MESH' or o.name.startswith('col_'): continue
+        M = o.matrix_world; W = [M @ v.co for v in o.data.vertices]
+        for p in o.data.polygons:
+            vs = [W[i] for i in p.vertices]; a += sum(((vs[i] - vs[0]).cross(vs[i + 1] - vs[0])).length / 2 for i in range(1, len(vs) - 1))
+    return a
+PPM = 960.0; A0 = area_of(LOD0); REACH0 = math.sqrt(A0 / (0.433 * T0)) * PPM / 2.0
+CHAIN = [dict(lod=0, tris=T0, from_m=0.0)]; _tc, _dc = T0, REACH0
+while _tc / 4.0 >= 300 and len(CHAIN) < 3:
+    _tc = int(_tc / 4.0); CHAIN.append(dict(lod=len(CHAIN), tris=_tc, from_m=round(_dc, 3))); _dc *= 2.0
+for lod, ratio, budget in [(c['lod'], 0.4 if c['lod'] == 1 else 0.14, c['tris']) for c in CHAIN[1:]]:
+    for attempt in range(6):
         obs = []
         for o in [body] + list(fin_obs.values()):
             lo, nt = LODS.simplify(o, ratio if o is body else max(ratio * 1.6, 0.3 * min(1.0, ratio / 0.14)), f'{o.name}_LOD{lod}', lock=CREASES if (o is body and lod == 1) else ()); lo.hide_render = True; obs.append(lo)
         got = tris_of(obs + (eye_obs if lod == 1 else []))
-        if got <= budget or attempt == 3: break
+        if got <= budget or attempt == 5: break
         for lo in obs: bpy.data.objects.remove(lo, do_unlink=True)
         ratio *= 0.97 * budget / got
+    CHAIN[lod]['tris_built'] = got
     keep = obs + [rig] + (eye_obs if lod == 1 else [])
     pth = os.path.join(OUT, f'fish_LOD{lod}.glb'); _exp(pth, keep); finish(pth, lod)
     lint = sum(1 for p in obs[0].data.polygons if p.material_index == INT_IDX)
     lods[f'LOD{lod}'] = dict(tris=tris_of(keep), kb=round(os.path.getsize(pth) / 1024), interior_tris=lint); lod_obs[lod] = obs
+SW['extras']['lod_chain'] = dict(levels=CHAIN, reach0_m=round(REACH0, 3), area_m2=round(A0, 5),
+    rule='Unreal-era intake rule (tools/optimise/creature_meter.py K2): level 0 is needed inside reach0 (2 px edges at 1920 px, 90 deg); each level 4 x fewer triangles from twice the distance; from_m = first distance to draw that level')
+for _p, _l in [(glb, 0)] + [(os.path.join(OUT, f'fish_LOD{c["lod"]}.glb'), c['lod']) for c in CHAIN[1:]]: finish(_p, _l)
+json.dump(dict(SW['extras']), open(os.path.join(OUT, 'swim.json'), 'w'), indent=1, default=float)
 stats = dict(glb_kb=round(os.path.getsize(glb) / 1024), objects=len([o for o in LOD0 if o.type == 'MESH' and not o.name.startswith('col_')]))
-stats['tris_total'] = tris_of(LOD0); stats['normal_specks_fixed'] = SPECKS_FIXED; stats['bones'] = len(rig.data.bones); stats['lods'] = lods; stats['blender_bake_s'] = bake_s
+stats['tris_total'] = tris_of(LOD0); stats['normal_specks_fixed'] = SPECKS_FIXED; stats['bones'] = len(rig.data.bones); stats['lods'] = lods; stats['lod_chain'] = SW['extras']['lod_chain']; stats['blender_bake_s'] = bake_s
 stats.update(INT_STATS); stats.update(RIG_INFO); stats.update(EXS)
 stats['clips'] = {n: dict(loop=v['loop']) for n, v in anim_x.items()}; stats['swim_loop_closure_BL'] = SW['loop_err']
 stats['collision'] = dict(hulls=len(HUL), coverage=round(cov, 4), hull_over_form_volume=round(vol, 3), verts=[len(h[0]) for h in HUL], bones=[f'spine_{h[2]:02d}' for h in HUL])
