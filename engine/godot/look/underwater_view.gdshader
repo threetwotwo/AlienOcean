@@ -1,4 +1,4 @@
-// Underwater view 0.1.0 (engine thread): the water between the eye and every pixel, from the ported lagoon
+// Underwater view 0.3.0 (0.3.0, look thread: the floor plane past the drawn floor; the glow's floor never above the ray) (engine thread): the water between the eye and every pixel, from the ported lagoon
 // physics (under_model.py glow(), lagoonwater PHYS_CODE): scene x exp(-c L) + in-scattered glow, per band.
 // Glow = b ( Es HG(cos) G(c - Kd dz, L) + (Ek G(c - Ku dz, L) Wk + Eu G(c + Ku dz, L) Wd) / pi ) x GlowK.
 // Drawn as a full-screen quad after the opaque pass. Only when the eye is under the water (above: later step).
@@ -30,6 +30,10 @@ void fragment() {
 		float L = min(length(vp.xyz), max_path);
 		vec3 d = normalize((INV_VIEW_MATRIX * vec4(vp.xyz, 0.0)).xyz);
 		vec3 c = water_a + water_b;
+		// no geometry along a downward ray (depth at the far plane: reversed z 0): the lagoon's floor plane goes on past the drawn
+		// floor, so the ray ends there on sand lit as the drawn sand is, instead of falling through to the sky (the white void)
+		float fd = w_floor_dist(d, water_y - cam.y);
+		if (depth <= 1e-7 && fd > 0.0 && fd < L) { L = fd; scene = w_floor_nits() * water_exposure; }
 		vec3 glow = w_glow(d, water_y - cam.y, L);
 		vec3 god = god_k > 0.5 ? god_rays(cam, d, L, FRAGCOORD.xy, god_frame) : vec3(0.0);
 		if (god_k > 1.5) ALBEDO = vec3(0.5 + 0.25 * god_acc(cam, d, L, FRAGCOORD.xy, god_frame));

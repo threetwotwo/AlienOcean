@@ -83,7 +83,7 @@ func _settle_physics() -> void:
 ## Advances the school(s) for secs at frame delta dt; actor_fn(t) -> Array of actors (or null). Returns the run record.
 func _run_school(s: FishSchool, secs: float, dt: float, actor_fn = null, watch := {}) -> Dictionary:
 	var rec := {"inside": 0, "max_speed": 0.0, "nan": 0, "nnd_min": INF, "close_max": 0.0, "max_extent": 0.0,
-		"main_ms_max": 0.0, "main_list": [], "wait_sum": 0.0, "frames": 0, "step_ms_sum": 0.0, "steps": 0, "startled_max": 0, "series": []}
+		"main_ms_max": 0.0, "main_list": [], "wait_sum": 0.0, "frames": 0, "step_ms_sum": 0.0, "steps": 0, "startled_max": 0, "alarmed_max": 0, "series": []}
 	var bl: float = s.sim.bl
 	var frames := int(round(secs / dt))
 	var t0: float = s.sim.t
@@ -108,8 +108,12 @@ func _run_school(s: FishSchool, secs: float, dt: float, actor_fn = null, watch :
 		c /= sim.N
 		for i in sim.N: rec.max_extent = maxf(rec.max_extent, sim.x[i].distance_to(c))
 		var st := 0
-		for q in sim.s: if q > 0.5: st += 1
+		var al := 0
+		for q in sim.s:
+			if q > 0.5: st += 1
+			if q > 0.2: al += 1
 		rec.startled_max = maxi(rec.startled_max, st)
+		rec.alarmed_max = maxi(rec.alarmed_max, al)
 		if sim.steps % 15 == 0:
 			var m: Dictionary = sim.metrics()
 			rec.nnd_min = minf(rec.nnd_min, m.nnd_min)
@@ -261,7 +265,7 @@ func _run() -> void:
 	# S9: a rush: the startle wave crosses the school, then the alarm brings it back together
 	if _want("S9"):
 		# the cascade is random: five seeds, judged on the median startle share and the worst regroup
-		var shares := []; var groups := []; var nmin := INF; var inv_ok := true
+		var shares := []; var bursts := []; var groups := []; var nmin := INF; var inv_ok := true
 		for sd in [5, 6, 7, 8, 9]:
 			_new_world(); await _settle_physics()
 			var s := _school("trevally", 160, sd, Vector3(0, -8, 0), true)
@@ -271,7 +275,8 @@ func _run() -> void:
 				if tt > 3.0: return []
 				return [{"pos": c + Vector3(-4.0 + 2.5 * tt, 0, 0), "vel": Vector3(2.5, 0, 0), "radius": 0.25, "axis": Vector3.RIGHT, "half_len": 0.55}]
 			var rec := await _run_school(s, 3.0, 1.0 / 30.0, rush)
-			shares.append(snappedf(float(rec.startled_max) / s.sim.N, 0.01))
+			shares.append(snappedf(float(rec.alarmed_max) / s.sim.N, 0.01))      # the wave: bursting or agitated (D9)
+			bursts.append(snappedf(float(rec.startled_max) / s.sim.N, 0.01))
 			var rec2 := await _run_school(s, 15.0, 1.0 / 30.0)
 			groups.append(snappedf(s.sim.largest_group(3.0), 0.01))
 			nmin = minf(nmin, minf(rec.nnd_min, rec2.nnd_min))
@@ -279,8 +284,13 @@ func _run() -> void:
 			inv_ok = inv_ok and inv.S4 and inv.S5
 		var srt := shares.duplicate(); srt.sort()
 		var med: float = srt[2]
-		_add("S9", "rush (2.5 m/s), 5 seeds: startle wave reaches the school (median), all regroup within 15 s", med >= 0.3 and groups.min() >= 0.85 and inv_ok,
-			{"startled_share": shares, "median": med, "largest_group_15s": groups, "nnd_min": snappedf(nmin, 0.001)})
+		var brt := bursts.duplicate(); brt.sort()
+		var bmed: float = brt[2]
+		_add("S9", "rush (2.5 m/s), 5 seeds: startle wave reaches the school (median, bursting or agitated), all regroup within 15 s", med >= 0.3 and groups.min() >= 0.85 and inv_ok,
+			{"alarmed_share": shares, "median": med, "largest_group_15s": groups, "nnd_min": snappedf(nmin, 0.001)})
+		# S18: graded alarm (schoollab v31, D9): the wave reaches far, but only fish near the threat burst (a pocket)
+		_add("S18", "graded alarm: median burst share <= half the wave's reach and <= 0.3 of the school (a pocket round the threat, agitation further out)", bmed <= 0.5 * med and bmed <= 0.3,
+			{"burst_share": bursts, "burst_median": bmed, "reach_median": med})
 	# S11: Thalassa calm-diver circling: a trevally school near a girl hovering still circles her at a respectful distance
 	if _want("S11"):
 		_new_world(); await _settle_physics()
@@ -465,17 +475,21 @@ func _run() -> void:
 				s.advance(dt)
 				if s.threaded: s.sync()
 			var n: int = s.sim.N
-			var cv_sum := 0.0; var rl_sum := 0.0; var bend_sd_sum := 0.0; var glide_fr := []
+			var cv_sum := 0.0; var rl_sum := 0.0; var bend_sd_sum := 0.0; var hsd_sum := 0.0; var glide_fr := []
 			for fr in 30:
 				s.advance(dt)
 				if s.threaded: s.sync()
 				var m := 0.0; var m2 := 0.0; var cx := 0.0; var cy := 0.0; var bm := 0.0; var bm2 := 0.0
 				var coasting := 0; var gliding := 0
+				var hx := 0.0; var hz := 0.0; var hs := []
 				for i in n:
 					var sz: float = s.sim.L[i] * s._p_size[i]
 					m += sz; m2 += sz * sz
 					cx += cos(s._swim_ph[i]); cy += sin(s._swim_ph[i])
 					bm += s.look_bend[i]; bm2 += s.look_bend[i] * s.look_bend[i]
+					var dh: Vector3 = s.drawn_heading(i)
+					var sf: Vector3 = s.look_fwd[i]
+					hs.append(atan2(sf.z * dh.x - sf.x * dh.z, sf.x * dh.x + sf.z * dh.z) + atan2(-sf.z, sf.x))
 					if s.look_coast[i] == 1:
 						coasting += 1
 						if s._bc_k[i] < 0.3: gliding += 1
@@ -484,15 +498,41 @@ func _run() -> void:
 				rl_sum += Vector2(cx, cy).length() / n
 				bend_sd_sum += sqrt(maxf(bm2 - bm * bm, 0.0))
 				if coasting >= 10: glide_fr.append(float(gliding) / coasting)
+				var c_ := 0.0; var s_ := 0.0
+				for h in hs: c_ += cos(h); s_ += sin(h)
+				var R: float = Vector2(c_, s_).length() / hs.size()
+				hsd_sum += rad_to_deg(sqrt(-2.0 * log(maxf(R, 1e-6))))
 			glide_fr.sort()
 			res["vary" if vary else "same"] = {"size_cv": snappedf(cv_sum / 30.0, 0.001), "phase_resultant": snappedf(rl_sum / 30.0, 0.001),
-				"bend_sd": snappedf(bend_sd_sum / 30.0, 0.001), "glide_share_min_max": [snappedf(glide_fr[0], 0.01), snappedf(glide_fr[-1], 0.01)] if glide_fr.size() > 0 else [],
+				"bend_sd": snappedf(bend_sd_sum / 30.0, 0.001), "heading_sd_deg": snappedf(hsd_sum / 30.0, 0.1), "glide_share_min_max": [snappedf(glide_fr[0], 0.01), snappedf(glide_fr[-1], 0.01)] if glide_fr.size() > 0 else [],
 				"export": not s.asset.is_empty()}
 			s.queue_free(); await process_frame
 		var v: Dictionary = res.vary
 		var gl: Array = v.glide_share_min_max
 		var sync_ok: bool = gl.is_empty() or gl[1] < 0.9
-		_add("S17", "no clones: drawn size CV >= 0.10, tail-beat phases spread (resultant <= 0.3), body bend spread >= 0.2, never 90 % of phrase-swimming fish gliding at once", v.size_cv >= 0.10 and v.phase_resultant <= 0.3 and v.bend_sd >= 0.2 and sync_ok, res)
+		_add("S17", "no clones: drawn size CV >= 0.10, tail-beat phases spread (resultant <= 0.3), body bend spread >= 0.2, drawn heading spread >= 12 deg (circular SD), never 90 % of phrase-swimming fish gliding at once", v.heading_sd_deg >= 12.0 and v.size_cv >= 0.10 and v.phase_resultant <= 0.3 and v.bend_sd >= 0.2 and sync_ok, res)
+	# S19: shallow water (test level, 28 Nov: "trevally schools sit at or near the waterline in the 4 m lagoon"; Fable:
+	# "a flat clump"). 160 trevally at the export's 52 cm in 4 m of water (floor y -20, surface y -16), 40 s: how close
+	# fish come to the surface and the floor, and their spacing.
+	if _want("S19"):
+		_new_world(); await _settle_physics()
+		var s := FishSchool.new()
+		s.species_id = "trevally"; s.count = 160; s.seed_ = 4; s.home = Vector3(0, -18, 0); s.tethered = true; s.threaded = true
+		s.use_asset = false; s.body_m = 0.52113; s.process_mode = Node.PROCESS_MODE_DISABLED
+		s.water_y = func(_x, _z, _t): return -16.0
+		world.add_child(s)
+		var rec := await _run_school(s, 40.0, 1.0 / 30.0)
+		var sim = s.sim
+		var near_surf := 0; var near_floor := 0; var dmin_s := INF; var dmin_f := INF
+		for i in sim.N:
+			var wp: Vector3 = sim.world_pos(i)
+			dmin_s = minf(dmin_s, -16.0 - wp.y); dmin_f = minf(dmin_f, wp.y + 20.0)
+			if -16.0 - wp.y < 0.75: near_surf += 1
+			if wp.y + 20.0 < 0.4: near_floor += 1
+		var m: Dictionary = sim.metrics()
+		var inv := _invariants(rec, sim.p)
+		_add("S19", "shallow water (4 m, 52 cm trevally): nobody within 0.75 m of the surface or 0.4 m of the floor, spacing NND >= 0.9 BL (not a flat clump)", near_surf == 0 and near_floor == 0 and m.nnd_med >= 0.9 and inv.S4 and inv.S5,
+			{"near_surface": near_surf, "near_floor": near_floor, "min_below_surface_m": snappedf(dmin_s, 0.01), "min_above_floor_m": snappedf(dmin_f, 0.01), "nnd_med_BL": snappedf(m.nnd_med, 0.01), "P": snappedf(m.P, 0.01)})
 	if _want("S10"):
 		_new_world(); await _settle_physics()
 		var s := _school("lagoon_baitfish", 120, 2, Vector3(0, -6, 0), true, true)

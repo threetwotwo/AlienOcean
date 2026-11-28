@@ -11,7 +11,7 @@ func _initialize() -> void:
 	var g: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://tests/golden/school_v1.json"))
 	var gp: Dictionary = g.params
 	var p := Species.params("open", 1.0, {"search_R": 60.0, "d0_scared_k": 1.0, "pitch_max_deg": 90.0,
-		"abs_depth": [gp.depth[0], gp.depth[1]], "env_period": 1000000, "overlap_pairs": false, "overlap": 0.3})
+		"abs_depth": [gp.depth[0], gp.depth[1]], "env_period": 1000000, "overlap_pairs": false, "overlap": 0.3, "burst_hops": -1})
 	for key in ["v0", "d0", "la", "lal", "g_att", "g_ali", "eps", "tau_v", "k_speed", "k_turn", "wmax", "noise", "vmin", "fov", "g_far", "alert_T", "alert_far", "alert_ali"]:
 		p[key] = float(gp[key])
 	p.k = int(gp.k); p.n_far = int(gp.n_far)

@@ -3,7 +3,7 @@ tuck ring that turns the skin into the orbit (a real opening for the eye shells)
 
 Rules: the block takes the columns that pass within the eye margin of the rim, plus one each side; the rings are laid out in
 the loft's (x, theta) plane with radial spokes and spaced by length on the skin (no fold possible); the rim lies on the
-record eye circle in the side view (EY1); the tuck goes down the socket axis, scaled to the eye, and stays on its side.
+record eye circle in the side view (EY1); the tuck goes down the eye's axis, scaled to the eye, and stays on its side.
 """
 import numpy as np
 
@@ -23,10 +23,9 @@ def rim3(form, sg, ph):
 
 
 def socket_axis(form, sg):
-    """the rim's best plane normal, pointing out of the body."""
-    R = rim3(form, sg, np.linspace(0, 2 * np.pi, 360, endpoint=False)); c3 = R.mean(0)
-    ax = np.linalg.svd(R - c3)[2][2]
-    return ax if ax @ form.radial(c3) > 0 else -ax
+    """the eye's aim on side sg (form.Form._orbit): the orbit lining goes down it. Up to 0.5.x this was the rim's own best
+    plane on the loft, which leans up wherever the head falls away above the eye."""
+    return form.eye_axis(sg)
 
 
 def col_dist(B, j, xs, sg):
@@ -131,12 +130,45 @@ def build_patches(B):
     B.eye = dict(rims=rims, tucks=tucks, rings=all_rings)
 
 
+EYE_RULE = 0.8         # DEFAULT: visible eye radius / globe radius, the Species records' own eye rule (skeleton.eye._origin: "R = 0.8 orbitR")
+LENS_M = 2.55          # DEFAULT: Matthiessen's ratio, retina to lens centre = 2.55 lens radii (old Eyes work: EYELENSOPT, handover/eyes.md)
+WINDOW_GAP = 0.05      # DEFAULT (x eye radius): the cornea clears the lens front by this (old Eyes work: EYEWINDOME 0.05, the flat window)
+IRIS_SEAT = 0.10       # DEFAULT (x eye radius): the iris root lies this far under the rim (record eye.groove, the same furrow, where a record has it)
+CORNEA_SAG = (0.04, 0.40)   # the cornea's height over its rim, x eye radius: scans show a flat window (centre minus rim 0.04-0.15), and
+                            # HP-EYE-PROUD names 0.40 as the limit before the eye reads as goggles (the old builds stood 0.66-0.77)
+
+
+def optics(EY, r):
+    """the eyeball behind a rim of radius r, as heights along the eye's axis over the rim plane (SL). Ported from the old
+    Eyes work (HARD_PROBLEMS HP-EYE-PROUD, handover/eyes.md), the look and not the mesh:
+      the globe is a sphere of the orbit's radius whose FRONT is shortened by record eye.axial (the retina keeps the back
+      half), and the rim is where that front has the visible eye's radius;
+      the lens is a ball of record lens_ED, its centre LENS_M lens radii in front of the retina (focus), so it stands
+      through the pupil; the pupil (record pupil_ED) is wider than the lens: the dark gap round it is real (aphakic);
+      the iris runs from under the rim onto the lens; the cornea is a flat window, as high as the globe's front or the
+      lens front plus a gap, whichever is higher."""
+    # the globe is at least the visible eye / EYE_RULE: on traced records the visible eye (measured on the photo) can be
+    # as large as the bony orbit (FishBase), and a globe no wider than its own window is a hemisphere: goggles
+    Rg = max(EY['orbit'], r / EYE_RULE); ax = float(np.clip(EY['axial'], 0.55, 1.0)); af = Rg * (2 * ax - 1)
+    eq = -af * np.sqrt(1 - (r / Rg) ** 2)                                   # the globe's equator, under the rim plane
+    rL = EY['lens_ED'] * Rg; zL = eq - Rg + LENS_M * rL                      # lens radius and centre
+    rp = float(np.clip(EY['pupil_ED'] * Rg if EY.get('pupil') is None else EY['pupil'] * r, 1.02 * rL, 0.8 * r))
+    sag = max(af + eq, zL + rL + WINDOW_GAP * r)                             # cornea apex over the rim plane
+    seat = -EY.get('groove', IRIS_SEAT) * r
+    zi = min(zL + 0.4 * rL, seat)                                            # the pupil's edge: on the lens, never over the rim
+    return dict(globe_r=float(Rg), lens_r=float(rL), lens_z=float(zL), pupil_r=rp, iris_z=float(zi), iris_seat=float(seat),
+                cornea_sag=float(sag), cornea_sag_R=round(float(sag / r), 3), lens_under_cornea_R=round(float((sag - zL - rL) / r), 3))
+
+
 def shells(B, V):
-    """eye shell placement (iris dome + cornea are made in the exporter), seated on each rim ring."""
+    """eye shell placement (iris dome + cornea are made in the exporter), seated on each rim ring and aimed down the eye's
+    own axis. The rim lies in the plane square to that axis (the form's periorbital tissue carries the skin out to it), so
+    the shells sit true in the opening. Up to 0.5.x the aim was the normal of three rim points: the skin's facing at the
+    eye, further up than the skin round it, where real eyes aim below it."""
     eyes = []
     for sg, rim in B.eye['rims']:
-        R = V[rim]; ctr = R.mean(0); nrm = np.cross(R[len(R) // 4] - R[0], R[len(R) // 2] - R[0]); nrm /= np.linalg.norm(nrm)
-        if nrm[2] * sg < 0: nrm = -nrm
+        R = V[rim]; ctr = R.mean(0); nrm = B.form.eye_axis(sg)
         eyes.append(dict(c=ctr, n=nrm, r=float(np.linalg.norm(R - ctr, axis=1).mean()),
                          r_side=float(np.linalg.norm((R - ctr)[:, :2], axis=1).mean()), side=sg))
+        eyes[-1]['optics'] = optics(B.form.EY, eyes[-1]['r'])
     return eyes

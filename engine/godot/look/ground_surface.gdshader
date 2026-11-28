@@ -7,6 +7,7 @@ render_mode blend_mix, cull_back, diffuse_lambert, specular_disabled;
 #include "res://look/world_surface.gdshaderinc"
 #include "res://look/water_physics.gdshaderinc"
 #include "res://look/caustics.gdshaderinc"
+#include "res://look/sun_under.gdshaderinc"
 
 uniform sampler2D rBC : source_color, repeat_enable, filter_linear_mipmap_anisotropic;
 uniform sampler2D rN : repeat_enable, filter_linear_mipmap_anisotropic;
@@ -68,11 +69,9 @@ void fragment() {
 }
 void light() {
 	float z = max(water_y - wpos.y, 0.0);
-	vec3 corr = exp(-water_kd * (z - water_zref));
-	// the light net (look/caustics.gdshaderinc, Unreal lagoonwater v98): on the sun's beam only, by depth and the refracted sun
-	float px = length(wpos - INV_VIEW_MATRIX[3].xyz) * 2.0 / (abs(PROJECTION_MATRIX[1][1]) * VIEWPORT_SIZE.y);
-	float caus = caustic_sun(wpos, water_y - wpos.y, water_sun_w, px, TIME, caustic_strength);
+	// the sun's beam at this depth, with the light net (look/sun_under.gdshaderinc, one copy with the creatures)
+	vec3 sun_k = sun_under(wpos, sun_under_pixel_m(wpos, INV_VIEW_MATRIX, PROJECTION_MATRIX, VIEWPORT_SIZE), TIME, caustic_strength);
 	vec3 fr = vec3(1.0);
 	if (water_fill_ao > 0.5) fr = w_fill_ratio(z, 0.5 + 0.5 * normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz).y);   // ALBEDO carries the fill ratio: take it back out
-	DIFFUSE_LIGHT += clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * ATTENUATION * LIGHT_COLOR / PI * corr * caus / fr;
+	DIFFUSE_LIGHT += clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * ATTENUATION * LIGHT_COLOR / PI * sun_k / fr;
 }
