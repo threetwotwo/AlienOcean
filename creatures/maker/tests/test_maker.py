@@ -145,6 +145,18 @@ def test_bake_keeps_interior_and_linings_off_the_skin_maps(tmp_path):
     r_good = rim(); assert r_good['EX9_pass'] and r_good['EX9_rim_vertices'] > 40, r_good
     bake(dict(CREATURE_PLANT_BAKE_FAULT='lining_pink_at_rim')); r_bad = rim()
     assert not r_bad['EX9_pass'] and r_bad['EX9_rim_colour_diff_p95'] > 3 * checks.EX9_DIFF_MAX, r_bad
+    # the wall of the mouth is mucosa: gill red stays in the passages (EX10); with the tissue set per vertex again the hole's
+    # loop carries its red out over the cavity wall and the check must see it
+    wall = lambda: checks.cavity_wall_colour(json.load(open(os.path.join(out, 'cage.json'))), checks._lin(os.path.join(out, 'interior_base.png')))
+    w_good = wall(); assert w_good['EX10_pass'], w_good
+    bake(dict(CREATURE_PLANT_BAKE_FAULT='gill_red_on_cavity_wall')); w_bad = wall()
+    assert not w_bad['EX10_pass'] and w_bad['EX10_cavity_red_texels'] > 0, w_bad
+    # the lining is lit as it is seen, with the mouth open (EX11); baked with the lips shut again the wall behind the lips is
+    # all floor with a dither where a ray gets out, and the check must see it
+    light = lambda: checks.lining_light(json.load(open(os.path.join(out, 'cage.json'))), np.asarray(Image.open(os.path.join(out, 'interior_orm.png')).convert('RGB'), float)[..., 0] / 255)
+    bake(dict(CREATURE_PLANT_BAKE_FAULT='lining_lit_with_the_mouth_shut')); l_bad = light()
+    bake(); l_good = light()
+    assert l_good['EX11_pass'] and not l_bad['EX11_pass'] and l_bad['EX11_cavity_lit_share'] < 0.6 * l_good['EX11_cavity_lit_share'], (l_good, l_bad)
     # the skin's shading stops at the lips: with the lip normals averaged into the lining again (the edges between skin and
     # interior faces left smooth) the map must lean the other way over every skin face at a lip, and P6 sees it
     # on those faces (the map-wide percentile alone no longer trips its gate here: it did while plate walls used up most of its 1 %)
@@ -352,6 +364,35 @@ def test_top_view_closing_to_a_point_at_the_snout_builds(tmp_path):
     F = Form(adapt(p)); assert abs(float(F.HW(np.array(0.0))) - HW_MIN) < 1e-12
     P = F.loft_point(np.array([0.0, 0.0]), np.array([0.3, 1.5]))
     assert np.isfinite(P).all()
+
+
+def test_snout_closes_round_and_the_jaw_ridge_runs_on_under_the_cover():
+    """a traced side outline starts with height at x = 0 (a blunt snout) over a top view that starts at zero width: built as
+    traced, the head ends in a flat front cut off square with a knife edge down it (a ridge from the snout through both lips
+    into the chin, a box step under the open lower lip: export r7). The front closes on the mouth tip's height and is round
+    seen from above (FM3); a snout that comes to a point keeps it. The lower jaw's ridge runs on under the gill cover's
+    front instead of ending on the joint (a pit across the throat, the jaw's end a ball in front of it). Each fault planted
+    back must be caught."""
+    from creature_maker.record import adapt
+    from creature_maker import form as fm, checks
+    rec = adapt(REC); tip = min(rec['mouth']['line'], key=lambda q: q[0])[1]
+    rec['outline']['top'][0][1] = tip + 0.02; rec['outline']['bot'][0][1] = tip - 0.025          # a front 4.5 % SL tall at x = 0
+    rec['outline']['hw'][0][1] = 0.0                                                             # over a top view that starts at a point
+    F = fm.Form(rec); R = checks.snout_fair(F)
+    assert R['FM3_pass'] and R['FM3_front_height_pctSL'] < 1.0 and R['FM3_nose_radius_pctSL'] > 0.5 * R['FM3_nose_radius_wanted_pctSL'] > 0.2, R
+    xs = np.linspace(0, 0.05, 200); assert (np.diff(F.TOP(xs) - F.BOT(xs))[:40] > 0).all()        # the front opens evenly from the tip: no corner
+    assert abs(float(F._TOP0(F.NOSE_L * 1.01)) - float(fm.pch(rec['outline']['top'])(F.NOSE_L * 1.01))) < 1e-9      # behind the round the outline is the record's
+    assert R['FM3_jaw_end_share'] > 0.6, R
+    cap, rnd = fm.NOSE_CAP, fm.NOSE_ROUND
+    try:
+        fm.NOSE_CAP = 0.0; bad = checks.snout_fair(fm.Form(rec)); assert not bad['FM3_pass'] and bad['FM3_front_height_pctSL'] > 4.0, bad
+        fm.NOSE_CAP, fm.NOSE_ROUND = cap, 0.0; bad = checks.snout_fair(fm.Form(rec)); assert not bad['FM3_pass'] and bad['FM3_nose_radius_pctSL'] < 0.5 * bad['FM3_nose_radius_wanted_pctSL'], bad
+    finally: fm.NOSE_CAP, fm.NOSE_ROUND = cap, rnd
+    class EndsOnJoint(fm.Form): _jaw_ends_on_joint = True
+    bad = checks.snout_fair(EndsOnJoint(rec)); assert not bad['FM3_pass'] and bad['FM3_jaw_end_share'] < checks.FM3_JAW_END_MIN, bad
+    # a snout drawn to a point is left alone
+    rp = adapt(REC); rp['outline']['top'][0][1] = tip + 1e-5; rp['outline']['bot'][0][1] = tip - 1e-5; Fp = fm.Form(rp)
+    assert Fp.NOSE_L < 1e-4 and abs(float(Fp._TOP0(0.001)) - float(fm.pch(rp['outline']['top'])(0.001))) < 1e-12
 
 
 def test_front_reference_marked_body_only_is_gated_without_fins():

@@ -24,6 +24,8 @@ INNER = ('cavity', 'gill')
 # line along the closed mouth and along the belly's silhouette under the gill cover, a black sliver under the cover
 # (export r6). So within RIM_SKIN of a rim (along the lining) the lining carries its rim's skin colour and no occlusion
 # of its own, and by RIM_FADE it has gone over to its tissue.
+AO_SAMPLES = 128                # DEFAULT: rays per texel of the linings' occlusion bake
+AO_SMOOTH = 1.5                 # DEFAULT (texels): the occlusion map is smoothed over this radius inside the island
 RIM_SKIN = 0.006                # DEFAULT (SL): the slit's first passage row lies 0.47-0.52 % SL in from the flap edge and the lip (cage/gill.py):
                                 # what can be seen through the closed lens. A lip's roll is one lip thickness (0.3 % SL)
 RIM_FADE = 0.014                # DEFAULT (SL): tissue colour from here in (the second passage row)
@@ -88,7 +90,7 @@ def slot(body, C):
     return idx, skip
 
 
-def setup(body, body_m, C, out, idx, skip, res=512, V=None):
+def setup(body, body_m, C, out, idx, skip, res=512, V=None, open_co=None):
     """remaps the interior UV island to fill its own texture, bakes its maps and returns (slot index, stats). idx and skip come
     from slot()."""
     me = body.data
@@ -110,7 +112,16 @@ def setup(body, body_m, C, out, idx, skip, res=512, V=None):
     plant = os.environ.get('CREATURE_PLANT_BAKE_FAULT', '') == 'lining_pink_at_rim'      # tests only: the fault back, to show EX9 catches it
     rw, rcol, rim = rim_blend(C, np.asarray(V, float), out) if V is not None and not plant else (np.ones(len(col)), col, [])
     col = rw[:, None] * col + (1 - rw)[:, None] * rcol
-    ca = me.color_attributes.new('tissue', 'FLOAT_COLOR', 'POINT'); ca.data.foreach_set('color', np.c_[col, np.ones(len(col))].ravel())
+    # Structure rule: the mouth's wall is mucosa all over; gill red belongs to the passage behind the hole in that wall. The
+    # tissue is therefore set per face corner: a cavity face is mucosa at every corner, a passage face grades to red. Set per
+    # vertex, the hole's own loop was red for the cavity faces round it too, and where the hole turns forward along the floor
+    # (a gill V) the red ran out over the floor of the mouth in streaks (export r7).
+    red_wall = os.environ.get('CREATURE_PLANT_BAKE_FAULT', '') == 'gill_red_on_cavity_wall'      # tests only: per vertex again, to show EX10 catches it
+    lv = np.zeros(len(me.loops), int); me.loops.foreach_get('vertex_index', lv); lgill = np.zeros(len(me.loops), bool)
+    for p in me.polygons: lgill[p.loop_start:p.loop_start + p.loop_total] = C['ftag'][p.index] == 'gill' or red_wall
+    mcol = rw[:, None] * np.array(MUCOSA) + (1 - rw)[:, None] * rcol
+    lcol = np.where(lgill[:, None], col[lv], mcol[lv])
+    ca = me.color_attributes.new('tissue', 'FLOAT_COLOR', 'CORNER'); ca.data.foreach_set('color', np.c_[lcol, np.ones(len(lcol))].ravel())
     me.materials[0] = skip; me.materials[idx] = tmp
     scn = bpy.context.scene
     for o in scn.objects: o.select_set(False)
@@ -122,8 +133,22 @@ def setup(body, body_m, C, out, idx, skip, res=512, V=None):
         bpy.ops.object.bake(type=kind, use_selected_to_active=False, margin=8, use_clear=True)
         return np.array(img.pixels[:], np.float32).reshape(H, W, 4)
     base = bake('EMIT', 'interior_emit', 1)[..., :3]
-    ca.data.foreach_set('color', np.c_[rw, rw, rw, np.ones(len(rw))].ravel()); own = bake('EMIT', 'interior_own', 1)[..., 0]
-    ao = bake('AO', 'interior_ao', 64)[..., 0]; ao = np.where(ao > 0, 1 - own * (1 - ao), ao)      # a rim is lit as the skin it is
+    ca.data.foreach_set('color', np.c_[rw, rw, rw, np.ones(len(rw))][lv].ravel()); own = bake('EMIT', 'interior_own', 1)[..., 0]
+    # Structure rule: a lining is lit as it is seen, and the mouth's lining is only seen with the mouth open. Baked with the
+    # lips closed the whole cavity is a sealed tube: every texel at the floor but the few a ray reaches through the lips'
+    # gap, so the lining was one flat near-black with a black dither where it meets the rim's skin band (export r7). The
+    # occlusion is baked with the jaw at the record's gape (open_co: the body's vertices in that pose) and smoothed over
+    # AO_SMOOTH texels inside the island: occlusion has no detail finer than the passage it comes from.
+    at_rest = os.environ.get('CREATURE_PLANT_BAKE_FAULT', '') == 'lining_lit_with_the_mouth_shut'      # tests only: the old bake, to show EX11 catches it
+    co0 = np.zeros(3 * len(me.vertices)); me.vertices.foreach_get('co', co0)
+    if open_co is not None and not at_rest: me.vertices.foreach_set('co', np.asarray(open_co, float).ravel()); me.update()
+    ao4 = bake('AO', 'interior_ao', AO_SAMPLES); ao = ao4[..., 0]
+    me.vertices.foreach_set('co', co0); me.update()
+    if not at_rest:
+        from scipy.ndimage import gaussian_filter
+        m_ = (ao4[..., 3] > 0).astype(float); ao = np.where(m_ > 0, gaussian_filter(ao * m_, AO_SMOOTH) / np.maximum(gaussian_filter(m_, AO_SMOOTH), 1e-6), ao)
+        ao = np.where(m_ > 0, np.maximum(ao, 1e-4), ao)      # a texel of the island stays one (0 means outside it, below)
+    ao = np.where(ao > 0, 1 - own * (1 - ao), ao)      # a rim is lit as the skin it is
     me.color_attributes.remove(me.color_attributes['tissue'])
     from PIL import Image
     srgb = lambda c: np.where(c <= 0.0031308, 12.92 * c, 1.055 * np.clip(c, 0, 1) ** (1 / 2.4) - 0.055)

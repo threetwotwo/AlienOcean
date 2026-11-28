@@ -6,7 +6,7 @@ import glob, json, os, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 
 KEEP = ('GP0_rest_crossings', 'GP1_pass', 'GP1_opening_share', 'GF1_pass', 'SR1_pass', 'SR1_safe', 'SR1_short', 'P2_worst_corner_p1_deg', 'P5_pass', 'P5_stretch_ok_area', 'P5_uv_folded_faces', 'P5_uv_overlap_texels', 'OP1_pass', 'OP2_pass', 'OP3_folds', 'OP3_folds_by_region',
-        'FM1_pass', 'FM1_crease_deg', 'FM1_orbit_crease_deg', 'FM1_ripple_deg', 'FM2_pass', 'FM2_plate_slope_max',
+        'FM1_pass', 'FM1_crease_deg', 'FM1_orbit_crease_deg', 'FM1_ripple_deg', 'FM2_pass', 'FM2_plate_slope_max', 'FM3_pass', 'FM3_front_height_pctSL', 'FM3_nose_radius_pctSL', 'FM3_nose_radius_wanted_pctSL', 'FM3_jaw_end_share',
         'IC1_input_faults', 'IC1_missing', 'P3_pass', 'EY1_pass',
         'EY2_pass', 'EY2_cornea_sag_R', 'EA1_pass', 'EA1_skin_up_deg', 'EA1_target_deg', 'EA1_dev_deg', 'EA1_under_band', 'EA1_bare_skin_up_deg', 'EA1_flat_by_record', 'EA1_filled_by_builder', 'EA2_pass', 'EA2_aim_up_deg', 'EA2_aim_fwd_deg', 'EA2_seat_deg', 'EA2_below_skin_deg',
         'PF1_pass', 'PF1_own_side_min_pctSL', 'PF2_pass', 'PF2_reach_over_trace', 'PF3_pass', 'PF3_turned_area_share', 'PF3_blade_bend_deg', 'PF4_pass', 'PF4_root_to_skin_deg',

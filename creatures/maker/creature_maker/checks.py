@@ -29,12 +29,15 @@ validator, P11 silhouette against the ceiling frame (info), and the export stage
   EX5 collision: at least 3 hulls (a body that bends), >= 99 % of the form's inside covered, hull volume <= 1.3 x form volume
   EX6 the swim settings ride in the glTF (rig node extras alien_ocean.swim: envelope with phase, envelopes at >= 2 speeds, wavelength, beat law, clips)
   EX8 the eye shells (iris, lens, cornea, both eyes) stay inside their triangle budget: the eye's look is in its maps
+  FM3 (cage stage) the snout closes round (no flat front, no knife edge seen from above) and the lower jaw's ridge runs on under the gill cover
   EX9 a lining carries the skin's colour where it meets the skin (lips, gill slits): no pink or black line at a closed opening
   RG1 the head is rigid in the swim clip: no vertex ahead of the head's end (rig.head_end: the gill cover's rear line) moves against
       the head bone (linear blend skinning through every key); the bend starts behind the gill covers
   RG2 every paired fin has a chain of 2+ bones along its blade that carries its edge, and the tip trails its rigid place in the swim clip
   RG3 the caudal fin has a root bone and two lobe bones that carry its edge, and the lobes trail the peduncle
       (RG rows are measured here from the cage, numpy, when the record has a gait and node is installed; the exports write the same rows)
+  EX11 the mouth's lining is lit with the mouth open: occlusion falls off into the throat, no flat floor, no dither
+  EX10 the wall of the mouth is mucosa: gill red stays in the gill passages (no red streak on the floor of an open mouth)
   EX7 LOD chain by the Unreal-era intake rule (creature_meter K2 + export round trip X4): each level 2.5-6 x fewer triangles, switch distances stated
 """
 import json, os, sys, math, copy, hashlib, subprocess
@@ -294,6 +297,43 @@ def plate_fair(form):
                 FM2_pass=worst <= FM2_SLOPE_MAX)
 
 
+FM3_FRONT_MAX = 0.012    # DEFAULT: tallest flat front the snout may end in at x = 0 (SL): the two jaws' least thickness and their
+                         # round (form.JAW_MIN + JAW_K each) and a fifth. The trevally's traced front, cut off square, was 4.8 % SL
+FM3_NOSE_SHARE = 0.5     # DEFAULT: least radius of the snout's tip seen from above, as a share of the traced front's half-height (or of
+                         # the widest round the top view's knots leave room for)
+FM3_NOSE_X = 0.002       # DEFAULT: where that radius is read (SL): one cell of the dense form behind the tip
+FM3_JAW_END_MIN = 0.5    # DEFAULT: least share of the lower jaw ridge still standing at the jaw joint, of its height half a ridge-width in front
+
+
+def snout_fair(form):
+    """FM3: the snout closes and the lower jaw's ridge runs on under the cover. (a) The loft's front at x = 0 is no taller
+    than FM3_FRONT_MAX: a traced blunt snout cut off square there is a flat front with a corner over and under the lips.
+    (b) Seen from above the tip is round: the circle through the tip and the half-width FM3_NOSE_X behind it has at least
+    FM3_NOSE_SHARE of the radius the record asks for (half the traced front's height, or what the top view's knots leave
+    room for); a wedge there is a knife edge down the front of the head. (c) At the jaw joint the mandible ridge still
+    stands at FM3_JAW_END_MIN of its height half a ridge-width in front of it: ended on the joint it leaves a pit between
+    jaw and gill cover."""
+    from .form import pch, HW_MIN
+    O = form.O; h0 = 0.5 * float(pch(O['top'])(0.0) - pch(O['bot'])(0.0)); k = np.array(O['hw'], float); k = k[k[:, 0] > 1e-6]
+    want = max(min(h0, float(np.min((k[:, 1] ** 2 + k[:, 0] ** 2) / (2 * k[:, 0])))), 0.0)
+    front = float(form.TOP(0.0) - form.BOT(0.0)); w = float(form.HW(FM3_NOSE_X)); rad = (w * w + FM3_NOSE_X ** 2) / (2 * FM3_NOSE_X)
+    R = dict(FM3_front_height_pctSL=round(100 * front, 3), FM3_nose_radius_pctSL=round(100 * rad, 3), FM3_nose_radius_wanted_pctSL=round(100 * want, 3))
+    ok = front <= FM3_FRONT_MAX and (want <= 2 * HW_MIN or rad >= FM3_NOSE_SHARE * want)
+    md = [p for p in getattr(form, 'PLATES', []) if p['name'] == 'mandible']
+    if md:
+        # the ridge half a ridge-width in front of the joint against the ridge at the joint, each at its highest round the
+        # underside (a jaw whose two lines close on each other toward the joint has little ridge at either place)
+        xj = float(form.rec['jaw_joint'][0]); th = np.linspace(np.pi / 2, np.pi - 0.01, 240); k_ = 1 + [p['name'] for p in form.PLATES].index('mandible')
+        def top(x):
+            T, ids, _ = form.plates(form.loft_point(np.full(len(th), x), th)); m = ids == k_
+            return (float(T[m].max()), float(th[m][np.argmax(T[m])])) if m.any() else (0.0, None)
+        before, th0 = top(max(xj - 0.5 * md[0]['ridge'], md[0]['poly'][:, 0].min()))
+        if th0 is not None and before > 1e-5:
+            end = float(form.plates(form.loft_point(np.full(len(th), xj), th))[0][np.abs(th - th0) < 0.15].max())
+            R['FM3_jaw_end_share'] = round(end / before, 2); ok = ok and end >= FM3_JAW_END_MIN * before
+    R['FM3_pass'] = bool(ok); return R
+
+
 EX9_DIFF_MAX = 0.06     # DEFAULT: most a lining's texel at a rim may differ from the skin's texel at the same vertex (linear RGB, 95th percentile)
 
 
@@ -315,6 +355,55 @@ def rim_colour(C, body_lin, int_lin, margin=0.02):
     if not len(d): return dict(EX9_rim_vertices=0, EX9_pass=False)
     return dict(EX9_rim_vertices=len(d), EX9_rim_colour_diff_p95=round(float(np.percentile(d, 95)), 3), EX9_rim_colour_diff_max=round(float(d.max()), 3),
                 EX9_pass=float(np.percentile(d, 95)) <= EX9_DIFF_MAX)
+
+
+EX10_RG_MAX = 1.7      # DEFAULT: most a cavity wall texel's red may stand over its green (linear). The stand-in mucosa reads 1.48
+                       # (blender/interior.py MUCOSA), skin near 1.1, gill-filament red 8.4: a wall texel one part in ten gill red reads 1.75
+
+
+def cavity_wall_colour(C, int_lin, margin=0.02):
+    """EX10: the wall of the mouth is mucosa; gill red stays in the gill passages. The interior map is read inside every
+    cavity face (its centre and each corner drawn a third of the way in), at its place in the interior island as
+    blender/interior.py lays it out. Image: linear RGB, row 0 at the top."""
+    inner = [t in INNER_TAGS for t in C['ftag']]
+    U = np.array([uv for f, i, u in zip(C['faces'], inner, C['uv']) if i for uv in u])
+    if not len(U): return dict(EX10_pass=False)
+    lo, hi = U.min(0), U.max(0); H, W = int_lin.shape[:2]; rg = []
+    for t, uv in zip(C['ftag'], C['uv']):
+        if t != 'cavity': continue
+        q = np.array(uv, float); c = q.mean(0)
+        for p in [c] + [c + (k - c) * (2 / 3) for k in q]:
+            u_, v_ = margin + (1 - 2 * margin) * (p - lo) / (hi - lo)
+            px = int_lin[int(np.clip((1 - v_) * H, 0, H - 1)), int(np.clip(u_ * W, 0, W - 1)), :3]; rg.append(px[0] / max(px[1], 1e-3))
+    if not rg: return dict(EX10_pass=False)
+    rg = np.array(rg)
+    return dict(EX10_cavity_red_over_green_max=round(float(rg.max()), 3), EX10_cavity_red_texels=int((rg > EX10_RG_MAX).sum()), EX10_pass=float(rg.max()) <= EX10_RG_MAX)
+
+
+EX11_FLOOR = 0.2            # DEFAULT: an occlusion texel under this is at the floor (blender/interior.py clips at 0.15)
+EX11_LIT_MIN = 0.12         # DEFAULT: least share of the mouth's wall behind the lip faces that the open mouth lights above the floor. Baked
+                            # with the lips shut that wall is all floor but its first row
+EX11_SPECK_MAX = 0.008      # DEFAULT: most of the interior island that may stand 0.25 or more off the median of its 5 x 5 texels: the dither of
+                            # a bake where one ray in many gets out
+
+
+def lining_light(C, int_ao, margin=0.02):
+    """EX11: the mouth's lining is lit as it is seen, with the mouth open: its occlusion falls off into the throat, it is not
+    one flat floor value, and it has no dither. int_ao: R of interior_orm.png (row 0 at the top), 0..1."""
+    from scipy.ndimage import median_filter
+    inner = [t in INNER_TAGS for t in C['ftag']]
+    U = np.array([uv for f, i, u in zip(C['faces'], inner, C['uv']) if i for uv in u])
+    if not len(U): return dict(EX11_pass=False)
+    lo, hi = U.min(0), U.max(0); H, W = int_ao.shape[:2]; v = []
+    rim = set(v_ for f, i in zip(C['faces'], inner) if i for v_ in f) & set(v_ for f, i in zip(C['faces'], inner) if not i for v_ in f)
+    for t, uv, f in zip(C['ftag'], C['uv'], C['faces']):
+        if t != 'cavity' or rim & set(f): continue        # behind the lip's own faces: those are lit as the skin they are
+        q = np.array(uv, float); c = q.mean(0)
+        for p in [c] + [c + (k - c) * (2 / 3) for k in q]:
+            u_, v_ = margin + (1 - 2 * margin) * (p - lo) / (hi - lo); v.append(int_ao[int(np.clip((1 - v_) * H, 0, H - 1)), int(np.clip(u_ * W, 0, W - 1))])
+    if not v: return dict(EX11_pass=False)
+    lit = float((np.array(v) > EX11_FLOOR).mean()); speck = float((np.abs(int_ao - median_filter(int_ao, 5)) >= 0.25).mean())
+    return dict(EX11_cavity_lit_share=round(lit, 3), EX11_speck_share=round(speck, 4), EX11_pass=lit >= EX11_LIT_MIN and speck <= EX11_SPECK_MAX)
 
 
 def _lin(path):
@@ -454,7 +543,7 @@ def cage_checks(C, V, form, rec):
     by, dmax = folds(C, V)
     R['OP3_folds_by_region'] = by; R['OP3_folds'] = int(sum(by.values())); R['OP3_designed_crease_max_deg'] = round(dmax)
     R['OP3_pass'] = R['OP3_folds'] == 0
-    R.update(form_fair(form)); R.update(plate_fair(form)); R.update(paired_fin_checks(paired_sheets(C, rec), form)); R.update(fin_fold_check(C))
+    R.update(form_fair(form)); R.update(plate_fair(form)); R.update(snout_fair(form)); R.update(paired_fin_checks(paired_sheets(C, rec), form)); R.update(fin_fold_check(C))
     return R
 
 
@@ -567,6 +656,9 @@ def export_checks(out, st):
     R.update(ex_checks(out, st))
     bp, ip, cp = (os.path.join(out, n) for n in ('body_base.png', 'interior_base.png', 'cage.json'))
     if all(os.path.exists(p_) for p_ in (bp, ip, cp)): R.update(rim_colour(json.load(open(cp)), _lin(bp), _lin(ip)))
+    if all(os.path.exists(p_) for p_ in (ip, cp)): R.update(cavity_wall_colour(json.load(open(cp)), _lin(ip)))
+    op = os.path.join(out, 'interior_orm.png')
+    if all(os.path.exists(p_) for p_ in (op, cp)): R.update(lining_light(json.load(open(cp)), np.asarray(Image.open(op).convert('RGB'), float)[..., 0] / 255))
     return R
 
 
@@ -719,9 +811,27 @@ def planted(C0, V0, VN0, form, rec):
     f3 = Form(rec)
     for p_ in f3.PLATES: p_['buried'] = [l[:max(2, len(l) // 2)] for l in p_['buried']]      # half of each buried outline has no fade: a wall there
     PL['FM2 (a stretch of outline left out of the fade)'] = plate_fair(f3)['FM2_plate_slope_max'] > FM2_SLOPE_MAX
+    # FM3: the same record with a blunt traced front (2 % SL over and under the mouth tip at x = 0, the top view starting at a point), with and without the rules
+    from . import form as _fm
+    rb = copy.deepcopy(rec); tip_ = min(rb['mouth']['line'], key=lambda q: q[0])[1]
+    rb['outline']['top'][0][1] = max(rb['outline']['top'][0][1], tip_ + 0.02); rb['outline']['bot'][0][1] = min(rb['outline']['bot'][0][1], tip_ - 0.02); rb['outline']['hw'][0][1] = 0.0
+    PL['FM3 planted baseline passes'] = snout_fair(Form(rb))['FM3_pass'] and snout_fair(form)['FM3_pass']
+    _cap, _rnd = _fm.NOSE_CAP, _fm.NOSE_ROUND
+    try:
+        _fm.NOSE_CAP = 0.0; PL['FM3 (blunt snout cut off square at x = 0)'] = snout_fair(Form(rb))['FM3_front_height_pctSL'] > 100 * FM3_FRONT_MAX
+        _fm.NOSE_CAP, _fm.NOSE_ROUND = _cap, 0.0; PL['FM3 (snout a wedge seen from above: a knife edge down the front)'] = not snout_fair(Form(rb))['FM3_pass']
+    finally: _fm.NOSE_CAP, _fm.NOSE_ROUND = _cap, _rnd
+    class _EndsOnJoint(Form): _jaw_ends_on_joint = True
+    PL['FM3 (lower jaw ridge ended on the joint: a pit before the gill cover)'] = snout_fair(_EndsOnJoint(rec)).get('FM3_jaw_end_share', 0.0) < FM3_JAW_END_MIN
     sk_ = np.zeros((64, 64, 3)) + [0.45, 0.42, 0.30]
     PL['EX9 planted baseline passes'] = rim_colour(C0, sk_, sk_.copy())['EX9_pass']
     PL['EX9 (lining mucosa pink right from the rim)'] = not rim_colour(C0, sk_, np.zeros((64, 64, 3)) + [0.62, 0.42, 0.40])['EX9_pass']
+    PL['EX10 planted baseline passes'] = cavity_wall_colour(C0, np.zeros((64, 64, 3)) + [0.62, 0.42, 0.40])['EX10_pass']
+    PL['EX10 (gill red on the wall of the mouth)'] = not cavity_wall_colour(C0, np.zeros((64, 64, 3)) + [0.52, 0.235, 0.225])['EX10_pass']
+    _ao = np.tile(np.linspace(1.0, 0.15, 64), (64, 1)); _rs = np.random.RandomState(3)
+    PL['EX11 planted baseline passes'] = lining_light(C0, _ao)['EX11_pass']
+    PL['EX11 (lining lit with the mouth shut: all floor)'] = not lining_light(C0, np.full((64, 64), 0.15))['EX11_pass']
+    PL['EX11 (dither in the lining occlusion)'] = not lining_light(C0, np.where(_rs.rand(64, 64) < 0.05, 0.15, _ao))['EX11_pass']
     PL['P6 naked trunk (no relief in the height map) may bake flat'] = p6(n2, np.ones((64, 64), bool), Hn)['P6_pass']
     PL['P6 (scaled trunk baked flat)'] = not p6(n2, np.ones((64, 64), bool), Hs)['P6_pass']
     PL['P6 (flat normal map on naked skin all over)'] = not p6(flat, np.ones((64, 64), bool), np.zeros((64, 64)))['P6_pass']
