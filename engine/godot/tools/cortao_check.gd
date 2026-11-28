@@ -5,7 +5,9 @@
 ##   C3 top: the box's top face is open (r > 0.95)
 ##   C4 lit image: the contact floor is darker than the open floor by >= 10 % with CORTAO on (it reaches the material)
 ##   C5 grain: high-pass std of the AO in the soft shadow < 0.02 (no speckle: SIMPLICITY, noise is not detail)
-## Planted fault: --fault flip renders with flip_y inverted (the AO lands mirrored), which must fail C1 or C3.
+##   C6 no screen door: in the same patch, the high-pass's correlation at a 3 px lag (CORTAO's filter tap spacing) < 0.35
+## Planted faults: --fault flip renders with flip_y inverted (the AO lands mirrored), which must fail C1 or C3;
+## --fault coarse makes the last filter pass use CORTAO's 3 px taps again (the lattice comes back), which must fail C6.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- <out dir> [--fault flip]
 extends SceneTree
 
@@ -80,8 +82,18 @@ void fragment() { ALBEDO = vec3(0.7); ROUGHNESS = 1.0; AO = min(AO, screen_ao(SC
 	var v := 0.0
 	for h in hp: v += h * h
 	var grain := sqrt(v / hp.size())
+	# C6: correlation of the high-pass with itself 3 px to the right and 3 px down (40 x 40 patch, row-major)
+	var c3 := 0.0
+	var n3 := 0
+	for y in 40:
+		for x in 37:
+			c3 += hp[y * 40 + x] * hp[y * 40 + x + 3]; n3 += 1
+	for y in 37:
+		for x in 40:
+			c3 += hp[y * 40 + x] * hp[(y + 3) * 40 + x]; n3 += 1
+	var lat := (c3 / n3) / maxf(v / hp.size(), 1e-12)
 	var rows := [["C5 grain (high-pass std) < 0.02", grain < 0.02, grain], ["C1 contact r < 0.80", contact < 0.80, contact], ["C2 open floor r > 0.95", open > 0.95, open],
-		["C3 box top r > 0.95", top > 0.95, top], ["C4 lit contact/open <= 0.90", lc / maxf(lo, 1e-4) <= 0.90, lc / maxf(lo, 1e-4)]]
+		["C6 no screen door: 3 px lag correlation < 0.35", lat < 0.35, lat], ["C3 box top r > 0.95", top > 0.95, top], ["C4 lit contact/open <= 0.90", lc / maxf(lo, 1e-4) <= 0.90, lc / maxf(lo, 1e-4)]]
 	var all := true
 	for r in rows:
 		print("%s %s  (%.3f)" % ["PASS" if r[1] else "FAIL", r[0], r[2]]); all = all and r[1]

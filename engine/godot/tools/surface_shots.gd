@@ -136,11 +136,18 @@ func _setup():
 		mk.call(post, base + Vector3(2.2, 0.1, 0.5), Vector3.ZERO, Color(0.9, 0.35, 0.2))                   # half in, half out
 		var rock := BoxMesh.new(); rock.size = Vector3(1.2, 0.8, 0.9)
 		mk.call(rock, base + Vector3(-2.0, -1.5, 1.0), Vector3(0.2, 0.5, 0.1), Color(0.35, 0.38, 0.32))   # 1.5 m down
+		# Gary 28 Nov playtest: standing in the water by a rock, seen from behind (legs and rock "doubled and smeared")
+		var legs := CapsuleMesh.new(); legs.radius = 0.16; legs.height = 3.0
+		mk.call(legs, base + Vector3(6.0, -0.9, 0.0), Vector3.ZERO, Color(0.88, 0.85, 0.8))           # floor to 0.6 m above
+		var boulder := SphereMesh.new(); boulder.radius = 1.6; boulder.height = 3.2
+		mk.call(boulder, base + Vector3(7.6, -1.2, -2.2), Vector3.ZERO, Color(0.72, 0.58, 0.42))      # top 0.4 m out
 		shots = [
 			["f1_refr_down60", base + Vector3(0, 3.0, 4.0), base + Vector3(0, -0.3, 0), 60.0],
 			["f2_refr_down35", base + Vector3(0, 2.2, 6.5), base + Vector3(0, -0.3, 0), 60.0],
 			["f3_refr_low", base + Vector3(0.5, 0.9, 7.0), base + Vector3(0, -0.2, 0), 60.0],
 			["f4_refr_top", base + Vector3(0.1, 5.0, 0.6), base + Vector3(0, -0.3, 0), 60.0],
+			["f5_refr_stand_behind", base + Vector3(6.3, 1.6, 2.2), base + Vector3(6.6, -0.6, -1.5), 60.0],
+			["f6_refr_stand_low", base + Vector3(6.2, 0.7, 2.6), base + Vector3(6.4, -0.2, -2.0), 60.0],
 		]
 	if OS.get_environment("AO_WL") != "":           # the waterline (Gary 28 Nov: "a cardboard effect of the horizon fog" as
 		# the eye cuts the water line): level views at the dressed lagoon's arch, the eye 2 cm and 15 cm above, 3 cm under,

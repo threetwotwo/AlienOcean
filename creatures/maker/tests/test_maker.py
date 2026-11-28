@@ -430,7 +430,7 @@ def test_blockout_follows_the_record_and_catches_planted_faults(tmp_path):
     from creature_maker.fins import build_fins
     D = blockout(REC, str(tmp_path / 'bk'), log=lambda *a: None)
     assert D['checks']['BK1_pass'] and D['checks']['BK2_pass'] and D['checks']['BK3_pass']
-    assert len(D['segments']) == 2 * D['bones'] and D['tris'] < 8000
+    assert len(D['segments']) == 2 * D['bones'] and D['tris'] < 16000 and len(D['lods'][2]['F']) < 6000
     rec = adapt(REC); form = Form(rec); segs, x_end = segments(form, rec); os.makedirs(tmp_path / 'f'); fins = build_fins(form, rec, str(tmp_path / 'f'))
     sq = copy.deepcopy(segs)
     for s in sq: s['r'][1] *= 0.7
@@ -440,6 +440,31 @@ def test_blockout_follows_the_record_and_catches_planted_faults(tmp_path):
     ok = checks(form, segs, x_end, fins, rec)['BK3_fin_iou'][m['name']]; assert ok >= 0.85, ok
     big = copy.deepcopy(fins); V = np.asarray(big[m['name']]['V']); c = V[:, :2].mean(0); V[:, :2] = c + (V[:, :2] - c) * 1.25; big[m['name']]['V'] = V
     assert checks(form, segs, x_end, big, rec)['BK3_fin_iou'][m['name']] < ok - 0.1
+
+
+def test_blockout_cutters_open_the_mouth_gills_and_eyes_and_catch_planted_faults():
+    """tier 3 (Gary 28 Nov: "blockouts can be used for holes too? mouth anatomy etc."): the jaw block sits in the jaw's cut out of
+    the head (CT1), the gill slits lie under the cover plates (CT2), the eyeballs in their sockets (CT3). A jaw raised into the skull,
+    a cover with no overhang over its slits, an eye pushed out of its socket each fail."""
+    import copy
+    from creature_maker import blockout_cut as CUT
+    from creature_maker.blockout import segments
+    from creature_maker.record import adapt
+    from creature_maker.form import Form
+    rec = adapt(REC); form = Form(rec); segs, _ = segments(form, rec)
+    kit = CUT.head_kit(rec, segs); carved, pieces = CUT.build(segs, kit)
+    R = CUT.cut_checks(kit, pieces); assert R['CT_pass'] and R['CT1_pass'] and R['CT2_pass'] and R['CT3_pass'], R
+    assert carved and {'jaw', 'opercleL', 'opercleR', 'eye_L', 'eye_R'} <= {p['name'] for p in pieces}
+    jaw = next(q for q in kit['blocks'] if q['kind'] == 'jaw'); up = copy.deepcopy(pieces)
+    for p in up:
+        if p['name'] == 'jaw': p['V'] = np.asarray(p['V']) + [0, 0.6 * jaw['ry_lo'], 0]
+    assert not CUT.cut_checks(kit, up)['CT1_pass']
+    k2 = copy.deepcopy(kit); poly = np.asarray(k2['cover_poly']); poly[:, 0] -= 2 * CUT.SLIT_W; k2['cover_poly'] = poly.tolist()
+    assert not CUT.cut_checks(k2, pieces)['CT2_pass']
+    k3 = copy.deepcopy(kit)
+    for q in k3['blocks']:
+        if q['kind'] == 'eyeball': q['c'][2] *= 1.0 + 3 * q['r'][0] / abs(q['c'][2])
+    assert not CUT.cut_checks(k3, pieces)['CT3_pass']
 
 
 def test_clips_have_no_jitter_at_any_tick_rate():

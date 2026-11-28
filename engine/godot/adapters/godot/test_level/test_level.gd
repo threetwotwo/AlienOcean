@@ -32,6 +32,8 @@ var mouse_captured := false
 var _mouse_acc := Vector2.ZERO
 var _show_collider := false
 var _collider_mesh: MeshInstance3D = null
+var ui: PlayerUI                      # gamepad layer: pause menu, interact prompt, rumble (adapters/godot/ui/player_ui.gd)
+var samples := {}                     # school id -> DNA samples taken (the slice's interact)
 
 func _ready() -> void:
 	name = "TestLevel"
@@ -60,6 +62,12 @@ func _ready() -> void:
 	grass.adopt(game.lagoon)
 	if OS.get_environment("AO_GRASS") == "0": grass.set_enabled(false)
 	_make_teleports()
+	# player UI 0.1.0: pause (Options / Esc), interact (Square / X / E, hold to sample a fish), rumble, remap
+	ui = PlayerUI.new(); ui.name = "PlayerUI"; ui.game = game; ui.reader = game.reader
+	ui.targets_fn = interact_targets
+	ui.on_pause = func(on): if on: set_mouse_captured(false)
+	ui.interacted.connect(_on_interact)
+	add_child(ui)
 	# Full screen by default (Gary 28 Nov: "make it fullscreen, for a more accurate reading and look"), so benches and the look
 	# are judged at the real screen size. AO_WINDOWED=1, or an explicit --resolution (cloud shots, the perf runner's window
 	# profile), keeps a window.
@@ -70,6 +78,26 @@ func _ready() -> void:
 	if DisplayServer.get_name() != "headless" and DisplayServer.screen_get_scale() >= 1.99 and OS.get_environment("AO_FULL_RES") != "1":
 		set_toggle("half_res", true)
 	ready_done = true
+
+## What the girl can act on now: the nearest fish of each school (hold to take a DNA sample). One id per school, so the
+## prompt stays on the school while the nearest fish changes inside it.
+func interact_targets() -> Array:
+	var out := []
+	var eye: Vector3 = game.girl.eye_point()
+	for i in game.school_nodes.size():
+		var sn = game.school_nodes[i]
+		var best := Vector3.ZERO
+		var bd := INF
+		for p in sn._cur:
+			var d: float = p.distance_squared_to(eye)
+			if d < bd: bd = d; best = p
+		if bd < INF:
+			out.append({"id": "school:%d" % i, "pos": best, "verb": "Sample DNA", "range": 3.0, "hold": 0.8})
+	return out
+
+func _on_interact(id: String) -> void:
+	samples[id] = samples.get(id, 0) + 1
+	ui.toast("Trevally sample logged  (%d from this school)" % samples[id])
 
 func _asset_dir(p: String) -> String:
 	if DirAccess.dir_exists_absolute(p): return p
