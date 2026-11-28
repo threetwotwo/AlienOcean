@@ -1,0 +1,198 @@
+{
+ "_about": "Perf runner stations for the T1 test level (res://scenes/test_level.tscn). tp = TestLevel teleport index, or pos = [x, metres below the surface, z] for a spot of your own (test_level.gd _make_teleports), yaw/pitch in radians (pitch -1.4 = looking straight down, camera limit 1.42), hour 0-24, sea = TestLevel.SEA_STATES. toggle_stations: where every TestLevel switch is flipped and timed. Copy this file to make stations for another level.",
+ "stations": [
+  {
+   "name": "start",
+   "tp": 0,
+   "yaw": 0.0,
+   "pitch": -0.1,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "keyframe_view",
+   "tp": 1,
+   "yaw": 0.08,
+   "pitch": -0.1,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "keyframe_yaw_90",
+   "tp": 1,
+   "yaw": 1.65,
+   "pitch": -0.1,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "keyframe_yaw_180",
+   "tp": 1,
+   "yaw": 3.14,
+   "pitch": -0.1,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "keyframe_yaw_270",
+   "tp": 1,
+   "yaw": -1.49,
+   "pitch": -0.1,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "floor_look_down",
+   "tp": 1,
+   "yaw": 0.08,
+   "pitch": -1.4,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "floor_look_down_night",
+   "tp": 1,
+   "yaw": 0.08,
+   "pitch": -1.4,
+   "hour": 23.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "arch_gate",
+   "tp": 2,
+   "yaw": 0.0,
+   "pitch": -0.1,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "trevally_school",
+   "tp": 3,
+   "yaw": 0.0,
+   "pitch": -0.1,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "surface",
+   "tp": 4,
+   "yaw": 0.0,
+   "pitch": 0.05,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "openwater_look_down",
+   "tp": 4,
+   "yaw": 0.0,
+   "pitch": -1.4,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "snell_window_up",
+   "tp": 5,
+   "yaw": 0.0,
+   "pitch": 1.2,
+   "hour": 12.0,
+   "sea": "B3"
+  },
+  {
+   "name": "midwater_look_down",
+   "tp": 5,
+   "yaw": 0.0,
+   "pitch": -1.4,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "reef_edge",
+   "tp": 6,
+   "yaw": 0.6,
+   "pitch": -0.1,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "reef_edge_look_down",
+   "tp": 6,
+   "yaw": 0.6,
+   "pitch": -1.0,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "force12_surface",
+   "tp": 4,
+   "yaw": 0.0,
+   "pitch": 0.05,
+   "hour": 12.0,
+   "sea": "B12"
+  },
+  {
+   "name": "dusk_keyframe",
+   "tp": 1,
+   "yaw": 0.08,
+   "pitch": -0.1,
+   "hour": 18.2,
+   "sea": "lagoon"
+  },
+  {
+   "name": "fore_reef_look_down",
+   "pos": [
+    700.0,
+    3.0,
+    0.0
+   ],
+   "yaw": 0.0,
+   "pitch": -1.4,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "open_ocean_look_down",
+   "pos": [
+    1150.0,
+    3.0,
+    0.0
+   ],
+   "yaw": 0.0,
+   "pitch": -1.4,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "open_ocean_deep_look_down",
+   "pos": [
+    1150.0,
+    15.0,
+    0.0
+   ],
+   "yaw": 0.0,
+   "pitch": -1.4,
+   "hour": 12.0,
+   "sea": "lagoon"
+  },
+  {
+   "name": "open_ocean_level",
+   "pos": [
+    1150.0,
+    3.0,
+    0.0
+   ],
+   "yaw": 0.0,
+   "pitch": -0.1,
+   "hour": 12.0,
+   "sea": "lagoon"
+  }
+ ],
+ "toggle_stations": [
+  "floor_look_down",
+  "openwater_look_down",
+  "keyframe_view",
+  "open_ocean_look_down"
+ ],
+ "skip_toggles": [
+  "collider"
+ ]
+}
