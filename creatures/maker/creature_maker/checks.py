@@ -7,6 +7,7 @@ Cage checks (no Blender):
   P5  skin UV: area with stretch in [0.8, 1.25] >= 95 %, no folded UV faces, no texel under two skin faces
   IC1 every part the record names exists; input faults and defaults listed
   EY1 eye rim radius within 5 % of the record eye
+  EY2 the eyeball is no goggle: the cornea window stands 0.04-0.40 eye radii over its rim and clears the lens
   EA1 the skin round the eye (best plane of the 1.6-2.4 eye radii ring) faces no further up than the scans' line for the eye's height + 8 deg
   EA2 the eye's own aim lies in the range real eye discs keep to (up -6..12, forward 4..26 deg), and the eye sits true in its rim
   OP1 openings are topology: genus 2 (mouth -> throat -> two gill exits), 2 border loops (eyes), consistent winding,
@@ -22,6 +23,7 @@ validator, P11 silhouette against the ceiling frame (info), and the export stage
   EX4 clips swim_loop, breathe_loop, gape, flare exist; swim_loop closes (last frame = first within 1e-4 BL)
   EX5 collision: at least 3 hulls (a body that bends), >= 99 % of the form's inside covered, hull volume <= 1.3 x form volume
   EX6 the swim settings ride in the glTF (rig node extras alien_ocean.swim: envelope with phase, envelopes at >= 2 speeds, wavelength, beat law, clips)
+  EX8 the eye shells (iris, lens, cornea, both eyes) stay inside their triangle budget: the eye's look is in its maps
   EX7 LOD chain by the Unreal-era intake rule (creature_meter K2 + export round trip X4): each level 2.5-6 x fewer triangles, switch distances stated
 """
 import json, os, sys, math, copy, hashlib, subprocess
@@ -174,6 +176,20 @@ def eye_aim_checks(C, V, form, rec):
     return R
 
 
+def eyeball_checks(C):
+    """EY2: the cornea window's height over its rim lies in cage.eye.CORNEA_SAG (flat window .. goggles limit, from the
+    old Eyes work) and the lens stays under it."""
+    from .cage.eye import CORNEA_SAG
+    o = [e.get('optics') for e in C['eyes']]
+    if not all(o): return dict(EY2_pass=False, EY2_note='no eye optics in the cage')
+    sag = [v['cornea_sag_R'] for v in o]; gap = [v['lens_under_cornea_R'] for v in o]
+    return dict(EY2_cornea_sag_R=sag, EY2_lens_under_cornea_R=gap, EY2_pass=bool(all(CORNEA_SAG[0] <= v <= CORNEA_SAG[1] for v in sag) and min(gap) > 0))
+
+
+EYE_SHELL_TRIS_MAX = 300    # DEFAULT: iris + lens + cornea of both eyes. The ceiling fish (the Nestaeric alfonsino) is about 8.8k
+                            # triangles whole with its eyes a separate material; 300 is 3.4 % of that. The shells this replaces took 864
+
+
 def cage_checks(C, V, form, rec):
     R = {}; faces, tags = C['faces'], C['ftag']
     skin = [k for k, t in enumerate(tags) if t in SKIN_TAGS]
@@ -220,7 +236,7 @@ def cage_checks(C, V, form, rec):
     R['IC1_pass'] = not R['IC1_missing'] and not R['IC1_input_faults']
     er = rec['eye']['d'] / 2; built = np.mean([e.get('r_side', e['r']) for e in C['eyes']])
     R['EY1_eye_radius_ratio'] = round(float(built / er), 3); R['EY1_pass'] = abs(built / er - 1) <= 0.05
-    R.update(eye_aim_checks(C, V, form, rec))
+    R.update(eye_aim_checks(C, V, form, rec)); R.update(eyeball_checks(C))
     tp = topology(C); ps = passages(C)
     R['OP1_topology'] = tp; R['OP1_lips_reach_each_gill'] = ps
     R['OP1_pass'] = tp['genus'] == 2 and tp['border_loops'] == 2 and tp['nonmanifold'] == 0 and tp['winding_faults'] == 0 and len(ps) == 2 and all(ps)
@@ -331,6 +347,8 @@ def ex_checks(out, st):
         js, _ = read(gp)
         sw = next((n['extras']['alien_ocean']['swim'] for n in js.get('nodes', []) if n.get('name') == 'rig' and 'alien_ocean' in n.get('extras', {})), None)
     elif 'swim_extras' in st: sw = st['swim_extras']
+    R['EX8_eye_shell_tris'] = st.get('eye_shell_tris'); R['EX8_eye_patch_tris'] = st.get('eye_patch_tris')
+    R['EX8_pass'] = st.get('eye_shell_tris') is not None and 0 < st['eye_shell_tris'] <= EYE_SHELL_TRIS_MAX
     need = ('wave', 'beat_law', 'clips')
     R['EX6_pass'] = bool(sw) and all(k in sw for k in need) and bool(sw['wave'].get('amplitude_envelope_BL')) and bool(sw['wave'].get('lam_BL')) \
         and len(sw['wave'].get('envelopes_by_speed') or []) >= 2 and all(len(r) == 3 for r in sw['wave']['amplitude_envelope_BL'])
@@ -401,11 +419,15 @@ def planted(C0, V0, VN0, form, rec):
     good = dict(EX1_gape_max_err_pctSL=0.001, EX1_gape_moved_pctSL=6.0, EX2_flare_max_err_pctSL=0.001, EX2_flare_moved_pctSL=2.0,
                 interior_faces=10, lods=dict(LOD1=dict(tris=1, interior_tris=5), LOD2=dict(tris=1, interior_tris=2)),
                 clips=dict(swim_loop={}, breathe_loop={}, gape={}, flare={}), swim_loop_closure_BL=0.0,
-                collision=dict(hulls=5, coverage=1.0, hull_over_form_volume=1.2),
+                collision=dict(hulls=5, coverage=1.0, hull_over_form_volume=1.2), eye_shell_tris=252,
                 lod_chain=dict(levels=[dict(lod=0, tris=8000, from_m=0.0), dict(lod=1, tris=2000, from_m=5.0, tris_built=1950), dict(lod=2, tris=500, from_m=10.0, tris_built=490)]),
                 swim_extras=dict(wave=dict(amplitude_envelope_BL=[[0, 0.02, 0.0]], lam_BL=1.0, envelopes_by_speed=[{}, {}]), beat_law={}, clips={}))
     ex = lambda **kw: ex_checks('/nonexistent', {**good, **kw})
-    PL['EX planted baseline passes'] = all(ex()[k] for k in ('EX1_pass', 'EX2_pass', 'EX3_pass', 'EX4_pass', 'EX5_pass', 'EX6_pass', 'EX7_pass'))
+    PL['EX planted baseline passes'] = all(ex()[k] for k in ('EX1_pass', 'EX2_pass', 'EX3_pass', 'EX4_pass', 'EX5_pass', 'EX6_pass', 'EX7_pass', 'EX8_pass'))
+    PL['EX8 (the old eye shells: two 24 x 5 domes an eye, 864 triangles)'] = not ex(eye_shell_tris=864)['EX8_pass']
+    c = copy.deepcopy(C0)
+    for e in c['eyes']: e['optics'] = dict(e['optics'], cornea_sag_R=0.7)          # the old builds' dome: 0.66-0.77 eye radii on every species
+    PL['EY2 (cornea a dome 0.7 eye radii high: goggles)'] = not eyeball_checks(c)['EY2_pass']
     PL['EX1 (jaw skinned off the stress pose by 0.5 % SL)'] = not ex(EX1_gape_max_err_pctSL=0.5)['EX1_pass']
     PL['EX2 (covers never move)'] = not ex(EX2_flare_moved_pctSL=0.0)['EX2_pass']
     PL['EX3 (LOD2 lost the mouth interior)'] = not ex(lods=dict(LOD1=dict(tris=1, interior_tris=5), LOD2=dict(tris=1, interior_tris=0)))['EX3_pass']

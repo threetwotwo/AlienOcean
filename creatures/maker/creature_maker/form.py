@@ -33,6 +33,8 @@ AIM_FWD = (4.0, 26.0)        # DEFAULT (deg toward the snout): scan median 14.3,
 TISSUE_REACH = 3.0           # DEFAULT (x eye radius): where the tissue has run out into the loft below the eye. It covers the scans' ring (to 2.4 R);
                              # HP-HEAD-ORBIT-1 found the built skin low at 1.6 and 2.0 R, and the scan skin profile (levels_r1) is read to 2.0 R
 ORBIT_SWELL = 2.0            # DEFAULT: length / height of the dorsal outline's lift over an eye that stands above it (1 = the eye's own circle)
+ROOF_N = 6.0                 # DEFAULT: the boxiest section the tissue may make (superellipse exponent). Art direction: the scans' own roofs are
+                             # rounder (gapfill orbit_r1 skeleton.skull.roof_exp 1.25-2.4), a wide forehead is Gary's ask (28 Nov)
 TISSUE_K = 0.04              # DEFAULT: the tissue meets the loft over 4 % of the local half-width, no crease
 PLATE_CHAMFER = 0.004   # DEFAULT: the edge of a plate drawn from below rises to full thickness over two cells of the dense form (0.2 % SL each)
 
@@ -371,9 +373,11 @@ class Form:
         ran out the same distance all round stood on the head as a bar from eye to eye (round 1 of this fix)."""
         O = self._orb
         if O is None: return 1.0
-        x, u = np.broadcast_arrays(np.asarray(x, float), np.asarray(u, float)); k = np.ones(x.shape)
+        # beyond the outline's height the widening is that of the outline's edge, so the distance field stays whole over a
+        # wide roof (cut off there, a point a hair over the roof read as far outside a section with no width)
+        x, u = np.broadcast_arrays(np.asarray(x, float), np.clip(np.asarray(u, float), -0.999, 0.999)); k = np.ones(x.shape)
         er, ex, eyy = self.er, self.ex, self.eyy
-        m = (x > ex - O['front']) & (x < ex + O['back']) & (np.abs(u) < 1)
+        m = (x > ex - O['front']) & (x < ex + O['back'])
         if not m.any(): return k
         xm = x[m]; c, a, b = self.sec(xm); y = c + a * u[m]; n = O['n']
         xc = np.clip(xm, ex - er, ex + er); cc, ac, bc = self.sec(xc)
@@ -382,14 +386,18 @@ class Form:
         yc = np.clip(y - (c + a) + (cc + ac), eyy - er, np.minimum(O['y_brow'], cc + ac - self._CLR))
         K = (O['zd'] - (n[0] * (xc - ex) + n[1] * (yc - eyy)) / n[2]) / (bc * self._wnorm0(xc, (yc - cc) / ac))
         w0 = self._wnorm0(xm, u[m])
-        Ko = np.minimum(smax(np.ones(K.shape), K, TISSUE_K), (1 + O['past'] / b) / w0)                 # out: inside the half-width + bulge
+        # out: inside the half-width + bulge, and no boxier than a ROOF_N superellipse, so the roof closes on the midline
+        # (held at the full half-width it ran flat to the dorsal outline and stopped there: a section with a cliff for a top)
+        box = (1 - np.abs(u[m]) ** ROOF_N) ** (1 / ROOF_N)
+        Ko = np.minimum(smax(np.ones(K.shape), K, TISSUE_K), np.maximum((1 + O['past'] / b) * box / w0, 1))
         dx = xm - ex; px = np.clip((np.abs(dx) - er) / (np.where(dx < 0, O['front'], O['back']) - er), 0, 1)
         py = np.clip((eyy - er - y) / ((TISSUE_REACH - 1) * er), 0, 1)
         s_ = np.clip(1 - np.hypot(px, py), 0, 1); W = s_ * s_ * (3 - 2 * s_)
         # the tissue is skull and the skin over it: it ends at the upper jaw (above the maxilla, record mouth.maxilla_h over
         # the mouth line), or the lips and the mouth cavity under them part company (porcupinefish: an eye that reaches the snout)
         ys, _ = self._seam_y(xm); xr = self._seam[-1, 0]
-        s_ = np.clip((y - ys - self.MO['maxilla_h']) / er, 0, 1); s_ = np.maximum(s_, np.clip((xm - xr) / er, 0, 1)); W = W * s_ * s_ * (3 - 2 * s_)
+        s_ = np.clip((y - ys - self.MO['maxilla_h']) / er, 0, 1); s_ = np.maximum(s_, np.clip((xm - xr) / er, 0, 1))
+        s_ = np.maximum(s_, np.clip((RING_R[0] - np.hypot(dx, y - eyy) / er) / (RING_R[0] - 1), 0, 1)); W = W * s_ * s_ * (3 - 2 * s_)    # the eye's own rim keeps its plane
         # in: only the furrow, where the eye's plane lies under the skin at the rim; it has closed by the skin ring
         s_ = np.clip((RING_R[0] - np.hypot(dx, y - eyy) / er) / (RING_R[0] - 1), 0, 1); Wi = s_ * s_ * (3 - 2 * s_)
         k[m] = 1 + W * (Ko - 1) + Wi * (np.minimum(K, 1) - 1)

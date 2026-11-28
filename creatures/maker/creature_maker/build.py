@@ -53,7 +53,7 @@ def write(B, uvr, fins, eyes, rec, form, map_prov, out, stats):
     json.dump(dict(faces=[list(map(int, f)) for f in mesh.faces], ftag=mesh.ftag, uv=[u.tolist() for u in uvr['face_uv']],
                    fins={k: dict(V=v['V'].tolist(), F=v['F'], UV=v['UV'].tolist(), T=v['T']) for k, v in fins.items()},
                    s_uv=float(uvr['s_uv']), rolls=B.rolls(), junctions=B.junctions(), commissures=B.commissures, openings=openings,
-                   eyes=[dict(c=e['c'].tolist(), n=e['n'].tolist(), r=e['r'], r_side=e['r_side'], side=e['side']) for e in eyes],
+                   eyes=[dict(c=e['c'].tolist(), n=e['n'].tolist(), r=e['r'], r_side=e['r_side'], side=e['side'], optics=e['optics']) for e in eyes],
                    eye=form.EY, SL_mm=rec['SL_mm'], xend=form.XEND, bones=rec['bones'], species=rec['species'], style=rec.get('style', {}), hamp=HAMP,
                    input_faults=rec['input_faults'], inputs=rec['provenance'], defaults_used=rec['defaults_used'],
                    parts=dict(eyes=len(B.eye['rims']), fins=sorted(fins.keys())), form_rules=dict(orbit_lift_pctSL=round(form.ORBIT_LIFT * 100, 2), jaw_lift_pctSL=round(form.JAW_LIFT * 100, 2), orbit=form.ORBIT),
