@@ -9,6 +9,9 @@
   sheet OUT RECORD.json                                       turnarounds: 8 angles x rest, real size, stylized (needs bpy)
   glb OUT --record RECORD.json [--views]                      OUT -> fish.glb + LOD1/LOD2 (Blender's Python: bpy): interior slot, rig with
                                                               jaw + gill covers, clips swim_loop/breathe_loop/gape/flare, swim extras, collision
+  blockout OUT --record RECORD.json [--no-glb]                 OUT -> blockout.json + fish_blockout.glb: ellipsoid chain + fin plates,
+                                                              the full export's rig, swim clips and collision (motion tests before detail)
+  blockoutboard OUT RECORD_DIR... [--no-glb]                  a blockout of every record + board_blockout.json + side/top sheet
   ship OUT ENGINE_SPECIES_DIR [--lock ASSETS_LOCK]            copy fish*.glb to the engine folder and list them in assets.lock.json
 """
 import sys, os, subprocess
@@ -59,6 +62,15 @@ def main(argv):
         lock = args[args.index('--lock') + 1] if '--lock' in args else None
         for r in ship(args[0], args[1], lock): print(r)
         return 0
+    if cmd == 'blockout':
+        from .blockout import blockout
+        rp = args[args.index('--record') + 1]; blockout(rp, args[0])
+        if '--no-glb' in args: return 0
+        script = os.path.join(os.path.dirname(__file__), 'blender', 'export_blockout.py')
+        return subprocess.call([sys.executable, script, args[0], '--record', rp])
+    if cmd == 'blockoutboard':
+        from .blockout import board
+        board(args[0], args[1:], glb='--no-glb' not in args); return 0
     if cmd == 'glb':
         script = os.path.join(os.path.dirname(__file__), 'blender', 'export_glb.py')
         return subprocess.call([sys.executable, script] + args)
