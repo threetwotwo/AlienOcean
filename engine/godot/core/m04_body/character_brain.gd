@@ -52,6 +52,8 @@ var focus_start_kind := ""    # how the last look began: "breath" (gated, on the
 const BREATH_EXHALE_AT := 0.40     # eval_asymmetric_breath: 40 % inhale, then the exhale
 const GLANCE_WAIT_CYCLES := 0.5    # a free look waits at most half a breath (the turns are under half a breath apart)
 const GLANCE_WAIT_MAX := 2.5       # s, and never longer than this
+var _eye_side := 0
+var _eye_on_focus := false         # (head upgrade) the eyes' goal is the focus (hysteresis on the glance blend)
 
 # attention
 var poi_memory := {}         # id -> Mem
@@ -700,6 +702,30 @@ func update(dt: float, ctx: Dictionary) -> Dictionary:
 	var obj_fast: bool = objective_active and not objective_focus.get("soft", false)
 	var gaze_hl := 0.09 if obj_fast else (0.30 if objective_active else (0.18 if active_turning else (0.44 if eff_focus_pos != null else 0.30)))
 	var gaze_dir_world := BM.nrm(gaze_dir_spring.step(raw_gaze, gaze_hl, sdt))
+	# ---- head upgrade BEGIN (eyes lead): where she means to look, before the gaze spring and the glance blend. The
+	# rig's eyes take this at once (a saccade) and the head follows the gaze spring above. Reach: the neck's plus the
+	# eyes' own range, so a thing behind her is seen from the corner of the eye on its own side.
+	var eye_goal := gaze_dir_world
+	var eye_goal_pos = null
+	if not exact:
+		var on_focus: bool = active_focus != null and not objective_active and want_blend > (0.10 if _eye_on_focus else 0.20)
+		_eye_on_focus = on_focus
+		eye_goal = desired_look
+		var gp = null
+		if objective_active: gp = objective_focus.pos
+		elif on_focus: gp = active_focus.pos
+		if objective_active and gp == null and objective_focus.dir != null: eye_goal = BM.nrm(objective_focus.dir)
+		if gp != null:
+			var raw_d := BM.nrm((gp as Vector3) - head_pos)
+			var fr: Array = [vis_fwd, vis_right] if mode == "swim" else [body_fwd, body_right]
+			var lr: float = raw_d.dot(fr[1])
+			if raw_d.dot(fr[0]) < -0.8 * Vector2(raw_d.dot(fr[0]), lr).length() and _eye_side != 0 and signf(lr) != float(_eye_side):
+				raw_d -= fr[1] * (2.0 * lr)     # right behind her: stay on the side the eyes already turned to (no flip-flop)
+			elif absf(lr) > 0.05: _eye_side = 1 if lr > 0.0 else -1
+			if mode == "swim": eye_goal = _within_reach(raw_d, vis_fwd, vis_right, vis_up, REACH_PITCH_SWIM, EYE_REACH_EXTRA)
+			else: eye_goal = _within_reach(raw_d, body_fwd, body_right, body_up, REACH_PITCH_LAND, EYE_REACH_EXTRA)
+			if eye_goal.dot(raw_d) > 0.999: eye_goal_pos = gp     # in reach: the eyes converge on the point itself
+	# ---- head upgrade END
 
 	# curiosity head tilt and upper-chest orienting
 	var tilt_goal := 0.0
@@ -788,6 +814,7 @@ func update(dt: float, ctx: Dictionary) -> Dictionary:
 		"exhaleStart": _exhale_start, "inhaleStart": _inhale_start, "exhaleCount": exhale_count,
 		"breathLockN": _lock_n, "breathLockW": _lock_w, "focusStartKind": focus_start_kind,
 		"gazeDirWorld": gaze_dir_world, "gazeBlend": gaze_blend,
+		"gazeGoalWorld": eye_goal, "gazeGoalPos": eye_goal_pos,     # (head upgrade) the eyes' goal
 		"headTiltRad": _cl(head_tilt, -0.055, 0.055), "torsoCuriosityYaw": _cl(torso_yaw, -0.24, 0.24),
 		"idleHipShift": idle_hip_shift, "anticipationCrouch": 0.0, "anticipationLean": ready_lean,
 		"touchL": touch_out.L, "touchR": touch_out.R,
@@ -834,13 +861,15 @@ func _breath_turning() -> bool:
 const REACH_YAW := 0.92
 const REACH_PITCH_SWIM := Vector2(-0.80, 0.80)     # from the look direction
 const REACH_PITCH_LAND := Vector2(-0.48, 0.54)     # from the upright body (neck -0.54..0.60)
-static func _within_reach(d: Vector3, bf: Vector3, br: Vector3, bu: Vector3, pl: Vector2) -> Vector3:
+const EYE_REACH_EXTRA := 0.55     # (head upgrade) rad the eyes add to the neck's reach
+static func _within_reach(d: Vector3, bf: Vector3, br: Vector3, bu: Vector3, pl: Vector2, extra := 0.0) -> Vector3:
 	var f := d.dot(bf); var r := d.dot(br); var u := d.dot(bu)
 	var yaw := atan2(r, f)
 	var pitch := atan2(u, Vector2(f, r).length())
-	if absf(yaw) <= REACH_YAW and pitch >= pl.x and pitch <= pl.y: return d
-	yaw = clampf(yaw, -REACH_YAW, REACH_YAW)
-	pitch = clampf(pitch, pl.x, pl.y)
+	var ry := REACH_YAW + extra
+	if absf(yaw) <= ry and pitch >= pl.x - extra and pitch <= pl.y + extra: return d
+	yaw = clampf(yaw, -ry, ry)
+	pitch = clampf(pitch, pl.x - extra, pl.y + extra)
 	return BM.nrm(bf * (cos(pitch) * cos(yaw)) + br * (cos(pitch) * sin(yaw)) + bu * sin(pitch))
 
 func _make_focus(id: String, kind, label: String, pos: Vector3, dist: float, priority: float, is_sound: bool, max_dwell: float,

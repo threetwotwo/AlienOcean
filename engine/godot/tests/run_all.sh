@@ -62,6 +62,8 @@ done
 if "$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --fault jitter --only B24 >/dev/null 2>&1; then echo "M04 PLANTED FAULT jitter NOT CAUGHT"; rc=1; else echo "M04 planted fault jitter caught"; fi
 # J13 breath fault: the breath phase skips a third of a cycle once (B60, long idle stand)
 if "$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --fault breathjump --only B60 >/dev/null 2>&1; then echo "M04 PLANTED FAULT breathjump NOT CAUGHT"; rc=1; else echo "M04 planted fault breathjump caught"; fi
+# J40 head fault: the eyes lose their limits (B63, fast look-around)
+if "$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --fault eyelimit --only B63 >/dev/null 2>&1; then echo "M04 PLANTED FAULT eyelimit NOT CAUGHT"; rc=1; else echo "M04 planted fault eyelimit caught"; fi
 # other tick rates and random monkey runs: reported, not yet gating (M04_STRICT=1 gates them)
 for r in 30 120; do
   "$G" --headless --fixed-fps $r --path . --script res://tests/test_body_stress.gd -- --tick $r > "$OUT/m04_$r.txt" 2>&1 || { [ "${M04_STRICT:-0}" = 1 ] && rc=1; }

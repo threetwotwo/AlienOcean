@@ -51,6 +51,8 @@
 ##                   "glance": at least BR_GLANCE_SHARE of the free new looks (not the camera's intent, not a sound)
 ##                   start as the breath turns (the brain lets one wait at most half a breath for it), at least one.
 ##                   Planted fault --fault breathjump: the breath phase jumps 0.35 of a cycle once.
+##  J40-J44 head     (every case with the skeleton; head upgrade block at the end of this file) eyes, gaze lead,
+##                   blinks and lids, jaw, neck segments. Planted fault --fault eyelimit: the eyes lose their limits.
 ##  Rest and ride (cases B48-B55, lettered, opts "act"; core/m02_motor/body_act.gd, core/m04_body/pose_rest.gd, pose_ride.gd):
 ##  J14 grip       riding (latched), each palm centre (hand frame (0, 0.04, 0)) within 2 cm of its grip marker
 ##  J15 creature   the J6 spheres (radius less 2 cm) never inside the creature stand-in's body ellipsoids, wings or
@@ -157,6 +159,7 @@ const Mannequin := preload("res://adapters/godot/mannequin.gd")
 var film := ""
 var film_head := false      # --head: a near three-quarter front camera on her head and chest, gaze ray and things she senses drawn (brain films)
 var film_marks: MeshInstance3D
+var film_fill: DirectionalLight3D     # (head upgrade) face fill light in --head films
 var film_snd := []          # [pos, t] of each sound as it rings, drawn 1 s
 var film_close := false     # --close: a near side-on camera that frames the body (Gary: clearer, bigger shots of the body), 30 fps
 var cam_side := Vector3.ZERO
@@ -196,7 +199,7 @@ func _initialize() -> void:
 			if idx % shard.y == shard.x and not (film != "" and is_known and only == ""): keep.append(c)     # --only films a KNOWN case too
 		cases = keep
 	if film != "":
-		root.size = Vector2i(800, 450)
+		root.size = Vector2i(1280, 720) if film_head else Vector2i(800, 450)     # (head upgrade: the face close-up at 720p)
 		var rock := StandardMaterial3D.new(); rock.albedo_color = Color(0.78, 0.72, 0.6); rock.roughness = 0.95
 		Worlds.visual_material = rock
 		var cl := CanvasLayer.new(); root.add_child(cl)
@@ -332,6 +335,7 @@ func _define_cases() -> void:
 			var k = _pk(Vector2(0, 0.6) if tt < 7.0 else (Vector2(0, 1) if tt < 13.0 else Vector2.ZERO))
 			k.thrust = 1.0 if (tt >= 7.0 and tt < 13.0) else 0.0
 			return k, {"breath": {"exert": [14.0, 19.0], "land_lock": [[4.0, 7.0], [10.0, 13.0]]}})
+	_hd_cases()     # (head upgrade)
 	for m in monkey_runs:
 		var seed := 2000 + m
 		_case("BM monkey seed %d (%ds)" % [seed, int(monkey_secs)], "shore", {"start": Vector3(0, 1.05, 4), "waves": 0.5 if m % 2 == 1 else 0.0},
@@ -383,6 +387,7 @@ func _start_next() -> bool:
 	rig = Rig.new()
 	if film != "":
 		_film_setup()
+	if fault == "eyelimit": rig.head_fault = "eyelimit"     # (head upgrade) planted: eyes without their limits
 	if fault == "len": rig.shin_len = 0.30          # planted: rig solves with a short shin, the checker knows the real one
 	wq = WorldQuery.new(world.get_world_3d(), 1)
 	wq.exclude.append(body.get_rid())
@@ -441,6 +446,7 @@ func _physics_process(dt: float) -> bool:
 		rec.hitch_acc = 0.0
 	if fault == "breathjump" and rec.ticks == tick * 5 and rig.brain.get("breath_phase") != null:
 		rig.brain.breath_phase = fposmod(rig.brain.breath_phase + 0.35, 1.0)     # planted: the breath skips a third of a cycle
+	if cur.opts.has("look"): rig.brain.engage_objective_focus("look", cur.opts.look.call(t))     # (head upgrade)
 	var pose: Dictionary = rig.update_swim(rdt, s, null, t, renv, _brain_sense(s) if cur.opts.has("brain") else null)
 	if fault == "jitter":
 		_shift_pose(pose, Vector3(0.002 if int(rec.ticks) % 2 == 0 else -0.002, 0, 0))   # planted: the whole body shaking +-2 mm
@@ -753,6 +759,7 @@ func _check(p: Dictionary, dt: float) -> void:
 		if ov > 0.02: _fail("J8", "legs overlap %.0f mm" % (ov * 1000.0))
 	if cur.opts.has("brain"): _check_brain(p, dt)
 	_check_breath(p, dt)
+	_check_head(p, dt)     # (head upgrade)
 	if cur.opts.has("act"): _check_act(p, dt)
 	for side in ["L", "R"]:
 		var arm3: Dictionary = p["arm" + side]
@@ -788,6 +795,7 @@ func _jitter(st: Dictionary, key: String, x: Vector3, amp: float) -> void:
 		rv.append(t)
 		while rv.size() > 0 and rv[0] < t - JIT_WIN: rv.pop_front()
 		rec.worst.jitter = maxi(rec.worst.get("jitter", 0), rv.size())
+		if OS.has_environment("BS_JITBY"): rec.jit_by = rec.get("jit_by", {}); rec.jit_by[key] = maxi(rec.jit_by.get(key, 0), rv.size())
 		if rv.size() > JIT_MAX: _fail("J11", "%s jitters: %d reversals in %.1f s" % [key, rv.size(), JIT_WIN])
 
 ## planted fault: move every point of the pose by off (bones keep their lengths)
@@ -1037,7 +1045,8 @@ func _film_frame(pose: Dictionary) -> void:
 	frame_i += 1
 
 func _film_head(pose: Dictionary) -> void:
-	# three-quarter front of her face, 1.6 m out, framing head and chest; follows her heading slowly
+	# (head upgrade: tighter) near front of her face, 0.8 m out, the face filling the frame so the eyes, lids and jaw
+	# read; follows her heading slowly
 	var head: Vector3 = pose.headMat.origin
 	var fw: Vector3 = -pose.chestBasis.z if pose.has("chestBasis") else Vector3.FORWARD
 	if pose.has("bodyRight"):
@@ -1049,11 +1058,14 @@ func _film_head(pose: Dictionary) -> void:
 	if cam_side == Vector3.ZERO or frame_i == 0: cam_side = fw
 	cam_side = cam_side.slerp(fw, 0.04).normalized()
 	var sv := cam_side.cross(Vector3.UP).normalized()
-	var tgt := head + Vector3(0, -0.12, 0)
-	var cp := tgt + (cam_side * 1.25 + sv * 0.9).normalized() * 2.3 + Vector3(0, 0.3, 0)
-	cam.fov = 34.0
+	var tgt := head + (pose.headMat.basis.y as Vector3).normalized() * 0.06 + Vector3(0, -0.03, 0)
+	var cp := tgt + (cam_side * 1.6 + sv * 0.55).normalized() * 0.78 + Vector3(0, 0.06, 0)
+	cam.fov = 30.0
 	cam.global_position = cam.global_position.lerp(cp, 0.3) if frame_i > 0 else cp
 	cam.look_at(tgt)
+	if film_fill == null or not is_instance_valid(film_fill):     # a soft fill from the camera's side: the face is not in shade
+		film_fill = DirectionalLight3D.new(); film_fill.light_energy = 0.7; film_fill.light_intensity_lux = PI * 0.6; world.add_child(film_fill)
+	film_fill.global_transform = Transform3D(cam.global_transform.basis.rotated(Vector3.UP, 0.4), cam.global_position)
 	# marks: gaze ray (yellow), the circling fish (orange), sounds (red, 1 s)
 	if film_marks == null or not is_instance_valid(film_marks):
 		film_marks = MeshInstance3D.new()
@@ -1072,9 +1084,15 @@ func _film_head(pose: Dictionary) -> void:
 		im.surface_set_color(Color(1, 0.9, 0.2))
 		var eye: Vector3 = head + (pose.headMat.basis.y as Vector3).normalized() * 0.1
 		var gd: Vector3 = (o.gazeDirWorld as Vector3).normalized()
-		for q in [Vector3.ZERO, Vector3(0.004, 0, 0), Vector3(0, 0.004, 0), Vector3(0, 0, 0.004)]:
-			im.surface_add_vertex(eye + q)
+		for q in [Vector3.ZERO, Vector3(0.002, 0, 0), Vector3(0, 0.002, 0)]:
+			im.surface_add_vertex(eye + q + gd * 0.25)
 			im.surface_add_vertex(eye + q + gd * 1.6)
+	if pose.has("skel") and pose.skel.has("eye_l"):     # (head upgrade) where each eye looks (cyan): the eyes lead
+		im.surface_set_color(Color(0.3, 0.95, 1.0))
+		for sd in ["eye_l", "eye_r"]:
+			var ex: Transform3D = pose.skel[sd]
+			im.surface_add_vertex(ex.origin - ex.basis.z.normalized() * 0.03)
+			im.surface_add_vertex(ex.origin - ex.basis.z.normalized() * 0.6)
 	var marks := []
 	if rec.has("brain") and rec.brain.swim:
 		marks.append([head + Vector3(3.0 * cos(t * 0.6), 0.6 * sin(t * 0.9), 3.0 * sin(t * 0.6)) - Vector3(0, 0, 0), Color(1, 0.55, 0.1), 0.18])
@@ -1095,7 +1113,12 @@ func _film_head(pose: Dictionary) -> void:
 	var bs: float = o.get("breathSignal", 0.0)
 	var bar := "#".repeat(int(round((bs * 0.5 + 0.5) * 12.0)))
 	var fails0: String = "  ".join(rec.fail.map(func(f): return f.substr(0, f.find(" at t="))))
-	label.text = "%s\nt = %.1f s   looking at: %s   breath %s\n%s" % [cur.name, t, fid if fid != null else "-", bar, "all checks holding" if fails0 == "" else "FAILING: " + fails0]
+	var hdg: Dictionary = rig.head_dbg
+	var eye_txt := ""
+	if not hdg.is_empty():
+		eye_txt = "   eyes %+.0f / %+.0f deg  lids %s  jaw %.0f deg" % [rad_to_deg((hdg.eye_l.x + hdg.eye_r.x) * 0.5), rad_to_deg((hdg.eye_l.y + hdg.eye_r.y) * 0.5),
+			"BLINK" if hdg.closure > 0.05 else "open", rad_to_deg(hdg.jaw)]
+	label.text = "%s\nt = %.1f s   looking at: %s   breath %s%s\n%s" % [cur.name, t, fid if fid != null else "-", bar, eye_txt, "all checks holding" if fails0 == "" else "FAILING: " + fails0]
 	RenderingServer.frame_post_draw.connect(_film_save.bind("%s/f%05d.png" % [film_case_dir, frame_i]), CONNECT_ONE_SHOT)
 	frame_i += 1
 
@@ -1192,6 +1215,7 @@ func _breath_end() -> String:
 func _end_case() -> void:
 	var brain_txt: String = _brain_end() if cur.opts.has("brain") else ""
 	brain_txt += _breath_end()
+	brain_txt += _head_end()     # (head upgrade)
 	if cur.opts.has("act"): brain_txt += _act_end()
 	var ok: bool = rec.fail.is_empty()
 	var w: Dictionary = rec.worst
@@ -1205,6 +1229,7 @@ func _end_case() -> void:
 	w["jerk_p95"] = jerk_p95
 	w["jerk_p50"] = jerk_p50
 	summary += ", jerk p50 %.0f p95 %.0f m/s3, jitter %d rev/%.1fs" % [jerk_p50, jerk_p95, w.get("jitter", 0), JIT_WIN] + brain_txt
+	if OS.has_environment("BS_JITBY"): summary += "\n        jitter by signal %s" % str(rec.get("jit_by", {}))
 	if OS.has_environment("BS_JERK"):
 		for k in rec.jk_by: summary += "\n        jerk %s rms %.0f" % [k, sqrt(rec.jk_by[k] / maxf(1.0, rec.jerk.size()))]
 	var fails: Array = rec.fail.map(func(f): return "%s  (%d ticks)" % [f, rec.count.get(f.substr(0, f.find(" ")), 1)])
@@ -1235,6 +1260,230 @@ func _finish() -> bool:
 	quit(0 if gate_ok else 1)
 	return true
 
+# ---------------------------------------------------------------- head upgrade BEGIN (J40-J44, cases B63-B67)
+## J40 eyes     every eye's yaw / pitch in the head inside +-35 / +-25 deg (+0.6 deg), sitting in its socket (0.5 mm);
+##              each eye's world direction passes J11 (band JIT_AMP_DIR .. 15x: micro-saccades are in it and must stay
+##              rare, intentional saccades over 3 deg are not jitter) while it is free (inside its soft knee; pinned at a
+##              limit it rides the head, whose facing J11 checks)
+## J41 lead     on every saccade over HD_LEAD_MIN the eyes reach 80 % of their move (first HD_SACC_WIN) before the head has made half of its
+##              own (head moving > 0.06 rad in the next 1.2 s); "lead" cases need at least that many such shifts
+## J42 blinks   each blink (lid closure > 0.02) lasts HD_BLINK_DUR; blinks start HD_BLINK_GAP apart (refractory .. the
+##              longest spontaneous interval); the upper lid stays concentric with its eye and between the closed edge
+##              and its open limit, never under HD_LID_OPEN_MIN while the eye is open, at the closed edge when shut;
+##              "blink_rate" cases: blinks come faster in the exertion window than at rest; "shift_blinks": at least
+##              that many blinks with gaze shifts
+## J43 jaw      between 0 and JAW_MAX, turning at most HD_JAW_RATE; closed (< 0.01 rad) after 1 s with the head under
+##              water; "jaw" windows: closed / open (>= HD_JAW_OPEN)
+## J44 neck     28 bones; neck_lower and neck_upper keep NECK_SEG (0.5 mm), neck_upper ends at the skull base 2 cm or
+##              less from the head bone
+const HD_EYE_PAD := 0.01
+const HD_LEAD_MIN := 0.15
+const HD_SACC_WIN := 0.10      # s: the eyes' own move (a saccade is 20-55 ms; pinned at a limit they then ride the head)
+const HD_BLINK_DUR := Vector2(0.08, 0.22)
+const HD_BLINK_GAP := Vector2(0.55, 6.3)
+const HD_LID_OPEN_MIN := -0.40
+const HD_JAW_RATE := 1.2
+const HD_JAW_OPEN := 0.045
+const HD_BONES := 28
+
+## a point at yaw offset / pitch from where she faces, d metres from her eye (the head cases' targets)
+func _hd_around(yaw_off: float, pitch: float, d: float) -> Vector3:
+	var s = body.motor.swimmer
+	return s.pos + BM.fwd(s.yaw + yaw_off, pitch) * d
+
+func _hd_cases() -> void:
+	var hf := {"start": Vector3(-8, 0.05, 0)}
+	var seq := [2.6, -2.6, 0.0, 1.6, -1.6, 0.7, -2.6, 2.6, 0.0]     # rad: +-150 deg and between
+	_case("B63 head: fast look-around, targets at +-150 deg", "wall", hf, 16.0, func(_t): return _pk(),
+		{"look": func(tt):
+			var i := int(tt / 1.6) % seq.size()
+			return _hd_around(seq[i], 0.25 * sin(float(i) * 1.7), 2.2),
+		"head": {"lead": 4, "shift_blinks": 1}})
+	_case("B64 head: near object, the eyes converge", "wall", hf, 14.0, func(_t): return _pk(),
+		{"look": func(tt):
+			if tt >= 4.0 and tt < 10.0: return _hd_around(0.12 * sin(tt * 0.9), -0.12, 0.32)
+			return _hd_around(0.0, -0.05, 4.0),
+		"head": {"verge": [[5.5, 9.5]], "far": [[2.0, 4.0], [12.0, 14.0]]}})
+	_case("B65 head: rest, sprint, rest: blink rate and mouth breathing", "wall", {"start": Vector3(-8, 0.05, 18)}, 34.0,
+		func(tt):
+			var k = _pk(Vector2(0, 1) if (tt >= 12.0 and tt < 18.0) else Vector2.ZERO)
+			k.thrust = 1.0 if (tt >= 12.0 and tt < 18.0) else 0.0
+			return k, {"head": {"blink_rate": {"rest": [0.0, 12.0], "exert": [18.0, 30.0]}, "jaw": {"closed": [2.0, 12.0], "open": [16.0, 26.0]}}})
+	_case("B66 head: swim prone, looking up and forward", "pool", {"start": Vector3(0, -8, 0), "mode": Motor.Mode.SWIM}, 14.0,
+		func(tt): return _pk(Vector2(0, 0.6), 0.0, 0.9 if tt < 5.0 else (0.0 if tt < 10.0 else -0.6)), {"head": {"jaw": {"closed": [1.5, 14.0]}}})
+	_case("B67 head: idle long stare", "wall", hf, 30.0, func(_t): return _pk(),
+		{"look": func(_tt): return _hd_around(0.15, -0.10, 1.6), "head": {"stare": [3.0, 30.0]}})
+
+func _check_head(p: Dictionary, dt: float) -> void:
+	if not p.has("skel"): return
+	var sk: Dictionary = p.skel
+	if not rec.has("hd"):
+		rec.hd = {"blinks": [], "b_on": -1.0, "closed": false, "leads": 0, "lead_ok": 0, "pending": [], "sacc_n": -1,
+			"jaw_prev": NAN, "under_t": 0.0, "jaw_max": 0.0, "eye_max": 0.0, "verge": {}, "stare_dev": 0.0, "stare_sacc": 0,
+			"micro0": -1, "micro1": 0, "jaw_win": {}, "shift_blinks": 0, "lid_min_open": 9.0}
+	var h: Dictionary = rec.hd
+	if OS.has_environment("HD_DEBUG") and int(rec.ticks) % int(OS.get_environment("HD_DEBUG")) == 0:
+		var d: Dictionary = rig.head_dbg
+		var hb0: Basis = (sk.head as Transform3D).basis.orthonormalized()
+		var g: Vector3 = d.goal
+		print("  t=%.2f eyeL %s eyeR %s goal-in-head %s fix-goal %.3f dist %.2f clo %.2f lid %.2f sacc %d micro %d" % [t, (d.eye_l * 57.3).snappedf(0.1), (d.eye_r * 57.3).snappedf(0.1),
+			Vector3(g.dot(hb0.x), g.dot(hb0.y), g.dot(-hb0.z)).snappedf(0.01), (d.fix as Vector3).angle_to(g), d.dist, d.closure, d.lid_l, d.sacc_n, d.micro_n])
+	# J44
+	var n := 0
+	for k in sk:
+		if sk[k] is Transform3D: n += 1
+	if n != HD_BONES: _fail("J44 neck", "%d bones, not %d" % [n, HD_BONES]); return
+	var hd: Transform3D = sk.head
+	var hb := hd.basis.orthonormalized()
+	var nl: Transform3D = sk.neck_lower
+	var nu: Transform3D = sk.neck_upper
+	var l1 := nl.origin.distance_to(nu.origin)
+	var top: Vector3 = nu.origin + nu.basis.y.normalized() * rig.NECK_SEG
+	if absf(l1 - rig.NECK_SEG) > 0.0005: _fail("J44 neck", "neck_lower %.1f mm (%.0f)" % [l1 * 1000.0, rig.NECK_SEG * 1000.0])
+	if top.distance_to(hd.origin) > 0.02: _fail("J44 neck", "neck_upper ends %.0f mm from the head" % (top.distance_to(hd.origin) * 1000.0))
+	# J40
+	var hx := hb.x; var hy := hb.y; var hf := -hb.z
+	var eyes := {}
+	for sd in ["l", "r"]:
+		var e: Transform3D = sk["eye_" + sd]
+		var f: Vector3 = -e.basis.z.normalized()
+		var yaw := atan2(f.dot(hx), f.dot(hf))
+		var pitch := asin(clampf(f.dot(hy), -1.0, 1.0))
+		eyes[sd] = Vector2(yaw, pitch)
+		h.eye_max = maxf(h.eye_max, maxf(absf(yaw) / rig.EYE_YAW_MAX, absf(pitch) / rig.EYE_PITCH_MAX))
+		if absf(yaw) > rig.EYE_YAW_MAX + HD_EYE_PAD or absf(pitch) > rig.EYE_PITCH_MAX + HD_EYE_PAD:
+			_fail("J40 eyes", "eye_%s at yaw %.0f / pitch %.0f deg in the head" % [sd, rad_to_deg(yaw), rad_to_deg(pitch)])
+		var sock: Vector3 = hd * (rig.EYE_L if sd == "l" else rig.EYE_R)
+		if e.origin.distance_to(sock) > 0.0005: _fail("J40 eyes", "eye_%s %.1f mm out of its socket" % [sd, e.origin.distance_to(sock) * 1000.0])
+		# pinned at its soft limit the eye is carried by the head (J11 checks the head's facing): it counts while it is free
+		if Vector2(yaw / rig.EYE_YAW_MAX, pitch / rig.EYE_PITCH_MAX).length() < rig.EYE_SOFT_KNEE:
+			_jitter(prev.jit, "eye_" + sd + " direction", f, JIT_AMP_DIR)
+		elif prev.jit.has("eye_" + sd + " direction"):
+			var js: Dictionary = prev.jit["eye_" + sd + " direction"]
+			js.x = f; js.d = Vector3.ZERO; js.len = 0.0; js.last = 0.0
+		# J42 lid: concentric, between its stops
+		var lid: Transform3D = sk["lid_" + sd]
+		if lid.origin.distance_to(e.origin) > 0.0001: _fail("J42 lid", "lid_%s off its eye's centre" % sd)
+		var lf: Vector3 = -lid.basis.z.normalized()
+		var la := atan2(lf.dot(hy), lf.dot(hf))
+		if la < rig.LID_CLOSED - 0.01 or la > rig.LID_UP_MAX + 0.01: _fail("J42 lid", "lid_%s edge at %.2f rad (%.2f..%.2f)" % [sd, la, rig.LID_CLOSED, rig.LID_UP_MAX])
+		var clo: float = rig.head_dbg.get("closure", 0.0)
+		if clo <= 0.0:
+			h.lid_min_open = minf(h.lid_min_open, la)
+			if la < HD_LID_OPEN_MIN: _fail("J42 lid", "lid_%s down to %.2f rad with the eye open" % [sd, la])
+		if clo >= 0.999 and la > rig.LID_CLOSED + 0.01: _fail("J42 lid", "lid_%s shut but its edge at %.2f" % [sd, la])
+	var ew: Vector3 = (-(sk.eye_l as Transform3D).basis.z - (sk.eye_r as Transform3D).basis.z).normalized()
+	# J41: the eyes lead the head
+	var sn: int = rig.head_dbg.get("sacc_n", 0)
+	if h.sacc_n >= 0 and sn > h.sacc_n and float(rig.head_dbg.get("sacc_amp", 0.0)) > HD_LEAD_MIN:
+		h.pending.append({"t0": t, "e0": ew, "h0": hf, "emax": 0.0, "hmax": 0.0, "et": [], "ht": []})
+	h.sacc_n = sn
+	var keep := []
+	for q in h.pending:
+		var ea: float = (q.e0 as Vector3).angle_to(ew)
+		var ha: float = (q.h0 as Vector3).angle_to(hf)
+		if t - q.t0 <= HD_SACC_WIN: q.et.append([t, ea]); q.emax = maxf(q.emax, ea)
+		q.ht.append([t, ha]); q.hmax = maxf(q.hmax, ha)
+		if t - q.t0 < 1.2: keep.append(q); continue
+		if q.hmax < 0.06: continue
+		var te := INF; var th := INF
+		for r in q.et:
+			if r[1] >= 0.8 * q.emax: te = r[0]; break
+		for r in q.ht:
+			if r[1] >= 0.5 * q.hmax: th = r[0]; break
+		h.leads += 1
+		if te <= th: h.lead_ok += 1
+		else: _fail("J41 lead", "the head made half its turn (%.2f s) before the eyes arrived (%.2f s)" % [th - q.t0, te - q.t0])
+	h.pending = keep
+	# J42 blinks
+	var clo2: float = rig.head_dbg.get("closure", 0.0)
+	if clo2 > 0.02 and h.b_on < 0.0:
+		h.b_on = t; h.b_dt = dt
+		var bl: Array = h.blinks
+		if bl.size() > 0 and t - float(bl[bl.size() - 1][0]) < HD_BLINK_GAP.x: _fail("J42 blink", "blink %.2f s after the last" % (t - float(bl[bl.size() - 1][0])))
+		if rig.head_dbg.get("blink_kind", "") == "shift": h.shift_blinks += 1
+		bl.append([t, 0.0])
+	elif h.b_on >= 0.0 and clo2 > 0.02: h.b_dt = maxf(h.b_dt, dt)
+	elif clo2 <= 0.02 and h.b_on >= 0.0:
+		var dur: float = t - h.b_on
+		h.blinks[h.blinks.size() - 1][1] = dur
+		var slack := maxf(0.0, maxf(h.b_dt, dt) - 1.0 / 30.0)     # measured to the rig's own steps (B40's hitches are long ones)
+		if dur < HD_BLINK_DUR.x - slack or dur > HD_BLINK_DUR.y + slack: _fail("J42 blink", "blink lasted %.0f ms" % (dur * 1000.0))
+		h.b_on = -1.0
+	var last_b: float = float(h.blinks[h.blinks.size() - 1][0]) if h.blinks.size() > 0 else 0.0
+	if t - last_b > HD_BLINK_GAP.y + 2.5 * (1.0 if h.blinks.size() == 0 else 0.0) + 0.1: _fail("J42 blink", "no blink for %.1f s" % (t - last_b))
+	# J43 jaw
+	var jw: Transform3D = sk.jaw
+	var jf: Vector3 = -jw.basis.z.normalized()
+	var jang := -atan2(jf.dot(hy), jf.dot(hf))
+	h.jaw_max = maxf(h.jaw_max, jang)
+	if jang < -0.005 or jang > rig.JAW_MAX + 0.005: _fail("J43 jaw", "jaw at %.3f rad (0..%.2f)" % [jang, rig.JAW_MAX])
+	if is_finite(h.jaw_prev) and absf(jang - h.jaw_prev) / maxf(dt, 1e-4) > HD_JAW_RATE: _fail("J43 jaw", "jaw turned %.2f rad/s" % (absf(jang - h.jaw_prev) / dt))
+	h.jaw_prev = jang
+	h.under_t = h.under_t + dt if rig.head_dbg.get("under", false) else 0.0
+	if h.under_t > 1.0 and jang > 0.01: _fail("J43 jaw", "mouth open %.3f rad under water" % jang)
+	# windows
+	var spec: Dictionary = cur.opts.get("head", {})
+	var jw_spec: Dictionary = spec.get("jaw", {})
+	for kk in jw_spec:
+		if _in_win(jw_spec[kk]): h.jaw_win[kk] = maxf(h.jaw_win.get(kk, 0.0), jang) if kk == "closed" else maxf(h.jaw_win.get(kk, 0.0), jang)
+	var verge: float = eyes.r.x - eyes.l.x     # eyes turned toward each other (right eye left, left eye right) is negative
+	for kk in ["verge", "far"]:
+		for w in spec.get(kk, []):
+			if _in_win(w):
+				var vv: Dictionary = h.verge
+				if kk == "verge": vv.near_min = minf(vv.get("near_min", 9.0), -verge)
+				else: vv.far_max = maxf(vv.get("far_max", 0.0), absf(verge))
+	if _in_win(spec.get("stare")):
+		var g = rig.brain_out.get("gazeGoalPos")
+		if g is Vector3:
+			var cyc: Vector3 = hd * ((rig.EYE_L + rig.EYE_R) * 0.5)
+			h.stare_dev = maxf(h.stare_dev, ew.angle_to(((g as Vector3) - cyc).normalized()))
+		if h.micro0 < 0: h.micro0 = rig.head_dbg.get("micro_n", 0); h.sacc0 = sn
+		h.micro1 = rig.head_dbg.get("micro_n", 0); h.stare_sacc = sn - int(h.get("sacc0", sn))
+
+func _head_end() -> String:
+	if not rec.has("hd"): return ""
+	var h: Dictionary = rec.hd
+	var spec: Dictionary = cur.opts.get("head", {})
+	var durs := []
+	for b in h.blinks:
+		if b[1] > 0.0: durs.append(b[1])
+	durs.sort()
+	var txt := "; head: %d blinks (%s ms), %d gaze shifts led by the eyes of %d, eyes up to %.0f %% of range, lid open min %.2f, jaw max %.3f rad" % [
+		h.blinks.size(), "%.0f..%.0f" % [durs[0] * 1000.0, durs[durs.size() - 1] * 1000.0] if durs.size() > 0 else "-", h.lead_ok, h.leads, h.eye_max * 100.0,
+		h.lid_min_open, h.jaw_max]
+	if spec.has("lead") and h.lead_ok < int(spec.lead): _fail("J41 lead", "only %d gaze shifts led by the eyes (want %d)" % [h.lead_ok, spec.lead])
+	if spec.has("shift_blinks"):
+		txt += ", %d blinks with gaze shifts" % h.shift_blinks
+		if h.shift_blinks < int(spec.shift_blinks): _fail("J42 blink", "%d blinks with gaze shifts (want %d)" % [h.shift_blinks, spec.shift_blinks])
+	if spec.has("blink_rate"):
+		var br_: Dictionary = spec.blink_rate
+		var rate := func(w: Array) -> float:
+			var nb := 0
+			for b in h.blinks:
+				if b[0] >= w[0] and b[0] < w[1]: nb += 1
+			return nb / (w[1] - w[0]) * 60.0
+		var rr: float = rate.call(br_.rest); var re: float = rate.call(br_.exert)
+		txt += ", blinks/min rest %.1f exertion %.1f" % [rr, re]
+		if re <= rr: _fail("J42 blink", "no faster blinking after effort (%.1f vs %.1f /min)" % [re, rr])
+	var jws: Dictionary = spec.get("jaw", {})
+	if jws.has("closed"):
+		txt += ", jaw closed-window max %.3f" % h.jaw_win.get("closed", 0.0)
+		if h.jaw_win.get("closed", 0.0) > 0.01: _fail("J43 jaw", "mouth open %.3f rad where it should be closed" % h.jaw_win.closed)
+	if jws.has("open"):
+		txt += ", jaw open-window max %.3f" % h.jaw_win.get("open", 0.0)
+		if h.jaw_win.get("open", 0.0) < HD_JAW_OPEN: _fail("J43 jaw", "mouth only %.3f rad open after effort (>= %.3f)" % [h.jaw_win.get("open", 0.0), HD_JAW_OPEN])
+	if spec.has("verge"):
+		var nm: float = h.verge.get("near_min", 0.0); var fm: float = h.verge.get("far_max", 0.0)
+		txt += ", vergence near min %.3f far max %.3f rad" % [nm, fm]
+		if nm < 0.10 or fm > 0.03: _fail("J40 eyes", "vergence near %.3f (>= 0.10) far %.3f (<= 0.03) rad" % [nm, fm])
+	if spec.has("stare"):
+		var mn: int = h.micro1 - h.micro0
+		txt += ", stare: %d micro-saccades, %d saccades, off the target max %.3f rad" % [mn, h.stare_sacc, h.stare_dev]
+		if mn < 12 or h.stare_dev > 0.015 or h.stare_sacc > 3: _fail("J40 eyes", "stare: %d micro-saccades (>= 12), %d saccades (<= 3), %.3f rad off (<= 0.015)" % [mn, h.stare_sacc, h.stare_dev])
+	return txt
+# ---------------------------------------------------------------- head upgrade END
 # ---------------------------------------------------------------- rest and ride (B48-B55: stool, bench, bunk, dolphin, manta, turtle, whale shark, humpback)
 ## Each case is a sequence of steps [phase, delay, action]: wait until the act is in 'phase' ("" = any, "free" = no
 ## activity) for 'delay' seconds, then do 'action' (sit: request the rest, stand / rise / release, ride: latch onto the
