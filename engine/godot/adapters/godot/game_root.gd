@@ -311,6 +311,7 @@ func _load_pieces() -> void:
 	## the rest in the water-lit seabed material; solid pieces get trimesh collision (grass stays swim-through)
 	var seabed := ShaderMaterial.new(); seabed.shader = load("res://look/seabed_surface.gdshader")
 	if worldtex_dir != "": _ground = WorldTextures.make_material(worldtex_dir)
+	var floors := []
 	for f in DirAccess.get_files_at(pieces_dir):
 		if not f.ends_with(".glb"): continue
 		var sc := GlbLoader.load_scene(pieces_dir.path_join(f))   # imported GLBs bring their LODs and shadow meshes
@@ -325,3 +326,19 @@ func _load_pieces() -> void:
 		for mi in sc.find_children("*", "MeshInstance3D", true, false):
 			for s in mi.mesh.get_surface_count(): mi.set_surface_override_material(s, mat)
 			if not "seagrass" in lf: mi.create_trimesh_collision()
+			if mat == _ground and _ground != null: floors.append(mi)
+	if not floors.is_empty() and OS.get_environment("AO_SAND_BAKE") != "0":
+		_bake_sand.call_deferred(SandBake.island_rect(floors))
+
+## The sand's fixed noise fields baked once over the floor tiles (adapters/godot/sand_bake.gd): until it lands (a couple of frames)
+## the ground shader computes them itself, and the picture is the same either way.
+var sand_bake: SandBake = null
+func _bake_sand(rect: Rect2) -> void:
+	var b := SandBake.new()
+	await b.bake(self, rect)
+	sand_bake = b
+	if _ground is ShaderMaterial: b.apply(_ground)
+	print("SAND BAKE %dx%d texels over %.0fx%.0f m, %.1f MB, %.0f ms" % [b.px.x, b.px.y, b.box.z, b.box.w, b.bytes() / 1048576.0, b.ms])
+
+func set_sand_bake(on: bool) -> void:
+	if sand_bake and _ground is ShaderMaterial: _ground.set_shader_parameter("sand_on", 1.0 if on else 0.0)
