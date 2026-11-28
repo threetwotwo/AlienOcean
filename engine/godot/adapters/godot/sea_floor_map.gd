@@ -1,4 +1,4 @@
-## Sea floor map 0.1.2 (adapters/godot; water surface thread, 27 Nov 2026): what lies under the sea round the eye, seen
+## Sea floor map 0.1.3 (adapters/godot; water surface thread, 27 Nov 2026): what lies under the sea round the eye, seen
 ## straight down: its light (radiance, nits, as the world's own shaders light it at its depth: sun, net, sky, sand
 ## bounce) and its top height, for the mirror in the underside of the surface (where a reflected ray really lands:
 ## sand, grass, rock; lagoonwater v73/v87 read a baked floor map of the slice the same way, with stand-in colours).
@@ -7,7 +7,7 @@
 ## (snapped) whenever it moves far enough, so it follows the eye through an open world with nothing baked or streamed.
 ## Shader globals: water_floor_albedo (sampler2D: the floor's radiance in nits, linear; alpha 0 = nothing there),
 ## water_floor_height (sampler2D: world y = r / g, alpha 0 = nothing there),
-## water_floor_org (vec4: centre x, centre z, size m, 1 = valid).
+## water_floor_org (vec4: centre x, centre z, size m, 1 = valid), water_floor_mean (vec4: the mean radiance, nits; 1 = valid).
 class_name SeaFloorMap
 extends Node3D
 
@@ -66,6 +66,7 @@ static func declare_globals() -> void:
 	rs.global_shader_parameter_add("water_floor_albedo", rs.GLOBAL_VAR_TYPE_SAMPLER2D, null)
 	rs.global_shader_parameter_add("water_floor_height", rs.GLOBAL_VAR_TYPE_SAMPLER2D, null)
 	rs.global_shader_parameter_add("water_floor_org", rs.GLOBAL_VAR_TYPE_VEC4, Vector4(0, 0, 96, 0))
+	rs.global_shader_parameter_add("water_floor_mean", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
 	Engine.set_meta("floor_map_globals", true)
 
 func _ready() -> void:
@@ -102,3 +103,19 @@ func follow(eye: Vector3) -> void:
 	_pending -= 1
 	if _pending == 0:
 		RenderingServer.global_shader_parameter_set("water_floor_org", Vector4(centre.x, centre.y, size_m, 1.0))
+		_floor_mean()
+
+func _floor_mean() -> void:
+	## the floor's mean radiance in the map (nits; 32 x 32 samples, where something is drawn): the floor beyond the drawn
+	## floor (look/sea_bathy.gdshaderinc) takes its brightness from it, so the drawn floor and the floor beyond meet without
+	## a seam (0.1.3, 28 Nov). One read back per capture (the eye moving 12 m, or the light changing).
+	var img: Image = _vp_alb.get_texture().get_image()
+	if img == null: return
+	var w := img.get_width(); var h := img.get_height()
+	var sum := Vector3.ZERO; var n := 0
+	for y in range(w / 64, h, maxi(h / 32, 1)):
+		for x in range(w / 64, w, maxi(w / 32, 1)):
+			var c := img.get_pixel(x, y)
+			if c.a > 0.5: sum += Vector3(c.r, c.g, c.b); n += 1
+	var m := sum / maxf(float(n), 1.0)
+	RenderingServer.global_shader_parameter_set("water_floor_mean", Vector4(m.x, m.y, m.z, 1.0 if n > 64 else 0.0))

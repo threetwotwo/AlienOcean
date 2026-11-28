@@ -93,39 +93,81 @@
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
   },
   {
+   "store": "project files assets/world/lagoon_keyframe/",
+   "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py",
+   "path": "engine/godot/assets/world/lagoon_keyframe/SB_Skirt_4_bank.glb",
+   "md5": "421508d14f19affd3af23ccd89b4bed7",
+   "bytes": 113840
+  },
+  {
+   "store": "project files assets/world/lagoon_keyframe/",
+   "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py",
+   "path": "engine/godot/assets/world/lagoon_keyframe/gate_fall.json",
+   "md5": "ee6542ada1b5363f97e1d3a5e8885608",
+   "bytes": 1177350
+  },
+  {
+   "store": "project files assets/world/lagoon_keyframe/",
+   "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py",
+   "path": "engine/godot/assets/world/lagoon_keyframe/kf_LG_seagrass_m1_1_0_r.glb",
+   "md5": "9d7be551e900a97de93e9cc708174440",
+   "bytes": 2245508
+  },
+  {
    "path": "engine/godot/assets/world/lagoon_keyframe/kf_LG_seagrass_m2_0_1.glb",
-   "md5": "4d169e0e41b92c34f696baff3433cdfd",
-   "bytes": 2046380,
+   "md5": "22c3f5b35bf41ece078e4850e58c2683",
+   "bytes": 758200,
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
   },
   {
    "path": "engine/godot/assets/world/lagoon_keyframe/kf_LG_seagrass_m2_1_1.glb",
-   "md5": "362a863ef8ece3a7fd712f8602d314d5",
-   "bytes": 9492716,
+   "md5": "bcc2c90c6a9a1f04e9e6e0f1708e8518",
+   "bytes": 8490452,
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
+  },
+  {
+   "store": "project files assets/world/lagoon_keyframe/",
+   "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py",
+   "path": "engine/godot/assets/world/lagoon_keyframe/kf_LG_seagrass_m2_1_1_L1_r.glb",
+   "md5": "d8dbad1c68f6c66b6d01423a599b88ef",
+   "bytes": 2223832
   },
   {
    "path": "engine/godot/assets/world/lagoon_keyframe/kf_LG_seagrass_m2_1_2.glb",
-   "md5": "b41a5ebfc601898152f551a6fa3b2180",
-   "bytes": 8120060,
+   "md5": "03b0956330a3557ce36acbe109844797",
+   "bytes": 7929836,
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
   },
   {
+   "store": "project files assets/world/lagoon_keyframe/",
+   "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py",
+   "path": "engine/godot/assets/world/lagoon_keyframe/kf_LG_seagrass_m2_1_2_r.glb",
+   "md5": "bb1d1af6aefcc19b9af3c187129616a6",
+   "bytes": 403404
+  },
+  {
    "path": "engine/godot/assets/world/lagoon_keyframe/kf_LG_seagrass_m2_2_0.glb",
-   "md5": "353590891f748629fdab6a27032e56a0",
-   "bytes": 2599004,
+   "md5": "4b09f5a3decf7fdb781a1b17cfc090b9",
+   "bytes": 77808,
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
   },
   {
    "path": "engine/godot/assets/world/lagoon_keyframe/kf_LG_seagrass_m2_2_1.glb",
-   "md5": "550d7146596f03ef053a461a3ddff0e3",
-   "bytes": 10850112,
+   "md5": "631936382a00e82f621e224d5a396a16",
+   "bytes": 9731376,
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
+  },
+  {
+   "store": "project files assets/world/lagoon_keyframe/",
+   "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py",
+   "path": "engine/godot/assets/world/lagoon_keyframe/kf_LG_seagrass_m2_2_1_L1_r.glb",
+   "md5": "6f042e6278f67b9f3a157817b5c03534",
+   "bytes": 192
   },
   {
    "path": "engine/godot/assets/world/lagoon_keyframe/kf_boulder_1.glb",
@@ -140,6 +182,13 @@
    "bytes": 1082548,
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
+  },
+  {
+   "store": "project files assets/world/lagoon_keyframe/",
+   "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py",
+   "path": "engine/godot/assets/world/lagoon_keyframe/kf_coral_rubble.glb",
+   "md5": "8a2f7728f002a0a27f0ab6dd4faf5b7c",
+   "bytes": 94231064
   },
   {
    "path": "engine/godot/assets/world/lagoon_keyframe/kf_finger_4.glb",
@@ -161,6 +210,20 @@
    "bytes": 2427156,
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
+  },
+  {
+   "store": "project files assets/world/lagoon_keyframe/",
+   "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py",
+   "path": "engine/godot/assets/world/lagoon_keyframe/pieces.json",
+   "md5": "1fd897812cd01b3d78cfcd6c09c20602",
+   "bytes": 6368
+  },
+  {
+   "store": "project files assets/world/lagoon_keyframe/",
+   "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py",
+   "path": "engine/godot/assets/world/lagoon_keyframe/provenance.json",
+   "md5": "42bbc619a98753ab56116ceefb3df4ad",
+   "bytes": 1201
   },
   {
    "path": "engine/godot/assets/creatures/caranx_melampygus/fish.glb",

@@ -1,4 +1,4 @@
-// Sea seen from above 0.5.0 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
+// Sea seen from above 0.6.0 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
 // 0.2.0 (28 Nov): the water's own colour, one model from the lagoon's sand to the open sea (Rrs x Ed where the floor
 // fades; it read jet black: the lagoon's path only saw the floor).
 // 0.5.0 (28 Nov): the sun's glitter sparkles (the tank's moon sparkle, run for the sun).
@@ -20,6 +20,7 @@ render_mode unshaded, cull_back, world_vertex_coords, fog_disabled, shadows_disa
 #include "res://look/caustics.gdshaderinc"
 #include "res://look/sky_dome.gdshaderinc"
 #include "res://look/sea_waves.gdshaderinc"
+#include "res://look/sea_bathy.gdshaderinc"
 global uniform vec3 water_sun_air;
 global uniform float water_sun_lux;
 #include "res://look/sea_foam_shade.gdshaderinc"   // the whitecaps' look (after the lines above: it uses them)
@@ -165,7 +166,13 @@ void fragment() {
 	// and then nothing of the screen shows through either)
 	bool nofloor = depth <= 1e-7;
 	float H = nofloor ? 1e4 : max(wi.z - q.z, 0.0);
-	if (nofloor) under -= scene * exp(-c * Lp);
+	if (nofloor) {
+		// 0.6.0: past the drawn floor the floor goes on (look/sea_bathy.gdshaderinc: the lagoon's sand to the reef, then down
+		// the fore reef to the open ocean), seen as the drawn floor is: its sand at that depth, faded on the way back up
+		H = sea_bathy_depth(vec2(wi.x, -wi.y));
+		float Lb = min(min(H, 60.0) / max(-T.z, 0.05), 400.0);
+		under = (sea_bathy_sand(H) * exp(-c * Lb) + w_glow(sea_gdt(T), 0.0, Lb)) * water_exposure;
+	}
 	float Ed = water_sun_lux * max(water_sun_air.y, 0.0) + PI * water_sky_nits;   // lux on the level sea
 	vec3 rrs = mix(water_rrs, water_rrs.z * vec3(0.03, 0.55, 1.0), sea_open_teal) * sea_open_gain;
 	under += rrs * Ed / 0.98 * (vec3(1.0) - exp(-(water_kd + water_ku) * H)) * water_exposure;

@@ -511,6 +511,28 @@ func _run() -> void:
 		var gl: Array = v.glide_share_min_max
 		var sync_ok: bool = gl.is_empty() or gl[1] < 0.9
 		_add("S17", "no clones: drawn size CV >= 0.10, tail-beat phases spread (resultant <= 0.3), body bend spread >= 0.2, drawn heading spread >= 12 deg (circular SD), never 90 % of phrase-swimming fish gliding at once", v.heading_sd_deg >= 12.0 and v.size_cv >= 0.10 and v.phase_resultant <= 0.3 and v.bend_sd >= 0.2 and sync_ok, res)
+	# S19: shallow water (test level, 28 Nov: "trevally schools sit at or near the waterline in the 4 m lagoon"; Fable:
+	# "a flat clump"). 160 trevally at the export's 52 cm in 4 m of water (floor y -20, surface y -16), 40 s: how close
+	# fish come to the surface and the floor, and their spacing.
+	if _want("S19"):
+		_new_world(); await _settle_physics()
+		var s := FishSchool.new()
+		s.species_id = "trevally"; s.count = 160; s.seed_ = 4; s.home = Vector3(0, -18, 0); s.tethered = true; s.threaded = true
+		s.use_asset = false; s.body_m = 0.52113; s.process_mode = Node.PROCESS_MODE_DISABLED
+		s.water_y = func(_x, _z, _t): return -16.0
+		world.add_child(s)
+		var rec := await _run_school(s, 40.0, 1.0 / 30.0)
+		var sim = s.sim
+		var near_surf := 0; var near_floor := 0; var dmin_s := INF; var dmin_f := INF
+		for i in sim.N:
+			var wp: Vector3 = sim.world_pos(i)
+			dmin_s = minf(dmin_s, -16.0 - wp.y); dmin_f = minf(dmin_f, wp.y + 20.0)
+			if -16.0 - wp.y < 0.75: near_surf += 1
+			if wp.y + 20.0 < 0.4: near_floor += 1
+		var m: Dictionary = sim.metrics()
+		var inv := _invariants(rec, sim.p)
+		_add("S19", "shallow water (4 m, 52 cm trevally): nobody within 0.75 m of the surface or 0.4 m of the floor, spacing NND >= 0.9 BL (not a flat clump)", near_surf == 0 and near_floor == 0 and m.nnd_med >= 0.9 and inv.S4 and inv.S5,
+			{"near_surface": near_surf, "near_floor": near_floor, "min_below_surface_m": snappedf(dmin_s, 0.01), "min_above_floor_m": snappedf(dmin_f, 0.01), "nnd_med_BL": snappedf(m.nnd_med, 0.01), "P": snappedf(m.P, 0.01)})
 	if _want("S10"):
 		_new_world(); await _settle_physics()
 		var s := _school("lagoon_baitfish", 120, 2, Vector3(0, -6, 0), true, true)

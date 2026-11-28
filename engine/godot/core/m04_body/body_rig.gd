@@ -412,10 +412,10 @@ func _follow_through(skel: Dictionary, dt: float, s) -> void:
 ## The elbow's bend has soft limits: it slows into its stops (straight, and fully bent) instead of hitting them.
 ## A small share of every target is the relaxed pose (upper arm hanging a little forward, elbow bent ~40 deg), so
 ## nothing is ever held rigidly.
-const SOFT_W_ELBOW := 13.0        # spring rate, rad/s
-const SOFT_W_HAND := 11.0
-const SOFT_Z := 0.62              # damping ratio: soft, one small overshoot
-const SOFT_NEUTRAL := 0.10        # share of the relaxed pose in every target
+const SOFT_W_ELBOW := 10.0        # spring rate, rad/s
+const SOFT_W_HAND := 6.5         # (Gary: elbows looser) the forearm is a loose pendulum on the elbow
+const SOFT_Z := 0.45              # damping ratio: loose, a visible overshoot that settles
+const SOFT_NEUTRAL := 0.15        # share of the relaxed pose in every target
 const SOFT_LIMIT_LO := 0.10       # elbow flexion stops (rad) and the soft zone before them
 const SOFT_LIMIT_HI := 2.45
 const SOFT_ZONE := 0.35
@@ -1849,7 +1849,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			# position in front)
 			var fl := ph * (lerpf(0.32, 0.65, rb) if ph > 0.0 else lerpf(0.40, 0.85, rb))       # shoulder flexion (rad)
 			var abd := lerpf(0.06, 0.10, rb)                                                      # out from the side
-			var elb := lerpf(lerpf(0.30, 0.50, ph * 0.5 + 0.5), lerpf(1.15, 1.70, ph * 0.5 + 0.5), rb)  # elbow flexion (rad): closes in front, opens behind
+			var elb := lerpf(lerpf(0.30, 0.50, ph * 0.5 + 0.5), lerpf(0.75, 1.50, ph * 0.5 + 0.5), rb)  # elbow flexion (rad): closes in front, opens well behind (Gary: looser)
 			# in the air the jump's lift becomes the arms driving up and forward (still bent), reach and flare open them
 			var lift_a := clampf(sw.y, -0.1, 0.45)
 			fl = lerpf(fl, clampf(ph * 0.4 + lift_a * 1.6, -0.7, 1.0), air_b)
