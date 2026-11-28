@@ -1,4 +1,4 @@
-## Sea surface 0.1.0 (adapters/godot; water surface thread, 27 Nov 2026): the drawn sea. One FFT sea (FftSea, the
+## Sea surface 0.2.0 (0.2.0, 28 Nov: the underside in the transparent pass, globals()) (adapters/godot; water surface thread, 27 Nov 2026): the drawn sea. One FFT sea (FftSea, the
 ## Unreal lagoon's) and one mesh of nested square rings that the vertex shader re-centres on the camera every frame
 ## (lagoonwater v98 sea_obj / LW_VS_HLSL: ring 0 a 2nq x 2nq grid of 6.25 cm, ring l the annulus between nq/2 and nq
 ## quads of 6.25 cm x 2^l; 15 rings reach 32 km), so the sea goes wherever the eye goes: open world, no level loads,
@@ -16,16 +16,21 @@ var mesh_instance: MeshInstance3D
 var under_mat: ShaderMaterial
 var top_mat: ShaderMaterial
 var floor_map: SeaFloorMap
+static var _globals_done := false
 
 func _init() -> void:
 	name = "SeaSurface"
+	globals()
 	fft = FftSea.new(); add_child(fft)
 	mesh_instance = MeshInstance3D.new(); mesh_instance.name = "SeaMesh"
 	mesh_instance.mesh = ring_mesh(NQ, LEVELS, D0)
 	under_mat = ShaderMaterial.new(); under_mat.shader = load("res://look/sea_under.gdshader")
 	top_mat = ShaderMaterial.new(); top_mat.shader = load("res://look/sea_top.gdshader")
-	# after the underwater view's full-screen quad (it copies the opaque screen back when the eye is above the water)
+	# after the underwater view's full-screen quad (it copies the opaque screen back when the eye is above the water).
+	# The underside too (0.2.0): it reads the scene behind it (a body above the water, seen through Snell's window), so it
+	# is drawn in the transparent pass and adds the eye's own water path itself, over the quad's
 	top_mat.render_priority = 1
+	under_mat.render_priority = 1
 	under_mat.next_pass = top_mat
 	mesh_instance.material_override = under_mat
 	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -37,6 +42,14 @@ func _init() -> void:
 	floor_map = SeaFloorMap.new(); add_child(floor_map)
 	# the tank's spray and spume off the breaking crests (SeaSpray: the sprite kit; drawn after the sea's top side)
 	add_child(SeaSpray.new())
+
+static func globals() -> void:
+	## the eye's values the underside needs for its own water path (WorldRoot sets them, as on the underwater view):
+	## sea_eye_wave = the wave over the still level at the eye (m), sea_god = (god rays on 0/1, frame mod 8, frames averaged 0/1, 0)
+	if _globals_done: return
+	_globals_done = true
+	RenderingServer.global_shader_parameter_add(&"sea_eye_wave", RenderingServer.GLOBAL_VAR_TYPE_FLOAT, 0.0)
+	RenderingServer.global_shader_parameter_add(&"sea_god", RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(1.0, 0.0, 0.0, 0.0))
 
 func _process(_dt: float) -> void:
 	var cam := get_viewport().get_camera_3d()
