@@ -27,6 +27,7 @@ class Foot:
 	var dur := 0.32
 	var height := 0.036
 	var toe_pitch := 0.0
+	var toe0 := 0.0     # toe pitch at take-off (the swing's own pitch blends in from it)
 	var heel_kick := 0.0
 
 var initialized := false
@@ -282,6 +283,10 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		else:
 			swing_ankle = lerpf(0.0, land_dorsi, smoothstep(0.44, 0.88, u)) * (1.0 - smoothstep(0.88, 1.0, u) * 0.50)
 		f.toe_pitch = swing_ankle * (0.28 + 0.72 * clampf(speed / 1.3, 0.0, 1.0))
+		if target_filter != null:
+			# ROOT (smoothness: a 1.5 cm hop at every take-off from standing): the swing's push-off pitch (-0.22 rad) was
+			# set in one tick from the planted pitch; it blends in over the first quarter of the swing
+			f.toe_pitch = lerpf(f.toe0, f.toe_pitch, smoothstep(0.0, 0.25, u))
 		if f.t >= 1.0:
 			f.stepping = false
 			f.planted = Vector3(f.to.x, lp.y, f.to.z)
@@ -490,6 +495,7 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		f.from_yaw = f.yaw
 		f.to_yaw = yaw
 		f.stepping = true
+		f.toe0 = f.toe_pitch
 		f.t = 0.0
 		var sd := Vector2(f.to.x - f.from.x, f.to.z - f.from.z).length()
 		var bh := lerpf(config.walkStepHeight, config.runStepHeight, rb)

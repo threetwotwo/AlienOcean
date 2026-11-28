@@ -30,6 +30,7 @@ var swing_floor := {"L": NAN, "R": NAN}
 var pelv_yaw_off := 0.0     # pelvis held back by a planted foot's hip rotation range (fast turns)
 var support_dg := 0.0     # pelvis ground from the feet's support minus the floor under her centre (stairs)
 var pelvis_yield := 0.0     # how far the pelvis is lowered so a planted foot stays reachable
+var pivot_carry := {"L": Vector3.ZERO, "R": Vector3.ZERO}     # the planted foot's last pivot offset, faded through lift-off
 var land_drop := {"L": 0.0, "R": 0.0}     # a foot that touched down above where it stands settles, not snaps
 var last_ank := {"L": NAN, "R": NAN}
 var last_stepping := {"L": false, "R": false}
@@ -1377,6 +1378,13 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			# swung the ball 5 cm backwards at every push-off; the ball (heel up) or the heel (toe up) is held where it
 			# would be with the foot flat, and the ankle moves instead.
 			var adj := Vector3.ZERO
+			# ROOT (smoothness, jerk 77 000 m/s3 at every lift-off): planted, the ankle is offset so the foot pivots on its
+			# ball (heel up); the offset ended the tick the swing began and the ankle jumped 2 cm and back. It is carried
+			# into the swing and faded out over its first third
+			if fst.stepping and not s.shore_is_airborne and pivot_carry[foot_k].length() > 1e-4:
+				adj = pivot_carry[foot_k] * (1.0 - smoothstep(0.0, 0.35, fst.t))
+				if adj.length() > 1e-4:
+					solved = BM.leg(hip, ft + adj, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
 			var heel_l := Vector3(0, -0.026, -0.048)
 			var ball_l := Vector3(0, 0.11, -0.048)
 			var flat_ball := Vector2(fx + sfw.x * ball_l.y, fz + sfw.z * ball_l.y)
@@ -1439,6 +1447,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			# FIX (stress J6/J7): a planted foot the leg can no longer reach (the body climbed away from it) was
 			# dragged; step it like a clamped one
 			var miss: float = solved.ik.eff.distance_to(ft + adj)
+			if not fst.stepping: pivot_carry[foot_k] = adj if not s.shore_is_airborne else Vector3.ZERO
 			var fk2 := "L" if side < 0 else "R"
 			if not fst.stepping and miss > 0.03:
 				world_foot_placer.forced[fk2] = maxf(world_foot_placer.forced[fk2], miss * (0.33 if (land_age[fk2] < 0.12 and miss <= HARD_MISS) else 1.0))
