@@ -460,6 +460,59 @@ def test_traced_tables_are_faired_and_the_loft_has_no_crease_or_ripple(tmp_path)
     assert form_fair(G)['FM1_crease_deg'] > FM1_CREASE_MAX
 
 
+def _traced_paired(tmp_path, fault=None):
+    """the proof record with its paired fins traced: a sickle pectoral laid flat on the flank, a pelvic fin held erect (as a
+    specimen photo shows it), its base on the belly line."""
+    from creature_maker.record import adapt
+    from creature_maker.form import Form
+    from creature_maker.fins import build_fins
+    D = json.load(open(REC)); S = D['record']['skeleton']; f0 = Form(adapt(REC)); SL = D['record']['outline']['end']
+    S['pectoral'].update(base_line=[[112.5, 5.4], [112.5, 0.0], [113.5, -5.4]],
+                         edge=[[112.5, 5.4], [135, 7], [155, 2], [172, -10], [156, -5], [135, -5], [113.5, -5.4]])
+    by = lambda u: float(f0.BOT(u / SL)) * SL
+    S['pelvic'].update(base_line=[[115, by(115)], [120, by(120)], [127, by(127)]],
+                       edge=[[115, by(115)], [118, by(118) - 18], [124, by(124) - 36], [128, by(128) - 24], [128.5, by(128) - 10], [127, by(127)]])
+    rp = str(tmp_path / 'paired.json'); json.dump(D, open(rp, 'w')); rec = adapt(rp)
+    for n in ('pectoral', 'pelvic'): rec['fins'][n]['fault'] = fault
+    form = Form(rec); fins = build_fins(form, rec, str(tmp_path))
+    return dict(fins={k: dict(V=np.asarray(v['V']).tolist(), F=v['F'], T=v['T']) for k, v in fins.items()}), form, rec
+
+
+def test_traced_paired_fins_keep_their_size_their_side_and_a_flat_blade(tmp_path):
+    """export r6 pixel check, items 1 and 4. A side-view outline is the fin's own shape, so the fin turns about its base line
+    (true length), a pelvic fin traced erect is folded to the record's rest angle, the pair stays apart, the blade is flat
+    and the base leaves the skin along the skin. The rule before (outline kept as the side view and pushed out by tan(out),
+    rows relaxed) fails the size and flatness checks, and each planted fault is caught."""
+    from creature_maker.checks import paired_fin_checks, paired_sheets, planted_fins
+    from creature_maker.fins import fan_angle
+    C, form, rec = _traced_paired(tmp_path); R = paired_fin_checks(paired_sheets(C, rec), form)
+    assert all(R[k] for k in ('PF1_pass', 'PF2_pass', 'PF3_pass', 'PF4_pass')), R
+    P = form.PAIRED['pelvic']; assert P['under'] and P['fan_traced'] > P['fan_record'] and abs(P['fold'] - P['fan_record'] / P['fan_traced']) < 1e-3
+    V = np.array(C['fins']['pelvic_L']['V']).reshape(-1, 25, 3); tip = V[-1][np.linalg.norm(V[-1] - V[1, 0], axis=1).argmax()] - V[1, 0]; c = V[1, -1] - V[1, 0]
+    ang = np.degrees(np.arccos(tip @ c / np.linalg.norm(tip) / np.linalg.norm(c)))        # the leading ray from the root line, in the fin's own plane
+    assert ang <= rec['fins']['pelvic']['fan'] + 6 < P['fan_traced'] - 15, (ang, P)     # 6 deg: measured from the first row, the root row is sunk
+    assert np.array(C['fins']['pelvic_L']['V'])[:, 2].min() > 0 > np.array(C['fins']['pelvic_R']['V'])[:, 2].max()
+    PL = planted_fins(C, form, rec); assert len(PL) >= 5 and all(PL.values()), PL
+    C0, form0, rec0 = _traced_paired(tmp_path, fault='project'); R0 = paired_fin_checks(paired_sheets(C0, rec0), form0)
+    assert not R0['PF2_pass'] and not R0['PF3_pass'], R0
+
+
+def test_a_swept_fin_lobe_does_not_fold_its_card(tmp_path):
+    """the notch behind the trevally's dorsal lobe (export r6, known item): a traced fin with a lobe swept back over the low
+    fin behind it. Rows relaxed to the mean of their neighbours fold over behind the lobe; the Winslow grid does not."""
+    from creature_maker.record import adapt
+    from creature_maker.form import Form
+    from creature_maker.fins import build_fins
+    from creature_maker.checks import fin_fold_check
+    D = json.load(open(REC)); f0 = Form(adapt(REC)); SL = D['record']['outline']['end']; ty = lambda u: float(f0.TOP(u / SL)) * SL
+    D['record']['skeleton']['median']['d']['edge'] = [[135, ty(135)], [150, ty(150) + 40], [185, ty(185) + 46], [166, ty(166) + 14], [180, ty(180) + 7], [198, ty(198)]]
+    rp = str(tmp_path / 'lobe.json'); json.dump(D, open(rp, 'w')); got = {}
+    for mode in ('relaxed', None):
+        rec = adapt(rp); rec['fins']['fault'] = mode; fins = build_fins(Form(rec), rec, str(tmp_path))
+        got[mode] = fin_fold_check(dict(fins={'dorsal': dict(V=np.asarray(fins['dorsal']['V']), F=fins['dorsal']['F'])}))
+    assert not got['relaxed']['FN1_pass'] and got[None]['FN1_pass'], got
+
+
 def test_blockout_follows_the_record_and_catches_planted_faults(tmp_path):
     """the blockout (ellipsoid chain + fin plates) matches the record's side and top outline (BK1, BK2) and its fin plates cover the
     traced fin outlines (BK3); a body squashed to 70 % height, or a fin plate grown by 1.25, fails."""

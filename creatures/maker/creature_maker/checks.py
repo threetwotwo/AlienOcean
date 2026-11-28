@@ -292,6 +292,81 @@ def _lin(path):
     a = np.asarray(Image.open(path).convert('RGB'), float) / 255; return np.where(a <= 0.04045, a / 12.92, ((a + 0.055) / 1.055) ** 2.4)
 
 
+PF_SIZE_TOL = 0.05      # DEFAULT: a traced paired fin's reach (first root to its farthest point) is the trace's within 5 %. Pushed
+                        # out of the photo's plane by tan(out), the rule before, it was 15 % long at out 30
+PF_FLAT_MAX = 25.0      # DEFAULT (deg): past its base a paired fin's blade is flat: no cell's normal more than this off the blade's
+                        # mean (a fin laid round a flank turns a few deg; the cupped pelvic fins of export r6 turned 60-90)
+PF_TURNED_MAX = 0.002   # DEFAULT: share of a paired fin's area that may be turned over (a sliver in a corner of the outline)
+PF_ROOT_MAX = 20.0      # DEFAULT (deg): over the body a paired fin leaves the skin at no more than this (a sheet standing on the
+                        # flank at its out angle is a slab with an open wedge behind it)
+
+
+FN_TURNED_MAX = 0.015   # DEFAULT: share of a median fin's or the tail's side-view area that may be folded over. Rows relaxed to the
+                        # mean of their neighbours folded 15 % of the trevally's second dorsal behind its lobe (the notch) and 1-29 %
+                        # on 16 of 28 records; what is left with the Winslow grid is slivers where a traced outline dips under its
+                        # own root row (trevally 1.1 %)
+
+
+def fin_fold_check(C):
+    """FN1: no median fin or caudal card is folded over in the side view (cells whose turn is against the card's)."""
+    worst, at = 0.0, None
+    for k, f in C['fins'].items():
+        if k.startswith(('pectoral', 'pelvic')): continue
+        P = np.asarray(f['V'], float)[:, :2]; Q = P[np.asarray(f['F'])]
+        a = 0.5 * ((Q[:, 2, 0] - Q[:, 0, 0]) * (Q[:, 3, 1] - Q[:, 1, 1]) - (Q[:, 3, 0] - Q[:, 1, 0]) * (Q[:, 2, 1] - Q[:, 0, 1]))
+        sh = float(np.abs(a[a * np.sign(a.sum()) < 0]).sum() / (np.abs(a).sum() + 1e-15))
+        if sh > worst: worst, at = sh, k
+    return dict(FN1_folded_area_share=round(worst, 4), FN1_worst_fin=at, FN1_pass=worst <= FN_TURNED_MAX)
+
+
+def paired_sheets(C, rec):
+    """the traced paired fins as built, {fin name: (rows + 1, columns, 3)}; the builder's fin record goes with each."""
+    from .fins import EDGE_RAYS
+    out = {}
+    for n in ('pectoral', 'pelvic'):
+        f = rec['fins'].get(n)
+        if not f or not (f.get('edge') and f.get('base_line')): continue
+        for s_ in 'LR':
+            if f'{n}_{s_}' in C['fins']: out[f'{n}_{s_}'] = (np.array(C['fins'][f'{n}_{s_}']['V'], float).reshape(-1, EDGE_RAYS, 3), f)
+    return out
+
+
+def paired_fin_checks(sheets, form):
+    """PF1 each paired fin stays on its own side of the midline (the pair never meets or crosses). PF2 its reach is the
+    traced outline's (true size, not the side view stretched by its out angle). PF3 the sheet is not turned over (at most PF_TURNED_MAX
+    of its area, a corner sliver) and its blade is flat (no cup). PF4 where it lies over the body it leaves the skin along the skin (no slab, no wedge)."""
+    from .fins import PAIR_BASE
+    R = {}; side, size, flat, turned, root = [], [], [], 0.0, []
+    for name, (V, f) in sheets.items():
+        sg = 1 if name.endswith('_L') else -1; side.append(float((sg * V[..., 2]).min()))
+        E, B = np.asarray(f['edge'], float), np.asarray(f['base_line'], float)
+        c2 = V[0, -1, :2] - V[0, 0, :2]; c2 /= np.linalg.norm(c2); sr = (V[0, :, :2] - V[0, 0, :2]) @ c2; o_ = np.argsort(sr)
+        Q = V.copy(); Q[..., 2] -= np.interp((V[..., :2] - V[0, 0, :2]) @ c2, sr[o_], V[0, o_, 2])    # measured off the root line's own distance out (the flank's curve is not fin)
+        size.append(float(np.linalg.norm(Q - Q[0, 0], axis=-1).max() / np.linalg.norm(E - B[0], axis=1).max()))
+        n = np.cross(V[1:, 1:] - V[:-1, :-1], V[1:, :-1] - V[:-1, 1:]); a = np.linalg.norm(n, axis=-1); n = n / (a[..., None] + 1e-15)
+        m = (n * a[..., None]).sum((0, 1)); m /= np.linalg.norm(m) + 1e-15; turned = max(turned, float(a[(n @ m) <= 0].sum() / a.sum()))
+        # the blade: cells further from the root line (first root to last root) than the base is deep, with some room
+        ax = V[0, -1] - V[0, 0]; ax /= np.linalg.norm(ax); W = V - V[0, 0]; dist = np.linalg.norm(W - (W @ ax)[..., None] * ax, axis=-1)
+        dc = np.minimum(np.minimum(dist[1:, 1:], dist[:-1, :-1]), np.minimum(dist[1:, :-1], dist[:-1, 1:]))
+        blade = (dc >= 1.25 * f.get('base_w', PAIR_BASE) * dist.max()) & (a > 1e-9); nb, ab = n[blade], a[blade]
+        mb = (nb * ab[..., None]).sum(0); mb /= np.linalg.norm(mb) + 1e-15
+        flat.append(float(np.degrees(np.arccos(np.clip(nb @ mb, -1, 1))).max()) if blade.any() else 0.0)
+        # the second row of cells (the first dives under the skin to the root row) against the skin under it
+        P = 0.5 * (V[1] + V[2]); P = 0.5 * (P[1:] + P[:-1]); x, y = np.clip(P[:, 0], 1e-4, form.XEND - 1e-4), P[:, 1]; e_ = 1e-4
+        on = (y > form.BOT(x) + 2 * e_) & (y < form.TOP(x) - 2 * e_) & (np.abs(form.z_on(x, y)) > 0.01)
+        if on.any():       # where the skin faces sideways more than down (under the belly a fin hangs from the skin, it does not lie on it)
+            gx = (np.abs(form.z_on(x + e_, y)) - np.abs(form.z_on(x - e_, y))) / (2 * e_); gy = (np.abs(form.z_on(x, y + e_)) - np.abs(form.z_on(x, y - e_))) / (2 * e_)
+            ns = np.stack([-gx, -gy, np.ones_like(gx)], -1); ns /= np.linalg.norm(ns, axis=1, keepdims=True); n1 = n[1] * np.array([1, 1, sg]); on &= a[1] > 1e-9
+            ang = np.degrees(np.arccos(np.clip(np.abs((n1 * ns).sum(1)), 0, 1))); on &= np.abs(gy) < 1
+            if on.any(): root.append(float(ang[on].max()))
+    if not sheets: return R
+    R['PF1_own_side_min_pctSL'] = round(min(side) * 100, 3); R['PF1_pass'] = min(side) > 0
+    R['PF2_reach_over_trace'] = [round(min(size), 3), round(max(size), 3)]; R['PF2_pass'] = all(abs(v - 1) <= PF_SIZE_TOL for v in size)
+    R['PF3_turned_area_share'] = round(turned, 4); R['PF3_blade_bend_deg'] = round(max(flat), 1); R['PF3_pass'] = turned <= PF_TURNED_MAX and max(flat) <= PF_FLAT_MAX
+    R['PF4_root_to_skin_deg'] = round(max(root), 1) if root else None; R['PF4_pass'] = not root or max(root) <= PF_ROOT_MAX
+    return R
+
+
 def cage_checks(C, V, form, rec):
     R = {}; faces, tags = C['faces'], C['ftag']
     skin = [k for k, t in enumerate(tags) if t in SKIN_TAGS]
@@ -350,7 +425,7 @@ def cage_checks(C, V, form, rec):
     by, dmax = folds(C, V)
     R['OP3_folds_by_region'] = by; R['OP3_folds'] = int(sum(by.values())); R['OP3_designed_crease_max_deg'] = round(dmax)
     R['OP3_pass'] = R['OP3_folds'] == 0
-    R.update(form_fair(form)); R.update(plate_fair(form))
+    R.update(form_fair(form)); R.update(plate_fair(form)); R.update(paired_fin_checks(paired_sheets(C, rec), form)); R.update(fin_fold_check(C))
     return R
 
 
@@ -503,6 +578,27 @@ def ex_checks(out, st):
     return R
 
 
+def planted_fins(C0, form, rec):
+    """the fin cards' planted faults (FN1, PF1-PF4); C0 needs only its fins."""
+    PL = {}
+    fk = next(k for k in C0['fins'] if not k.startswith(('pectoral', 'pelvic'))); f_ = C0['fins'][fk]; fv = np.array(f_['V'], float); nc = f_['F'][0][3] - f_['F'][0][0]
+    rows_ = fv.reshape(-1, nc, 3).copy(); rows_[[1, 2]] = rows_[[2, 1]]        # two rows of a median fin laid over each other
+    PL['FN1 (two rows of a fin card swapped: the card folded over itself)'] = not fin_fold_check(dict(fins={fk: dict(f_, V=rows_.reshape(-1, 3))}))['FN1_pass']
+    sh = paired_sheets(C0, rec)
+    if sh:
+        from .fins import paired_sheet
+        fault = lambda kind, only=None: {n: (paired_sheet(form, f, 1 if n.endswith('_L') else -1, kind) if only is None or n.startswith(only) else v, f) for n, (v, f) in sh.items()}
+        PL['PF planted baseline passes'] = all(v for k, v in paired_fin_checks(sh, form).items() if k.endswith('_pass'))
+        old = paired_fin_checks(fault('project'), form)
+        PL['PF2 (side-view outline pushed out by tan(out): the fin too long)'] = not old['PF2_pass']
+        PL['PF3 (rows relaxed between root and outline, lifted by distance from the root: turned or cupped)'] = not old['PF3_pass']
+        n0 = next(iter(sh)); v0, f0 = sh[n0]; v1 = v0.copy(); v1[..., 2] -= (1 if n0.endswith('_L') else -1) * (np.abs(v0[..., 2]).min() + 0.01)
+        PL['PF1 (one fin moved 1 % SL across the midline)'] = not paired_fin_checks({**sh, n0: (v1, f0)}, form)['PF1_pass']
+        if paired_fin_checks(sh, form)['PF4_root_to_skin_deg'] is not None and max(f['out'] for _, f in sh.values()) >= PF_ROOT_MAX + 10:
+            PL['PF4 (the whole turn on the root line: a slab on the flank)'] = not paired_fin_checks(fault('hard'), form)['PF4_pass']
+    return PL
+
+
 def planted(C0, V0, VN0, form, rec):
     """each planted fault must be caught by its check."""
     run = lambda c, v: cage_checks(c, v, form, rec); PL = {}
@@ -610,6 +706,7 @@ def planted(C0, V0, VN0, form, rec):
     PL['EX6 (no swim settings in the glTF)'] = not ex(swim_extras=None)['EX6_pass']
     PL['EX7 (LOD1 only 2 x fewer triangles than LOD0)'] = not ex(lod_chain=dict(levels=[dict(lod=0, tris=8000, from_m=0.0), dict(lod=1, tris=2000, from_m=5.0, tris_built=4000)]))['EX7_pass']
     PL['EX6 (one speed only, no envelopes to blend)'] = not ex(swim_extras=dict(wave=dict(amplitude_envelope_BL=[[0, 0.02, 0.0]], lam_BL=1.0, envelopes_by_speed=[{}]), beat_law={}, clips={}))['EX6_pass']
+    PL.update(planted_fins(C0, form, rec))
     return PL
 
 

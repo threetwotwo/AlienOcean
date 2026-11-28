@@ -100,12 +100,32 @@ from nUp/nLo, widest at mid-height, listed as a DEFAULT row) and builds byte-ide
 
 **Traced fins.** A median fin (or the caudal) may carry `edge`: its free outline from the photo, in record units, from
 where the leading edge leaves the body to where the rear margin meets it (dorsal and anal front to back, caudal top to
-bottom). The fin card then spans its root and that outline, with the rows between relaxed so swept lobes and filaments
-follow the photo instead of being cut by straight rays. Without `edge` the card is guessed from `h` and `lean`.
+bottom). The fin card then spans its root and that outline, with a Winslow grid between them so swept lobes and filaments
+follow the photo instead of being cut by straight rays, and no cell folds over behind a lobe. Without `edge` the card is guessed from `h` and `lean`.
 `silhouette.fin_edges(ref, rec)` reads these outlines off a traced reference for the tracer to write into the record (the
 record stays the only build input, the reference stays the test) and lists fins whose outline meets the body far from
 the record's root ends. On the 28 traced drafts (27 Nov): SIL1 passes 3 with guessed fins, 24 with traced outlines; the
 other 4 have record fin roots that disagree with their photo.
+
+**Traced paired fins** (`skeleton.pectoral` / `skeleton.pelvic`: `edge`, the side-view outline from the first root round the
+tip to the last root, and `base_line`, root to root). The outline is the fin's own shape (flat in the photo's plane:
+trace reach over record `length` is 1.01 in the median of the 31 traced fins; a fin standing 30 deg out of the photo
+would read 0.87), so the builder (`fins.paired_sheet`) keeps every length on it and only poses it:
+
+| Step | Rule | From |
+|---|---|---|
+| fair | the outline loses the trace's jitter, ends and tip held | DEFAULT `EDGE_FAIR_TOL` 0.4 % SL over `EDGE_FAIR_LEN` 5 % SL |
+| grid | columns run as rays: first column the leading edge (first root to the farthest free point), top row the margin, Coons patch then Winslow's equations (`fins.winslow`: no fold behind a swept lobe); a last stretch of outline lying on the root line is not free edge | `EDGE_RAYS` columns, `PAIR_BASE_ROWS` 3 + `PAIR_ROWS` 5 rows |
+| fold | the fan closes about the first root, base held, until the leading ray stands no further from the base than the record's rest angle (a specimen photo shows the pelvic fin erect); never opened past the photo | record `sweep[0]` (pelvic: deg below the belly line; pectoral: 90 + deg above the body axis) |
+| hinge | the sheet turns about its base line by the record's `out`, the turn spread over the fleshy base so it leaves the skin along the skin; a blade that would pass through the body swings further out until clear (at most `PAIR_OUT_MAX` 85) | record `out`; base depth record `baseBand.w`, DEFAULT `PAIR_BASE` 0.12 of the reach |
+| seat | root row on the skin at the base line, `ROOT_SINK` 0.4 % SL under it; a base drawn on the underside (skin facing down more than sideways, or the belly line itself) sits `PAIR_GAP` 0.6 % SL to its own side of the midline, the fin moved there as one piece; over its base a flank fin lies `PAIR_LIFT` 0.1 % SL off the skin | DEFAULTS |
+
+The base carries the body's skin colour over the same depth (the fin atlas), and the card is cut away at the root so the rays come out of the skin first (`PAIR_EMERGE` 0.3 of the base depth) and the membrane between them later (0.8): no straight cut edge on the flank. How each fin was placed is written to
+`cage.json` `form_rules.paired_fins` (fold factor, out used, traced and record fan angles). Median fins and the caudal
+use the same Winslow grid between root row and outline. Checks: PF1 each paired fin on its own side of the midline, PF2
+its reach is the trace's within 5 %, PF3 no part turned over (0.2 % of its area at most) and the blade past the base flat
+within 25 deg, PF4 where it lies on the flank it leaves the skin at 20 deg or less, FN1 no median fin or tail card folded
+over in the side view (1.5 % of its area at most).
 
 Cage (no Blender): P2 quad share and corners, P3 manifold, P4 skin on the form, P5 skin UV stretch, folds and overlap (no texel
 under two skin faces), IC1 parts

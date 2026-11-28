@@ -9,6 +9,8 @@ KEEP = ('GP0_rest_crossings', 'GP1_pass', 'GP1_opening_share', 'GF1_pass', 'SR1_
         'FM1_pass', 'FM1_crease_deg', 'FM1_ripple_deg', 'FM2_pass', 'FM2_plate_slope_max',
         'IC1_input_faults', 'IC1_missing', 'P3_pass', 'EY1_pass',
         'EY2_pass', 'EY2_cornea_sag_R', 'EA1_pass', 'EA1_skin_up_deg', 'EA1_target_deg', 'EA1_dev_deg', 'EA1_under_band', 'EA2_pass', 'EA2_aim_up_deg', 'EA2_aim_fwd_deg', 'EA2_seat_deg', 'EA2_below_skin_deg',
+        'PF1_pass', 'PF1_own_side_min_pctSL', 'PF2_pass', 'PF2_reach_over_trace', 'PF3_pass', 'PF3_turned_area_share', 'PF3_blade_bend_deg', 'PF4_pass', 'PF4_root_to_skin_deg',
+        'FN1_pass', 'FN1_folded_area_share', 'FN1_worst_fin',
         'SIL1_pass', 'SIL1_iou', 'SIL1_head_iou', 'SIL1_body_iou', 'SIL1_note',
         'SIL2_pass', 'SIL2_front_iou', 'SIL2_top_iou', 'SIL2_note')
 
