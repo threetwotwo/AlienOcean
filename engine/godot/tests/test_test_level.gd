@@ -56,7 +56,11 @@ func _run() -> void:
 	_ok("L1 assets", lvl.missing_assets.is_empty() or not need_assets, {"missing": lvl.missing_assets, "gated": need_assets})
 	# L1b: the grass field built blades (a script error in GrassField.adopt once left the meadows bare and every check green)
 	var gs: Dictionary = lvl.grass.stats if lvl.grass else {}
-	_ok("L1b grass", lvl.grass == null or int(gs.get("blades", 0)) > 1000, gs)
+	# (the stand-in floor run has no seagrass tiles at all: then nothing to build is a pass)
+	var src := 0
+	for mi in lvl.game.lagoon.find_children("*", "MeshInstance3D", true, false):
+		if "seagrass" in String(mi.name).to_lower() and not "_blades" in String(mi.name): src += 1
+	_ok("L1b grass", lvl.grass == null or int(gs.get("blades", 0)) > 1000 or src == 0, {"stats": gs, "seagrass_tiles": src})
 	# L2
 	var t0: int = lvl.game.clock.tick
 	var bad_pos := 0

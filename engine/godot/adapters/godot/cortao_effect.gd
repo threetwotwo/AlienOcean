@@ -34,6 +34,14 @@ var filter_passes_temporal := 2   # with TAA / FSR 2 / MetalFX temporal: CORTAO'
 var filter_passes := 2            # without one (TAA off, FSR 1 is spatial) the same: cortao_check C5 grain 0.009 (3 coarse) -> 0.003, C6 0.84 -> 0.25
                                   # (2 coarse + fine: C6 0.39, two coarse passes deepen the lattice more than one fine pass undoes)
 var fine_last := OS.get_environment("CORTAO_FAULT_COARSE") == ""   # checks only: env CORTAO_FAULT_COARSE=1 plants the old lattice (cortao_check --fault coarse)
+# The occlusion pass itself (head to head, Gary 28 Nov "keep the head-to-head"): CORTAO, or a horizon method on the same depth /
+# normal inputs, denoised by the same filter and read by the materials the same way (look/cortao/gtao_main.glsl):
+# "gtao" = XeGTAO (Intel), "vbao" = visibility bitmask (Therrien et al. 2023). WorldRoot.set_ao("gtao" | "vbao") sets it.
+var algo := OS.get_environment("CORTAO_ALGO") if OS.get_environment("CORTAO_ALGO") != "" else "cortao"
+var gtao_slices := 4.0            # XeGTAO "high" is 3 slices x 3 steps; budget allows more
+var gtao_steps := 6.0
+var gtao_power := 2.2             # XeGTAO FinalValuePower default
+var vbao_thickness := 0.4         # m: how deep an occluder is assumed to be (bitmask)
 var capture_next := false         # checks: copy the next result into `captured` (stalls the GPU; tests only)
 var captured: Image
 var gpu_ms := 0.0                 # the three passes' GPU time, last frame read back (RD timestamps; 0 until measured)
@@ -47,6 +55,10 @@ var pl_pre: RID
 var pl_main: RID
 var pl_filt: RID
 var pl_filt2: RID
+var sh_gtao: RID
+var sh_vbao: RID
+var pl_gtao: RID
+var pl_vbao: RID
 var smp_border: RID
 var smp_clamp: RID
 var lut: RID
@@ -73,7 +85,7 @@ func _init() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and rd:
-		for r in packed_mips + [packed, raw, raw2, shape_n, out, ubo, ubo_main, lut, smp_border, smp_clamp, pl_pre, pl_main, pl_filt, pl_filt2, sh_pre, sh_main, sh_filt, sh_filt2]:
+		for r in packed_mips + [packed, raw, raw2, shape_n, out, ubo, ubo_main, lut, smp_border, smp_clamp, pl_pre, pl_main, pl_filt, pl_filt2, pl_gtao, pl_vbao, sh_pre, sh_main, sh_filt, sh_filt2, sh_gtao, sh_vbao]:
 			if r.is_valid(): rd.free_rid(r)
 
 ## CORTAO's shaders #include its headers; Godot's GLSL compiler has no include path, so the headers are inlined here
@@ -123,7 +135,11 @@ func _init_compute() -> void:
 	sh_main = _compile("res://look/cortao/cortao_main.glsl", "#define CORTAO_SAMPLES %d\n#define CORTAO_RAYS %d\n" % [samples, rays])
 	sh_filt = _compile("res://look/cortao/cortao_filter.glsl", "", fine_last)   # the last pass: fine taps
 	sh_filt2 = _compile("res://look/cortao/cortao_filter.glsl", "#define CORTAO_OUT_PACKED 1\n")
-	if not (sh_pre.is_valid() and sh_main.is_valid() and sh_filt.is_valid() and sh_filt2.is_valid()): return
+	sh_gtao = _compile("res://look/cortao/gtao_main.glsl")
+	sh_vbao = _compile("res://look/cortao/gtao_main.glsl", "#define GTAO_BITMASK 1\n")
+	if not (sh_pre.is_valid() and sh_main.is_valid() and sh_filt.is_valid() and sh_filt2.is_valid() and sh_gtao.is_valid() and sh_vbao.is_valid()): return
+	pl_gtao = rd.compute_pipeline_create(sh_gtao)
+	pl_vbao = rd.compute_pipeline_create(sh_vbao)
 	pl_pre = rd.compute_pipeline_create(sh_pre)
 	pl_main = rd.compute_pipeline_create(sh_main)
 	pl_filt = rd.compute_pipeline_create(sh_filt)
@@ -266,15 +282,30 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	rd.compute_list_set_push_constant(cl, pre, pre.size())
 	rd.compute_list_dispatch(cl, (sz.x + 7) / 8, (sz.y + 7) / 8, 1)
 	rd.compute_list_add_barrier(cl)
-	rd.compute_list_bind_compute_pipeline(cl, pl_main)
-	rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_main, 0, [
-		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_border, packed]),
-		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_clamp, shape_n]),
-		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [smp_clamp, lut]),
-		_u(U.UNIFORM_TYPE_IMAGE, 3, [raw]),
-		_u(U.UNIFORM_TYPE_UNIFORM_BUFFER, 4, [ubo_main])]), 0)
-	rd.compute_list_set_push_constant(cl, mp, mp.size())
-	rd.compute_list_dispatch(cl, (sz.x + 15) / 16, (sz.y + 15) / 16, 1)
+	if algo == "gtao" or algo == "vbao":
+		var shg := sh_gtao if algo == "gtao" else sh_vbao
+		rd.compute_list_bind_compute_pipeline(cl, pl_gtao if algo == "gtao" else pl_vbao)
+		rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(shg, 0, [
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_border, packed]),
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_clamp, shape_n]),
+			_u(U.UNIFORM_TYPE_IMAGE, 3, [raw])]), 0)
+		var gp := PackedByteArray(); gp.resize(64)
+		for i in 4: gp.encode_float(i * 4, mp.decode_float(16 + i * 4))   # CORTAO's unprojectParams
+		gp.encode_float(16, 1.0 / sz.x); gp.encode_float(20, 1.0 / sz.y); gp.encode_u32(24, res); gp.encode_u32(28, seed)
+		gp.encode_float(32, radius); gp.encode_float(36, screen_radius * sz.y); gp.encode_float(40, vbao_thickness)
+		gp.encode_float(44, gtao_slices); gp.encode_float(48, gtao_steps); gp.encode_float(52, gtao_power)
+		rd.compute_list_set_push_constant(cl, gp, gp.size())
+		rd.compute_list_dispatch(cl, (sz.x + 7) / 8, (sz.y + 7) / 8, 1)
+	else:
+		rd.compute_list_bind_compute_pipeline(cl, pl_main)
+		rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_main, 0, [
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_border, packed]),
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_clamp, shape_n]),
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [smp_clamp, lut]),
+			_u(U.UNIFORM_TYPE_IMAGE, 3, [raw]),
+			_u(U.UNIFORM_TYPE_UNIFORM_BUFFER, 4, [ubo_main])]), 0)
+		rd.compute_list_set_push_constant(cl, mp, mp.size())
+		rd.compute_list_dispatch(cl, (sz.x + 15) / 16, (sz.y + 15) / 16, 1)
 	rd.compute_list_add_barrier(cl)
 	var src := raw
 	var tmp := _temporal(rsb)

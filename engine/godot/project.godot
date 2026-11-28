@@ -6,9 +6,17 @@ run/main_scene="res://scenes/test_level.tscn"
 [display]
 window/size/viewport_width=960
 window/size/viewport_height=540
+; full screen from the first frame on every launch path on the Mac (editor Run, debug, scripts, launchers); Gary 28 Nov.
+; Windowed only on request: --windowed, AO_WINDOWED=1 or an explicit --resolution (test_level.gd switches back).
+; macOS only (feature override): on Linux (cloud renders under Xvfb, no window manager) a window created full screen can't be
+; resized, so every --resolution shot came out at the Xvfb screen size.
+window/size/mode.macos=3
 [rendering]
 renderer/rendering_method="forward_plus"
 lights_and_shadows/use_physical_light_units=true
+lights_and_shadows/directional_shadow/size=8192
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=4
+lights_and_shadows/positional_shadow/soft_shadow_filter_quality=4
 [physics]
 3d/physics_engine="Jolt Physics"
 common/physics_ticks_per_second=60
