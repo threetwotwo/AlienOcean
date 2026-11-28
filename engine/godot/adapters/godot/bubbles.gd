@@ -50,12 +50,14 @@ var _last_cd := 0.0
 var _trail := 0.0
 var _splashes: Array = []
 var _motes = null
+var exhale_style := "calm"         # style choice "Exhale bubbles": calm (real, thin stream) | lush (fuller plume); AO_EXHALE=lush
 var stress_rate := 0.0             # AO_BUBBLE_STRESS=<bubbles/s>: a plume 1.5 m in front of the camera (speed worst case)
 var _stress_acc := 0.0
 
 func _init() -> void:
 	name = "Bubbles"
 	rng.seed = 0x5eed
+	if OS.get_environment("AO_EXHALE") != "": exhale_style = OS.get_environment("AO_EXHALE")
 	stress_rate = float(OS.get_environment("AO_BUBBLE_STRESS")) if OS.get_environment("AO_BUBBLE_STRESS") != "" else 0.0
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
@@ -184,6 +186,10 @@ func _log_uniform(lo: float, hi: float) -> float:
 ## exhaled bubble sizes: mostly 0.8-3 mm, some 3-6, a few 6-10 mm blurps (more of the big ones with exertion)
 func _exhale_size(ex: float) -> float:
 	var u := rng.randf()
+	if exhale_style == "lush":      # fuller: more 3-6 mm and cap bubbles to 12 mm
+		if u < 0.14 + 0.06 * ex: return _log_uniform(6.0, 12.0)
+		if u < 0.45 + 0.10 * ex: return _log_uniform(3.0, 6.0)
+		return _log_uniform(0.8, 3.0)
 	if u < 0.05 + 0.06 * ex: return _log_uniform(6.0, 10.0)
 	if u < 0.30 + 0.10 * ex: return _log_uniform(3.0, 6.0)
 	return _log_uniform(0.8, 3.0)
@@ -211,7 +217,7 @@ func _girl_sources(dt: float, t: float) -> void:
 	var n_ex: int = girl.brig.underwater_exhales
 	if _seen_exhales >= 0 and n_ex > _seen_exhales:
 		var amp := float(bo.get("breathAmp", 1.0)); var ex := float(bo.get("exertion", 0.0))
-		_exh = {"on": true, "sig": float(bo.get("breathSignal", 1.0)), "n": 0.0, "total": 26.0 * amp + 22.0 * ex, "ex": ex}
+		_exh = {"on": true, "sig": float(bo.get("breathSignal", 1.0)), "n": 0.0, "total": (26.0 * amp + 22.0 * ex) * (2.6 if exhale_style == "lush" else 1.0), "ex": ex}
 		for k in 1 + int(ex * 2.0):     # the onset blurp
 			_exhale_one(head, head, vel, t - dt, t, 1.0, _log_uniform(4.0, 7.5))
 	_seen_exhales = n_ex
