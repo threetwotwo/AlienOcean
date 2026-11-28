@@ -8,10 +8,10 @@ class_name GrassField
 extends Node3D
 
 const SHADER := "res://look/seagrass.gdshader"
-const PUSHERS := 24
-const TRAIL_N := 16                 # girl trail samples (the grass closes back in behind her)
-const TRAIL_DT := 0.12              # seconds between trail samples
-const TRAIL_TAU := 1.2              # trail fade (s)
+const PUSHERS := 32
+const TRAIL_N := 20                 # girl trail samples (the grass closes back in behind her)
+const TRAIL_DT := 0.16              # seconds between trail samples
+const TRAIL_TAU := 3.0              # trail fade (s)
 const FISH_N := 10
 const BLADE_W := 0.016              # 16 mm ribbons (Gary 28 Nov: "longer and slightly wider, more velvety, not short hair")
 const LENGTH_GAIN := 1.6            # blades this much longer than the tiles' (Gary 28 Nov: longer, velvety)
@@ -32,17 +32,25 @@ var _trail: Array = []              # [{p: Vector3, t: float}]
 var _t := 0.0
 var _last_sample := -1.0
 var _rng := RandomNumberGenerator.new()
+var _cap_prev := []; var _cap_cur := []        # girl capsule at the last two game ticks (drawn frames interpolate between them)
+var frac_fn: Callable = func(): return Engine.get_physics_interpolation_fraction()   # where this frame sits between ticks
+var jitter := {"frames": 0, "max_jerk_mm": 0.0, "p99_jerk_mm": 0.0}   # no-jitter check (see _measure_jitter)
+var _jerks := PackedFloat32Array()
+var _probe_hist := []               # last 2 frames of probe offsets
+var interpolate := true             # false = the planted fault for tests/test_grass_jitter.gd (tick-stepped pushers)
+var _probe_o := Vector3.INF          # world-fixed probe grid origin (snapped near her)
+var _girl_s := Vector3.ZERO          # her interpolated centre
 var _boxes: Array = []              # tile AABBs grown 0.3 m (fish test)
 var _union := AABB()                # all of them
 
-static func blade_mesh(segments := 4) -> ArrayMesh:
+static func blade_mesh(segments := 6) -> ArrayMesh:
 	## one blade, 1 m tall (scaled per instance), BLADE_W wide at the root tapering to a point; a slight natural curl forward.
 	## UV.y = 0 root .. 1 tip (the shader's height share); UV.x = 0 / 1 on the two edges (pale leaf margins).
 	var st := SurfaceTool.new(); st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rows := []
 	for i in segments + 1:
 		var h := float(i) / segments
-		var w := BLADE_W * (1.0 - 0.30 * h) * (1.0 if i < segments else 0.45)   # blunt rounded tip: a point goes sub-pixel and dithers
+		var w := BLADE_W * (1.0 - 0.15 * h) * (1.0 if i < segments else 0.75)   # strap end, not a point: points read sharp and go sub-pixel
 		rows.append([h, w, 0.16 * h * h])
 	for i in segments:
 		var a: Array = rows[i]; var b: Array = rows[i + 1]
@@ -101,8 +109,8 @@ func adopt(root: Node) -> void:
 		mi.visible = false
 		var src_tris: int = mi.mesh.get_faces().size() / 3
 		tiles.append({"src": mi, "mmi": mmi, "far": mmi_far, "aabb": mmi.custom_aabb, "blades": leaves.size(), "leaves": leaves, "seated": false})
-		stats.tiles += 1; stats.blades += leaves.size(); stats.src_tris += src_tris; stats.tris += leaves.size() * 8
-		var gb := mmi.custom_aabb.grow(0.3)
+		stats.tiles += 1; stats.blades += leaves.size(); stats.src_tris += src_tris; stats.tris += leaves.size() * 12
+		var gb := mmi.custom_aabb.grow(1.2)   # wide enough that a fish arriving cannot reach a blade yet (no pop)
 		_union = gb if _boxes.is_empty() else _union.merge(gb)
 		_boxes.append(gb)
 	stats.build_ms = (Time.get_ticks_usec() - t0) / 1000.0
@@ -185,6 +193,16 @@ func _roots(mi: MeshInstance3D) -> Array:
 ## Seat every blade on the collider below it (one tile per physics frame, once): a ray from 40 cm above the root down to
 ## 60 cm below; a hit within that window moves the root to the hit, 2 cm into the sand. Misses keep the grid seat.
 func _physics_process(_dt: float) -> void:
+	_tick_capsule()
+	_seat_step()
+
+func _tick_capsule() -> void:
+	if girl_capsule_fn == null: return
+	var cap: Array = girl_capsule_fn.call()
+	_cap_prev = _cap_cur if not _cap_cur.is_empty() else cap
+	_cap_cur = cap
+
+func _seat_step() -> void:
 	for t in tiles:
 		if t.seated: continue
 		t.seated = true
@@ -219,6 +237,49 @@ func _rebuild(t: Dictionary) -> void:
 	var mf: MultiMesh = t.far.multimesh
 	for j in mf.instance_count: mf.set_instance_transform(j, leaves[j * step][0])
 
+## No-jitter check (Gary 28 Nov, a rule for everywhere): the push the shader computes, replayed on the CPU at 9 probe points
+## around the girl. Smooth motion has a small second difference frame to frame; a step (tick-rate stepping, a pusher popping
+## in or out) shows as a spike. jitter.max_jerk_mm / p99_jerk_mm are the largest and 99th percentile second differences of
+## the probes' bend offsets, scaled to 60 Hz frames (so 30/60/120 Hz read alike). The probes sit on a world-fixed 1 m grid
+## near her (re-snapped, with the history reset, when she moves a metre away).
+func _measure_jitter(arr: Array, delta: float) -> void:
+	if girl_fn == null or delta <= 0.0: return
+	var g: Vector3 = _girl_s if girl_capsule_fn != null else girl_fn.call()
+	var o := Vector3(round(g.x), g.y, round(g.z))
+	if _probe_o == Vector3.INF or Vector2(o.x - _probe_o.x, o.z - _probe_o.z).length() > 0.5 or absf(g.y - _probe_o.y) > 0.5:
+		_probe_o = o; _probe_hist.clear()
+	var offs := PackedVector2Array()
+	for k in 9:
+		var pr := _probe_o + Vector3((k % 3 - 1) * 0.35, -0.3, (k / 3 - 1) * 0.35)
+		var tip := pr + Vector3(0, 0.6, 0)
+		var off := Vector2.ZERO
+		for v in arr:
+			if v.w <= 0.0: continue
+			var d: Vector3 = tip - Vector3(v.x, v.y, v.z)
+			var r: float = v.w + 0.3      # as the shader: radius w + L/2 (L = 0.6 probe blade)
+			var sk := clampf(1.0 - d.length() / r, 0.0, 1.0)
+			var dl := Vector2(d.x, d.z).length()
+			if sk > 0.0: off += Vector2(d.x, d.z) / sqrt(dl * dl + 0.0225) * sk * sk * (3.0 - 2.0 * sk) * 0.6 * 1.6 * clampf(v.w / 0.3, 0.0, 1.0)
+		var ol := off.length(); var cap := 0.92 * 0.6
+		if ol > 1e-6: off *= cap * tanh(ol / cap) / ol
+		offs.append(off)
+	_probe_hist.push_back([offs, delta])
+	if _probe_hist.size() > 3: _probe_hist.pop_front()
+	if _probe_hist.size() == 3:
+		# second derivative with uneven frame times, expressed per 60 Hz frame squared (so 30/60/120/144 Hz read alike)
+		var d1: float = _probe_hist[1][1]; var d2: float = _probe_hist[2][1]
+		var m := 0.0
+		for k in 9:
+			var o0: Vector2 = _probe_hist[0][0][k]; var o1: Vector2 = _probe_hist[1][0][k]; var o2: Vector2 = _probe_hist[2][0][k]
+			var acc: Vector2 = 2.0 * ((o2 - o1) / d2 - (o1 - o0) / d1) / (d1 + d2)
+			m = maxf(m, acc.length() * pow(1.0 / 60.0, 2.0) * 1000.0)
+		_jerks.append(m)
+		jitter.frames += 1
+		jitter.max_jerk_mm = snappedf(maxf(jitter.max_jerk_mm, m), 0.01)
+		if _jerks.size() % 30 == 0:
+			var srt := _jerks.duplicate(); srt.sort()
+			jitter.p99_jerk_mm = snappedf(srt[int(srt.size() * 0.99)], 0.01)
+
 func set_enabled(on: bool) -> void:
 	enabled = on
 	for t in tiles:
@@ -238,17 +299,26 @@ func _process(delta: float) -> void:
 			_trail.push_front({"p": g, "t": _t}); _last_sample = _t
 			if _trail.size() > TRAIL_N: _trail.pop_back()
 		if girl_capsule_fn != null:
-			# her whole body bends the grass: head, middle and feet along her capsule (she lies flat when swimming)
-			var cap: Array = girl_capsule_fn.call()
-			var ax: Vector3 = cap[1]; var hl: float = cap[2]
+			# her whole body bends the grass: head, middle and feet along her capsule (she lies flat when swimming). The capsule
+			# moves once per game tick; drawn frames (30-144 Hz) take it interpolated between its last two ticks, or the bend
+			# would step at the tick rate (Gary 28 Nov: "no jitter, a rule for everywhere")
+			if _cap_cur.is_empty(): _tick_capsule()
+			var a := clampf(float(frac_fn.call()), 0.0, 1.0) if interpolate else 1.0
+			var c0: Vector3 = (_cap_prev[0] as Vector3).lerp(_cap_cur[0], a)
+			_girl_s = c0
+			var ax: Vector3 = (_cap_prev[1] as Vector3).lerp(_cap_cur[1], a).normalized()
+			var hl: float = lerpf(_cap_prev[2], _cap_cur[2], a)
 			for f in [-1.0, 0.0, 1.0]:
-				var q: Vector3 = (cap[0] as Vector3) + ax * hl * f
+				var q: Vector3 = c0 + ax * hl * f
 				arr.append(Vector4(q.x, q.y - 0.1, q.z, 0.5))
 		else:
 			arr.append(Vector4(g.x, g.y - 0.15, g.z, 0.5))
 		for s in _trail:
-			var w := 0.4 * exp(-(_t - float(s.t)) / TRAIL_TAU)
-			if w > 0.03: arr.append(Vector4(s.p.x, s.p.y - 0.15, s.p.z, w))
+			# eased settle (Gary 28 Nov: "rest back to its natural position in a slower, gentler way"): the blades let go slowly
+			# at first and land softly, over TRAIL_TAU seconds, instead of an exponential snap
+			var age := _t - float(s.t)
+			var w := 0.45 * smoothstep(0.0, 0.25, age) * (1.0 - smoothstep(0.25, TRAIL_TAU, age))   # eases in under her body, out slowly
+			if w > 0.0: arr.append(Vector4(s.p.x, s.p.y - 0.15, s.p.z, w))   # reaches 0 smoothly: no cut-off pop
 	# fish inside a meadow's box, nearest the camera first
 	var cam := get_viewport().get_camera_3d()
 	var cp := cam.global_position if cam else Vector3.ZERO
@@ -257,16 +327,26 @@ func _process(delta: float) -> void:
 	var fish := []
 	var r2 := FISH_R * FISH_R
 	for sc in schools:
-		if not is_instance_valid(sc) or not "_cur" in sc: continue
+		if not is_instance_valid(sc) or not "_cur" in sc or not "_prev" in sc: continue
 		var cur: PackedVector3Array = sc._cur
-		for p in cur:
+		var prv: PackedVector3Array = sc._prev
+		if cur.is_empty(): continue
+		# the school steps per sim tick and draws its fish at _prev.lerp(_cur, _acc / sim.dt): take them exactly where it draws them
+		var a: float = clampf(float(sc._acc) / float(sc.sim.dt), 0.0, 1.0) if "_acc" in sc and sc.sim != null else 1.0
+		var same := prv.size() == cur.size()
+		for i in cur.size():
+			var p: Vector3 = prv[i].lerp(cur[i], a) if same else cur[i]
 			if p.distance_squared_to(cp) > r2 or not _union.has_point(p): continue
 			for b in _boxes:
 				if (b as AABB).has_point(p):
 					fish.append(p); break
 	fish.sort_custom(func(a, b): return a.distance_squared_to(cp) < b.distance_squared_to(cp))
-	for i in mini(fish.size(), FISH_N):
-		arr.append(Vector4(fish[i].x, fish[i].y, fish[i].z, 0.18))
+	# weights fade to 0 toward the FISH_N-th nearest (and toward FISH_R), so a fish entering or leaving the chosen set never pops
+	var nf := mini(fish.size(), FISH_N)
+	var d_cut: float = minf(FISH_R, fish[FISH_N].distance_to(cp)) if fish.size() > FISH_N else FISH_R
+	for i in nf:
+		var fw := 0.18 * (1.0 - smoothstep(d_cut * 0.6, d_cut, (fish[i] as Vector3).distance_to(cp)))
+		if fw > 0.0: arr.append(Vector4(fish[i].x, fish[i].y, fish[i].z, fw))
 	while arr.size() < PUSHERS: arr.append(Vector4.ZERO)
 	arr.resize(PUSHERS)
 	material.set_shader_parameter("pushers", PackedVector4Array(arr))
@@ -280,4 +360,5 @@ func _process(delta: float) -> void:
 		material.set_shader_parameter("push_bound", Vector4(c.x, c.y, c.z, (hi - lo).length() * 0.5 + rmax))
 	else:
 		material.set_shader_parameter("push_bound", Vector4(0, -1e6, 0, 0))
+	_measure_jitter(arr, delta)
 	stats["process_ms"] = snappedf(lerpf(float(stats.get("process_ms", 0.0)), (Time.get_ticks_usec() - tp) / 1000.0, 0.1), 0.001)
