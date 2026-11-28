@@ -51,7 +51,15 @@ void fragment() {
 				// the abyss: endless water, its own light field (Unreal M_OO_Abyss DEEP), nothing behind it
 				scene = vec3(0.0); glow = w_deep(d, z0, 1e4);
 			} else glow = w_glow(d, z0, L);
-		} else glow = w_glow(d, z0, L);
+		} else {
+			// a ray that ends below the lagoon floor (down a reef wall, a fore-reef slope 50-150 m down) sees mostly water column, not
+			// the lagoon's sand bounce: blend to the deep light field over the first 10 m past the floor, so it matches the open-water
+			// ray beside it (water surface thread's drop-off views, 28 Nov: these read near black on w_glow alone)
+			float zend = z0 + max(-d.y, 0.0) * L;
+			float kd = clamp((zend - (water_y - water_floor_y)) / 10.0, 0.0, 1.0);
+			glow = w_glow(d, z0, L);
+			if (kd > 0.0) glow = mix(glow, w_deep(d, z0, L), kd);
+		}
 		vec3 god = god_k > 0.5 ? god_rays(cam, d, L, FRAGCOORD.xy, god_frame) : vec3(0.0);
 		if (god_k > 1.5) ALBEDO = vec3(0.5 + 0.25 * god_acc(cam, d, L, FRAGCOORD.xy, god_frame));
 		else ALBEDO = max(scene * exp(-c * L) + (glow + god) * water_exposure, vec3(0.0));
