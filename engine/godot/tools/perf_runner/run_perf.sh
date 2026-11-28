@@ -16,9 +16,9 @@ mkdir -p "$OUT"
 dirs=()
 for p in ${PROFILES:-fullscreen}; do
   case $p in
-    window) flags=() ;;
+    window) flags=(--windowed --resolution 960x540) ;;
     fullscreen) flags=(--fullscreen) ;;
-    *) flags=(--resolution "$p") ;;
+    *) flags=(--windowed --resolution "$p") ;;
   esac
   mkdir -p "$OUT/$p"
   "$G" --path . ${flags[@]+"${flags[@]}"} --script res://tools/perf_runner/perf_runner.gd -- --out "$OUT/$p" --label "$p" "$@" > "$OUT/$p/godot.log" 2>&1

@@ -71,8 +71,10 @@ func _ready() -> void:
 	# Full screen by default (Gary 28 Nov: "make it fullscreen, for a more accurate reading and look"), so benches and the look
 	# are judged at the real screen size. AO_WINDOWED=1, or an explicit --resolution (cloud shots, the perf runner's window
 	# profile), keeps a window.
-	if DisplayServer.get_name() != "headless" and OS.get_environment("AO_WINDOWED") != "1" and not "--resolution" in OS.get_cmdline_args():
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	if DisplayServer.get_name() != "headless":
+		# project.godot opens full screen at window creation (macOS can ignore a switch made after load); a window only on request
+		var want_window := OS.get_environment("AO_WINDOWED") == "1" or "--resolution" in OS.get_cmdline_args() or "--windowed" in OS.get_cmdline_args()
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if want_window else DisplayServer.WINDOW_MODE_FULLSCREEN)
 	# Retina (screen scale 2): render at half resolution, upscaled. Gary's M1 Pro bench, key-frame view at 2704x1696: 83 ms -> 28 ms;
 	# the picture keeps the pixel count of a non-Retina screen of the same size. AO_FULL_RES=1 keeps full resolution.
 	if DisplayServer.get_name() != "headless" and DisplayServer.screen_get_scale() >= 1.99 and OS.get_environment("AO_FULL_RES") != "1":

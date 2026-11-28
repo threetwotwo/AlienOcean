@@ -6,6 +6,9 @@ run/main_scene="res://scenes/test_level.tscn"
 [display]
 window/size/viewport_width=960
 window/size/viewport_height=540
+; full screen from the first frame on every launch path (editor Run, debug, scripts, launchers); Gary 28 Nov.
+; Windowed only on request: --windowed, AO_WINDOWED=1 or an explicit --resolution (test_level.gd switches back).
+window/size/mode=3
 [rendering]
 renderer/rendering_method="forward_plus"
 lights_and_shadows/use_physical_light_units=true
