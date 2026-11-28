@@ -24,7 +24,7 @@ const SHADER := preload("res://fish/school_fish.gdshader")
 @export var tethered := true            # keep the record's home radius (false = roams, e.g. an open-water school)
 @export var threaded := true
 @export var body_m := -1.0              # metres; <= 0: the record's stand-in until the maker's glb gives it
-@export var lod_dist := Vector2(12.0, 30.0)   # metres to the camera: LOD0 within x, LOD1 within y, LOD2 beyond
+@export var lod_dist := Vector2(12.0, 25.0)   # metres to the camera: LOD0 within x, LOD1 within y, LOD2 beyond (no shadow past 25 m, schoollab v47)
 @export var look := {}                  # shader overrides (back_colour, stripe, ...)
 @export var collision_mask := 1
 @export var bank_gain := 1.0            # art multiplier on Thalassa's roll law (wildlife-ecosystem.js: 0.22 x yaw rate, cap 0.40 rad)
@@ -72,8 +72,9 @@ var _p_bc := PackedFloat64Array()        # where in its burst a phrase starts (0
 var _p_w := PackedFloat64Array()         # pose wander rates (curl, lean), rad/s
 var _p_ph := PackedFloat64Array()        # pose wander phases
 var _look_t := 0.0
+var look_pitch_off := PackedFloat64Array()  # drawn pitch offset (rad), each fish's own
 var look_yaw_off := PackedFloat64Array()  # drawn heading offset about up (rad), each fish's own
-var _k_head := 0.0; var _k_yaw := 0.0; var _k_v := 0.0; var _k_bank := 0.0; var _k_bc_up := 0.0; var _k_bc_down := 0.0
+var _k_bank_fast := 0.0; var _k_head := 0.0; var _k_yaw := 0.0; var _k_v := 0.0; var _k_bank := 0.0; var _k_bc_up := 0.0; var _k_bc_down := 0.0
 var _cap := 2.5
 var _u_min := 0.0; var _f_umin := 1.0; var _amp_flat := true
 var _beat_tab_u := PackedFloat64Array(); var _beat_tab_f := PackedFloat64Array()
@@ -113,6 +114,7 @@ func _ready() -> void:
 		mi.multimesh = mm
 		if asset.is_empty(): mi.material_override = _mat     # an export carries its own materials per surface
 		mi.top_level = true
+		if lod == 2: mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF   # far fish cast no shadow (schoollab v47, Gary 2 Nov)
 		mi.custom_aabb = AABB(Vector3(-1e4, -1e4, -1e4), Vector3(2e4, 2e4, 2e4))   # fish roam; culled per fish below
 		add_child(mi)
 		_mm.append(mi)
@@ -298,7 +300,7 @@ func _draw(alpha: float) -> void:
 		var lod := 0 if d2 < lx else (1 if d2 < ly else 2)
 		var mm: MultiMesh = mms[lod]
 		var k: int = counts[lod]
-		mm.set_instance_transform(k, Transform3D(fish_basis(look_fwd[i].rotated(Vector3.UP, look_yaw_off[i]), _bank[i]).scaled(Vector3(r, r, r)), pos))
+		mm.set_instance_transform(k, Transform3D(fish_basis(drawn_heading(i), _bank[i]).scaled(Vector3(r, r, r)), pos))
 		if has_asset:
 			mm.set_instance_custom_data(k, Color(_swim_ph[i], look_u[i], look_bend[i], look_amp[i]))
 		else:
@@ -320,12 +322,12 @@ func _swim_setup() -> void:
 ## Per-frame easing constants (frame-rate independent), computed once a frame rather than once a fish.
 func _frame_consts(dt: float) -> void:
 	_look_t += dt
-	_k_head = 1.0 - exp(-5.2 * dt); _k_yaw = 1.0 - exp(-6.5 * dt); _k_v = 1.0 - exp(-3.0 * dt); _k_bank = 1.0 - exp(-5.5 * dt)
+	_k_head = 1.0 - exp(-5.2 * dt); _k_yaw = 1.0 - exp(-6.5 * dt); _k_v = 1.0 - exp(-3.0 * dt); _k_bank = 1.0 - exp(-5.5 * dt); _k_bank_fast = 1.0 - exp(-14.0 * dt)
 	_k_bc_up = 1.0 - exp(-dt / 0.1); _k_bc_down = 1.0 - exp(-dt / 0.15)
 
 func _vary_setup(n: int) -> void:
-	look_yaw_off.resize(n)
-	_p_size.resize(n); _p_rate.resize(n); _p_amp.resize(n); _p_bc.resize(n); _p_w.resize(3 * n); _p_ph.resize(3 * n)
+	look_yaw_off.resize(n); look_pitch_off.resize(n)
+	_p_size.resize(n); _p_rate.resize(n); _p_amp.resize(n); _p_bc.resize(n); _p_w.resize(4 * n); _p_ph.resize(4 * n)
 	var r := RandomNumberGenerator.new(); r.seed = seed_ * 7741 + 3
 	for i in n:
 		var on := vary_look
@@ -333,8 +335,9 @@ func _vary_setup(n: int) -> void:
 		_p_rate[i] = clampf(1.0 + 0.06 * r.randfn(), 0.88, 1.12) if on else 1.0
 		_p_amp[i] = clampf(1.0 + 0.10 * r.randfn(), 0.8, 1.2) if on else 1.0
 		_p_bc[i] = r.randf() * 0.9 if on else 0.0
-		for j in 3:
-			_p_w[3 * i + j] = r.randf_range(0.35, 1.0); _p_ph[3 * i + j] = r.randf() * TAU
+		for j in 4:
+			_p_w[4 * i + j] = r.randf_range(TAU / 10.0, TAU / 7.0) if j == 1 else r.randf_range(0.35, 1.0)   # sway period 7-10 s (v32)
+			_p_ph[4 * i + j] = r.randf() * TAU
 
 ## What the viewer sees of fish i this frame (every fish, drawn or not, so filters never jump when a fish comes into view).
 ## Zero-twitch drawing, ported from Thalassa v20.19 wildlife-ecosystem.js ("speed deadband + slew-rate capped yaw +
@@ -375,11 +378,19 @@ func _look(i: int, alpha: float) -> void:
 	# each fish's own pose: a slow personal curl and roll that wander (Fable critique 28 Nov: "clones, same pose")
 	var curl := 0.0; var lean := 0.0
 	if vary_look:
-		curl = 0.35 * sin(_look_t * _p_w[3 * i] + _p_ph[3 * i])
-		lean = 0.07 * sin(_look_t * _p_w[3 * i + 1] + _p_ph[3 * i + 1])
-		look_yaw_off[i] = 0.05 * sin(_look_t * _p_w[3 * i + 2] + _p_ph[3 * i + 2])   # a few degrees of heading spread
+		curl = 0.35 * sin(_look_t * _p_w[4 * i] + _p_ph[4 * i])
+		lean = 0.12 * sin(_look_t * _p_w[4 * i + 1] + _p_ph[4 * i + 1])     # ~7 deg sway (schoollab v32), so the far wall glints
+		# heading spread (key frame v7c critique 28 Nov: "it still shares one heading"): each fish points up to 15 deg
+		# (SD ~10 deg) off the school's heading and up to 6 deg in pitch, wandering slowly; drawn only, the path is the sim's
+		look_yaw_off[i] = 0.26 * sin(_look_t * _p_w[4 * i + 2] + _p_ph[4 * i + 2])
+		look_pitch_off[i] = 0.10 * sin(_look_t * _p_w[4 * i + 3] + _p_ph[4 * i + 3])
 	# bank into the turn: Thalassa roll = 0.22 x yaw rate, cap 0.40 rad, eased at 5.5/s
-	_bank[i] += (clampf(yaw * 0.22 * bank_gain, -0.40, 0.40) + lean - _bank[i]) * _k_bank
+	# silver flash (schoollab v32, Gary 1 Nov "ripples of light that run across the school when it's alarmed"): a
+	# startled or agitated fish rolls up to 60 deg toward its turn and back as the startle fades, so the alarm wave runs
+	# across the school as flashes of flank (real silver schools flash because the fish roll, PLOS ONE 2023)
+	var flash := (1.05 if yaw >= 0.0 else -1.05) * st
+	var kb: float = _k_bank_fast if st > 0.2 else _k_bank
+	_bank[i] += (clampf(yaw * 0.22 * bank_gain, -0.40, 0.40) + lean + flash - _bank[i]) * kb
 	look_bend[i] = clampf(-yaw / maxf(vv, 0.3) + curl, -_cap, _cap)
 	if not asset.is_empty():
 		look_u[i] = _swim_drive(i, vv)
@@ -437,6 +448,13 @@ func _swim_drive(i: int, v: float) -> float:
 		_bc_k[i] -= _bc_k[i] * _k_bc_down
 		if _bc_k[i] > 0.3: _swim_ph[i] = fmod(_swim_ph[i] + TAU * f * dt, TAU)   # finish the stroke, then hold
 	return um
+
+## The heading fish i is drawn with: the smoothed heading plus its own yaw and pitch offsets.
+func drawn_heading(i: int) -> Vector3:
+	var f: Vector3 = look_fwd[i].rotated(Vector3.UP, look_yaw_off[i])
+	var side := Vector3.UP.cross(f)
+	if side.length_squared() > 1e-8: f = f.rotated(side.normalized(), look_pitch_off[i])
+	return f
 
 ## A fish's drawn frame: x = heading (head toward +x in the mesh), y = its back, rolled by bank (positive rolls the back
 ## toward its left, into a left turn), z = x cross y. Upright for a level heading (check S15; it was upside down to 28 Nov).
