@@ -328,7 +328,22 @@ if MANIFEST and os.environ.get('CORAL_APRON'):
     clear(); me = bpy.data.meshes.new('kf_coral_rubble'); bm.to_mesh(me); bm.free()
     ro = bpy.data.objects.new('kf_coral_rubble', me); bpy.context.scene.collection.objects.link(ro)
     C = np.concatenate(colsv); set_paint(ro, np.concatenate([np.clip(C, 0, 1), np.ones((len(C), 1))], 1))
-    tri = ro.copy(); tri.data = me.copy(); bpy.context.scene.collection.objects.link(tri); tri.name = 'kf_coral_rubble_TRI'
+    # game budget (test level thread 28 Nov: 462k tris / 94 MB with flat-shaded unshared verts): the kit pieces are ~7k tris each,
+    # so decimate the merged apron to RUBBLE_TRIS (80k; runtime LODs go lower), smooth by angle so the glTF verts stay shared,
+    # and a coarse concave collider (RUBBLE_COL_TRIS, 6k) instead of a full-detail copy.
+    def _decimate(o, target):
+        n0 = tris(o)
+        if n0 <= target: return
+        bpy.context.view_layer.objects.active = o; bpy.ops.object.select_all(action='DESELECT'); o.select_set(True)
+        m_ = o.modifiers.new('dec', 'DECIMATE'); m_.decimate_type = 'COLLAPSE'; m_.ratio = target / n0; m_.use_collapse_triangulate = True
+        bpy.ops.object.modifier_apply(modifier=m_.name)
+    bpy.context.view_layer.objects.active = ro; bpy.ops.object.select_all(action='DESELECT'); ro.select_set(True)
+    bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT'); bpy.ops.mesh.remove_doubles(threshold=0.0005); bpy.ops.object.mode_set(mode='OBJECT')
+    tri = ro.copy(); tri.data = me.copy(); bpy.context.scene.collection.objects.link(tri); tri.name = 'kf_coral_rubble_TRI'; tri.data.name = 'kf_coral_rubble_TRI'
+    _decimate(ro, int(os.environ.get('RUBBLE_TRIS', 80000))); _decimate(tri, int(os.environ.get('RUBBLE_COL_TRIS', 6000)))
+    bpy.ops.object.select_all(action='DESELECT'); ro.select_set(True); bpy.context.view_layer.objects.active = ro
+    bpy.ops.object.shade_smooth_by_angle(angle=math.radians(40))
+    print('RUBBLE TRIS', tris(ro), 'collider', tris(tri))
     finish('kf_coral_rubble', ro, [tri], 'rubble', os.environ['CORAL_APRON'] + ' + ' + RUBBLE_KIT)
     print('CORAL RUBBLE', len(CR), 'pieces,', len(cache_), 'kit meshes, on rock', sum(1 for r in CR if r[3] > 0.05))
 

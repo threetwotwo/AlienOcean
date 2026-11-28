@@ -1,5 +1,10 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, lagoon dressing): lighter coral rubble
+- Test level thread: kf_coral_rubble was 462k tris, 94 MB (flat-shaded, unshared verts) with a full-detail concave copy as its
+  collider (the second mesh seen on the Mac). Now one drawn mesh decimated to 80k tris (RUBBLE_TRIS), smooth by angle 40 deg so
+  verts are shared, and a 6k-tri concave collider (RUBBLE_COL_TRIS): 2.5 MB. Key frame view unchanged by eye. Lagoon 1.82 -> 1.30 M tris.
+
 ## 0.6.0-dev (28 Nov 2026, lagoon dressing): the lagoon dressed like key frame v7c
 - Target: key frame v7c (Gary approved 28 Nov 04:35Z, "Approve, keep A brightness"; papers/process/art_bible/style_level/keyframe/
   key_frame_v7.png, layout_v7.json). world_dress/lagoon_keyframe.json 1.0.0 is its layout: the v18c arch at (-2.9, 10.6) rot 5.18,

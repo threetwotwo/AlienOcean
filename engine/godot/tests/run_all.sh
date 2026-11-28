@@ -20,6 +20,9 @@ echo "== GI light field (look)"
 echo "== Overcast (look)"
 "$G" --headless --path . --script res://tests/test_overcast.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_overcast.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_overcast.gd -- --fault >/dev/null 2>&1 && { echo "OVERCAST PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Overcast planted fault caught"
+echo "== Marine snow drift"
+"$G" --headless --path . --script res://tests/test_marine_snow.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_marine_snow.gd >/dev/null 2>&1 || rc=1
+"$G" --headless --path . --script res://tests/test_marine_snow.gd -- --fault >/dev/null 2>&1 && { echo "MARINE SNOW PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Marine snow planted fault caught"
 echo "== M29 buoyancy"
 for r in 30 60 120; do
   "$G" --headless --fixed-fps $r --path . --script res://tests/test_buoyancy.gd -- --rate $r --out "$OUT/m29_$r.json" 2>&1 | grep -E "FAIL|M29" || true
