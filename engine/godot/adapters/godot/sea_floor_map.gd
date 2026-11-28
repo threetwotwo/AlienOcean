@@ -1,4 +1,4 @@
-## Sea floor map 0.1.0 (adapters/godot; water surface thread, 27 Nov 2026): what lies under the sea round the eye, seen
+## Sea floor map 0.1.1 (adapters/godot; water surface thread, 27 Nov 2026): what lies under the sea round the eye, seen
 ## straight down: its light (radiance, nits, as the world's own shaders light it at its depth: sun, net, sky, sand
 ## bounce) and its top height, for the mirror in the underside of the surface (where a reflected ray really lands:
 ## sand, grass, rock; lagoonwater v73/v87 read a baked floor map of the slice the same way, with stand-in colours).
@@ -24,6 +24,7 @@ var _vp_alb: SubViewport
 var _vp_h: SubViewport
 var _cams := []
 var _pending := 0
+var _dirty := false            # the light changed (WorldRoot.apply): capture again where we are
 
 func _init() -> void:
 	name = "SeaFloorMap"
@@ -70,11 +71,17 @@ func _ready() -> void:
 	RenderingServer.global_shader_parameter_set("water_floor_albedo", _vp_alb.get_texture())
 	RenderingServer.global_shader_parameter_set("water_floor_height", _vp_h.get_texture())
 
+func refresh() -> void:
+	## the light changed (the hour, the eye going under or out): the radiance captured under the old light is stale,
+	## so capture again on the next follow (28 Nov: at night the mirror still showed the day's floor, bright cyan)
+	_dirty = true
+
 func follow(eye: Vector3) -> void:
 	## call each frame (or when the eye moves) with the eye
 	var c := Vector2(eye.x, eye.z)
-	if c.distance_to(centre) < recentre_m and _pending == 0: return
+	if c.distance_to(centre) < recentre_m and _pending == 0 and not _dirty: return
 	if _pending == 0:
+		_dirty = false
 		centre = (c / snap_m).round() * snap_m
 		for cam in _cams:
 			cam.global_transform = Transform3D(Basis.looking_at(Vector3.DOWN, Vector3.FORWARD), Vector3(centre.x, ALTITUDE, centre.y))
