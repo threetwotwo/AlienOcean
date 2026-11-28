@@ -219,10 +219,15 @@ func attach_camera(cam: Camera3D) -> void:
 
 func _process(_dt: float) -> void:
 	## the god rays' start point moves on each frame only where TAA averages it (Unreal: StateFrameIndexMod8 under TSR);
-	## without TAA it holds still, or the shafts would boil.
+	## without TAA it holds still, or the shafts would boil. A temporal upscaler (FSR 2, MetalFX temporal) averages frames as TAA does.
 	if under_mat == null: return
 	var vp := get_viewport()
-	under_mat.set_shader_parameter("god_frame", float(Engine.get_frames_drawn() % 8) if vp and vp.use_taa else 0.0)
+	under_mat.set_shader_parameter("god_frame", float(Engine.get_frames_drawn() % 8) if vp and temporal(vp) else 0.0)
+
+static func temporal(vp: Viewport) -> bool:
+	## frames are averaged on this viewport (TAA, FSR 2 or MetalFX temporal), so per-frame noise may move on each frame
+	var m := vp.scaling_3d_mode
+	return vp.use_taa or (vp.scaling_3d_scale < 0.999 and (m == Viewport.SCALING_3D_MODE_FSR2 or m == Viewport.SCALING_3D_MODE_METALFX_TEMPORAL))
 
 func set_fov(fov_deg: float) -> void:
 	## CameraAttributesPhysical owns the field of view: Godot takes the vertical FOV from a 24 mm sensor height (12 mm
