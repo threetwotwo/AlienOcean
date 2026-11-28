@@ -20,6 +20,7 @@ validator, P11 silhouette against the ceiling frame (info), and the export stage
   EX4 clips swim_loop, breathe_loop, gape, flare exist; swim_loop closes (last frame = first within 1e-4 BL)
   EX5 collision: at least 3 hulls (a body that bends), >= 99 % of the form's inside covered, hull volume <= 1.3 x form volume
   EX6 the swim settings ride in the glTF (rig node extras alien_ocean.swim: envelope with phase, envelopes at >= 2 speeds, wavelength, beat law, clips)
+  EX7 LOD chain by the Unreal-era intake rule (creature_meter K2 + export round trip X4): each level 2.5-6 x fewer triangles, switch distances stated
 """
 import json, os, sys, math, copy, hashlib, subprocess
 from collections import Counter, defaultdict, deque
@@ -262,7 +263,7 @@ def export_checks(out, st):
 
 
 def ex_checks(out, st):
-    """EX1-EX6 (export stage) from glb_stats.json and the written fish.glb."""
+    """EX1-EX7 (export stage) from glb_stats.json and the written fish.glb."""
     R = {}
     for k, tag in (('EX1', 'EX1_gape'), ('EX2', 'EX2_flare')):
         e, m = st.get(tag + '_max_err_pctSL'), st.get(tag + '_moved_pctSL', 0)
@@ -287,6 +288,12 @@ def ex_checks(out, st):
     need = ('wave', 'beat_law', 'clips')
     R['EX6_pass'] = bool(sw) and all(k in sw for k in need) and bool(sw['wave'].get('amplitude_envelope_BL')) and bool(sw['wave'].get('lam_BL')) \
         and len(sw['wave'].get('envelopes_by_speed') or []) >= 2 and all(len(r) == 3 for r in sw['wave']['amplitude_envelope_BL'])
+    # EX7 the LOD chain follows the Unreal-era intake rule (creature_meter K2) and export round trip X4: each level 2.5-6 x fewer
+    # triangles than the one before, every level built within 20 % of its count (fin and eye floors), switch distances stated (rising)
+    ch = (st.get('lod_chain') or {}).get('levels') or []
+    R['EX7_chain'] = [(c['lod'], c.get('tris_built', c['tris']), c['from_m']) for c in ch]
+    R['EX7_pass'] = len(ch) >= 2 and all(2.5 <= ch[i - 1].get('tris_built', ch[i - 1]['tris']) / max(ch[i].get('tris_built', ch[i]['tris']), 1) <= 6.0
+                                         and ch[i].get('tris_built', 1e9) <= 1.2 * ch[i]['tris'] and ch[i]['from_m'] > ch[i - 1]['from_m'] for i in range(1, len(ch)))
     return R
 
 
@@ -339,15 +346,17 @@ def planted(C0, V0, VN0, form, rec):
                 interior_faces=10, lods=dict(LOD1=dict(tris=1, interior_tris=5), LOD2=dict(tris=1, interior_tris=2)),
                 clips=dict(swim_loop={}, breathe_loop={}, gape={}, flare={}), swim_loop_closure_BL=0.0,
                 collision=dict(hulls=5, coverage=1.0, hull_over_form_volume=1.2),
+                lod_chain=dict(levels=[dict(lod=0, tris=8000, from_m=0.0), dict(lod=1, tris=2000, from_m=5.0, tris_built=1950), dict(lod=2, tris=500, from_m=10.0, tris_built=490)]),
                 swim_extras=dict(wave=dict(amplitude_envelope_BL=[[0, 0.02, 0.0]], lam_BL=1.0, envelopes_by_speed=[{}, {}]), beat_law={}, clips={}))
     ex = lambda **kw: ex_checks('/nonexistent', {**good, **kw})
-    PL['EX planted baseline passes'] = all(ex()[k] for k in ('EX1_pass', 'EX2_pass', 'EX3_pass', 'EX4_pass', 'EX5_pass', 'EX6_pass'))
+    PL['EX planted baseline passes'] = all(ex()[k] for k in ('EX1_pass', 'EX2_pass', 'EX3_pass', 'EX4_pass', 'EX5_pass', 'EX6_pass', 'EX7_pass'))
     PL['EX1 (jaw skinned off the stress pose by 0.5 % SL)'] = not ex(EX1_gape_max_err_pctSL=0.5)['EX1_pass']
     PL['EX2 (covers never move)'] = not ex(EX2_flare_moved_pctSL=0.0)['EX2_pass']
     PL['EX3 (LOD2 lost the mouth interior)'] = not ex(lods=dict(LOD1=dict(tris=1, interior_tris=5), LOD2=dict(tris=1, interior_tris=0)))['EX3_pass']
     PL['EX4 (swim loop does not close)'] = not ex(swim_loop_closure_BL=0.01)['EX4_pass']
     PL['EX5 (one rigid hull for a bending body)'] = not ex(collision=dict(hulls=1, coverage=1.0, hull_over_form_volume=1.1))['EX5_pass']
     PL['EX6 (no swim settings in the glTF)'] = not ex(swim_extras=None)['EX6_pass']
+    PL['EX7 (LOD1 only 2 x fewer triangles than LOD0)'] = not ex(lod_chain=dict(levels=[dict(lod=0, tris=8000, from_m=0.0), dict(lod=1, tris=2000, from_m=5.0, tris_built=4000)]))['EX7_pass']
     PL['EX6 (one speed only, no envelopes to blend)'] = not ex(swim_extras=dict(wave=dict(amplitude_envelope_BL=[[0, 0.02, 0.0]], lam_BL=1.0, envelopes_by_speed=[{}]), beat_law={}, clips={}))['EX6_pass']
     return PL
 
