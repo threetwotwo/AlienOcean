@@ -56,7 +56,7 @@ def write(B, uvr, fins, eyes, rec, form, map_prov, out, stats):
                    eyes=[dict(c=e['c'].tolist(), n=e['n'].tolist(), r=e['r'], r_side=e['r_side'], side=e['side']) for e in eyes],
                    eye=form.EY, SL_mm=rec['SL_mm'], xend=form.XEND, bones=rec['bones'], species=rec['species'], style=rec.get('style', {}), hamp=HAMP,
                    input_faults=rec['input_faults'], inputs=rec['provenance'], defaults_used=rec['defaults_used'],
-                   parts=dict(eyes=len(B.eye['rims']), fins=sorted(fins.keys())), form_rules=dict(orbit_lift_pctSL=round(form.ORBIT_LIFT * 100, 2)),
+                   parts=dict(eyes=len(B.eye['rims']), fins=sorted(fins.keys())), form_rules=dict(orbit_lift_pctSL=round(form.ORBIT_LIFT * 100, 2), jaw_lift_pctSL=round(form.JAW_LIFT * 100, 2)),
                    uv_relax={str(k): v for k, v in uvr['uv_relax'].items()},
                    provenance=form.provenance() + map_prov,
                    stats=stats),
