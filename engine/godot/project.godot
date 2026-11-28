@@ -2,7 +2,7 @@ config_version=5
 [application]
 config/name="Alien Ocean"
 config/version="0.6.0-dev"
-run/main_scene="res://scenes/probe.tscn"
+run/main_scene="res://scenes/test_level.tscn"
 [display]
 window/size/viewport_width=960
 window/size/viewport_height=540

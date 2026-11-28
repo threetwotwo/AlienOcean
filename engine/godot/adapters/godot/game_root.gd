@@ -313,9 +313,8 @@ func _load_pieces() -> void:
 	if worldtex_dir != "": _ground = WorldTextures.make_material(worldtex_dir)
 	for f in DirAccess.get_files_at(pieces_dir):
 		if not f.ends_with(".glb"): continue
-		var doc := GLTFDocument.new(); var st := GLTFState.new()
-		if doc.append_from_file(pieces_dir.path_join(f), st) != OK: continue
-		var sc := doc.generate_scene(st)
+		var sc := GlbLoader.load_scene(pieces_dir.path_join(f))   # imported GLBs bring their LODs and shadow meshes
+		if sc == null: continue
 		lagoon.add_child(sc)
 		var lf := f.to_lower()
 		var mat: Material = seabed

@@ -58,6 +58,9 @@ for r in 30 120; do
 done
 "$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --monkey "${1:-4}" --monkey-secs 60 --only BM > "$OUT/m04_monkey.txt" 2>&1 || { [ "${M04_STRICT:-0}" = 1 ] && rc=1; }
 echo "monkey: $(tail -1 "$OUT/m04_monkey.txt")"
+echo "== Test level T1 (stand-in floor when the lagoon assets are absent)"
+OUT="$OUT" bash tests/run_test_level.sh 600 | grep -vE "^PASS" || rc=1
+[ "${PIPESTATUS[0]}" = "0" ] || rc=1
 echo "== Blockout kit + blockout stress scene (30/60/120 Hz)"
 OUT="$OUT" bash tests/run_blockout.sh || rc=1
 echo "== result: $([ $rc = 0 ] && echo ALL GREEN || echo FAILURES)"

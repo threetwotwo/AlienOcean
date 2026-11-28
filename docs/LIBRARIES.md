@@ -29,6 +29,7 @@ NavigationServer3D through a WorldQuery-style service row in core/README.md befo
 | Terrain3D | MIT | open-world seabed streaming | engine thread, at P9 |
 | Material Maker | MIT | authoring rock and coral detail only | engine thread, at the materials step |
 | Effekseer | MIT | particles (marine snow) | decide at the marine snow port |
+| CORTAO (github.com/theagentd/CORTAO) | MIT | ambient occlusion + bent normals, a GTAO-class SSAO replacement (claims GTAO quality at under half the cost); GLSL compute, needs depth + view normals | look pass, after frame time is solved (Gary asked 28 Nov; SSAO costs only 0-1.3 ms on his M1 Pro, so the gain is look, not speed; 1-commit reference code) |
 | ozz-animation | MIT | animation playback and blending | not needed while the body rig is procedural (M04); revisit if keyframed animation arrives |
 
 ## Not adopted (with reasons)

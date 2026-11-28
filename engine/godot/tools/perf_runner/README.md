@@ -37,3 +37,8 @@ keyframe_view). Pass = that station is the slowest and over 40 ms, files written
 ## Known limits
 - Godot 4.7 reports 0 GPU ms on Metal, so frame ms is the whole frame (CPU + GPU); the toggle deltas are the useful split.
 - Switching SDFGI back on rebuilds its cascades; the toggle pass settles 1 s after each switch.
+
+## Swim shots
+`swim_shots.gd`: the girl swims by herself (real `move_forward` input) across the biggest seagrass meadow; pictures at the
+start, half way, leaving, then looking back after `--after` s and 4 s later (grass push and trail), plus swim.json.
+`godot --path . --script res://tools/perf_runner/swim_shots.gd -- --out DIR [--speed 0.35] [--pitch -0.45] [--after 2]`
