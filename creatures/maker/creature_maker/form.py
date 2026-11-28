@@ -32,7 +32,7 @@ AIM_UP = (-6.0, 12.0)        # DEFAULT (deg above horizontal): the range real ey
 AIM_FWD = (4.0, 26.0)        # DEFAULT (deg toward the snout): scan median 14.3, IQR 10.2-19.6, error 7.8 -> median +- 1.5 errors
 TISSUE_REACH = 3.0           # DEFAULT (x eye radius): where the tissue has run out into the loft below the eye. It covers the scans' ring (to 2.4 R);
                              # HP-HEAD-ORBIT-1 found the built skin low at 1.6 and 2.0 R, and the scan skin profile (levels_r1) is read to 2.0 R
-ORBIT_SWELL = 2.0            # DEFAULT: length / height of the dorsal outline's lift over an eye that stands above it (1 = the eye's own circle)
+ORBIT_SWELL = 2.0            # DEFAULT: half-length of the dorsal outline's swell over an eye that stands above it, x the eye's radius + margin
 ROOF_N = 6.0                 # DEFAULT: the boxiest section the tissue may make (superellipse exponent). Art direction: the scans' own roofs are
                              # rounder (gapfill orbit_r1 skeleton.skull.roof_exp 1.25-2.4), a wide forehead is Gary's ask (28 Nov)
 TISSUE_K = 0.04              # DEFAULT: the tissue meets the loft over 4 % of the local half-width, no crease
@@ -93,7 +93,8 @@ class Form:
         # structure rule: the orbit shapes the head profile. Where the record's eye (plus a skin margin for the eye loops)
         # rises above the dorsal outline, the outline is lifted over it (ceiling frame: the alfonsino eye bulges the profile).
         self._CLR = 0.15 * EY['d'] / 2
-        _xs = np.linspace(0, self.XEND, 400); self.ORBIT_LIFT = float(np.max(self._top_orbit(_xs) - self._TOP0(_xs)))
+        _xs = np.linspace(0, self.XEND, 2000); self._swell = None; _l = self._top_orbit(_xs) - self._TOP0(_xs)
+        self.ORBIT_LIFT = float(np.max(_l)); self._swell = (float(_xs[int(np.argmax(_l))]), self.ORBIT_LIFT) if self.ORBIT_LIFT > 1e-5 else None
         _xm = np.linspace(0, self._seam[-1, 0], 60)
         self.JAW_LIFT = float(max(np.max(self.TOP(_xm) - self._top_orbit(_xm)), np.max(self._BOT0(_xm) - self.BOT(_xm))))
         self._orb = None; self.ORBIT = self._orbit()
@@ -166,16 +167,20 @@ class Form:
 
     # ---- level 0: the loft
     def _top_orbit(self, x):
-        # the lift is a swell, a parabola ORBIT_SWELL times as long as it is high that runs into the outline without a step:
-        # with the skull roof at the eyes' width (_tissue) a lift as short as the eye, ending square on the outline, stood
-        # across the forehead as a bar from eye to eye
-        # Toward the snout the swell stops short of the mouth tip where it can (porcupinefish: an eye that reaches the snout;
-        # a swell over the lips thickened the upper jaw into the mouth cavity); it is never shorter than sqrt 2 x its
-        # height, the shortest parabola that clears the eye's circle
-        E = self.EY; t0 = self._TOP0(x); rr = E["d"] / 2 + self._CLR; dx = np.asarray(x) - E['x']
-        w = np.where(dx < 0, np.clip(E['x'] - self._seam[0, 0], np.sqrt(2) * rr, rr * ORBIT_SWELL), rr * ORBIT_SWELL)
-        bump = E['y'] + rr * (1 - (dx / w) ** 2)
-        return smax(t0, bump, max(0.004, self._CLR))
+        """the dorsal outline lifted over the orbit. Where the eye's circle (plus its skin margin) stands above the record
+        outline, the outline clears it, and the lift is carried on as a swell ORBIT_SWELL times as long, as high as the
+        circle stands out and no higher: with the skull roof at the eyes' width (_tissue) a lift as short as the eye,
+        ending square on the outline, stood across the forehead as a bar from eye to eye. An eye under the outline lifts
+        nothing. Toward the snout the swell runs no further than the rictus where the mouth lies under the eye (porcupinefish,
+        blenny: an eye that reaches the snout; a swell over the lips thickened the upper jaw into the mouth cavity)."""
+        E = self.EY; x = np.asarray(x, float); t0 = self._TOP0(x); rr = E["d"] / 2 + self._CLR; dx = x - E['x']
+        bump = E['y'] + rr * np.sqrt(np.clip(1 - (dx / rr) ** 2, 0, 1)) - (np.abs(dx) >= rr) * 1.0
+        lift = smax(t0, bump, 0.004) - t0
+        if self._swell is None: return t0 + lift
+        xp, L = self._swell; d2 = x - xp
+        w = np.where(d2 < 0, np.clip(xp - self._seam[-1, 0], 0.25 * rr, rr * ORBIT_SWELL), rr * ORBIT_SWELL)
+        bell = L * np.clip(1 - (d2 / w) ** 2, 0, 1) ** 2
+        return t0 + smax(lift, bell, 0.2 * L)
 
     def _seam_y(self, x):
         """mouth line height at x, and whether x lies in the mouth (in front of the rictus)."""
@@ -397,7 +402,7 @@ class Form:
         # the mouth line), or the lips and the mouth cavity under them part company (porcupinefish: an eye that reaches the snout)
         ys, _ = self._seam_y(xm); xr = self._seam[-1, 0]
         s_ = np.clip((y - ys - self.MO['maxilla_h']) / er, 0, 1); s_ = np.maximum(s_, np.clip((xm - xr) / er, 0, 1))
-        s_ = np.maximum(s_, np.clip((RING_R[0] - np.hypot(dx, y - eyy) / er) / (RING_R[0] - 1), 0, 1)); W = W * s_ * s_ * (3 - 2 * s_)    # the eye's own rim keeps its plane
+        W = W * s_ * s_ * (3 - 2 * s_)
         # in: only the furrow, where the eye's plane lies under the skin at the rim; it has closed by the skin ring
         s_ = np.clip((RING_R[0] - np.hypot(dx, y - eyy) / er) / (RING_R[0] - 1), 0, 1); Wi = s_ * s_ * (3 - 2 * s_)
         k[m] = 1 + W * (Ko - 1) + Wi * (np.minimum(K, 1) - 1)
