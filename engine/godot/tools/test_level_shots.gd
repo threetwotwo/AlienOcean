@@ -35,6 +35,7 @@ func _run(main) -> void:
 	var aom := OS.get_environment("AO_AO")
 	if aom == "cortao": lvl.set_toggle("cortao", true)
 	elif aom == "off": lvl.set_toggle("ssao", false)
+	if OS.get_environment("AO_CORTAO_LIGHT") != "": lvl.game.world_root.cortao_fx.light_weighted = OS.get_environment("AO_CORTAO_LIGHT") == "1"   # occlusion weighted by the water light per direction
 	var pick := OS.get_environment("AO_SHOTS")
 	var feet_cam := Camera3D.new(); root.add_child(feet_cam)
 	for s in SHOTS:

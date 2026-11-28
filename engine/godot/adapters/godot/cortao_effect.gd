@@ -20,7 +20,9 @@ var filter_normal := 16.0           # CORTAO default 128; 16 with shape normals:
 var animate := false              # force a new seed every frame; otherwise it follows the viewport (TAA / FSR 2 / MetalFX temporal); constant without one: no flicker
 var invert_flip := false          # checks only: the planted fault (AO lands mirrored)
 var depth_normals := true         # the shape's normal from depth, not the materials' detail normal (see cortao_prepass.glsl)
-var light_weighted := false       # (trial, off by default) each open ray counts by the water's light from its direction (above: light_down, below: light_up)
+var light_weighted := true        # each open ray counts by the water's light from its direction (above: light_down, below: light_up).
+                                  # Key frame 28 Nov: darkens only what sits under an overhang (table coral's stalk and the corals beneath, up to
+                                  # ~10/255), leaves open sand alone; toward v7c's darker under-coral shadow. Off: AO_CORTAO_LIGHT=0
 var light_down := 1.0             # luminance of the upper half of the field (WorldRoot: Ek), any unit
 var light_up := 1.0               # luminance of the lower half (WorldRoot: Eu, the sand's bounce)
 var rays := int(OS.get_environment("CORTAO_RAYS")) if OS.get_environment("CORTAO_RAYS") != "" else 16   # 16 or 32 (lookup table per count)
