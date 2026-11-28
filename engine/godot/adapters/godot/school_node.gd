@@ -41,6 +41,7 @@ var paused := false
 var wq
 var seg_fn: Callable = segment_hit     # the swept guard's ray (tests may swap it)
 var _acc := 0.0
+var _shadow: MultiMeshInstance3D      # shadow-only LOD2 copy of the near fish
 var _task := -1
 var _prev := PackedVector3Array()
 var _cur := PackedVector3Array()
@@ -114,10 +115,22 @@ func _ready() -> void:
 		mi.multimesh = mm
 		if asset.is_empty(): mi.material_override = _mat     # an export carries its own materials per surface
 		mi.top_level = true
-		if lod == 2: mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF   # far fish cast no shadow (schoollab v47, Gary 2 Nov)
+		# near fish draw full detail but cast their shadow from the LOD2 mesh (_shadow below): a shadow on sand 2 m down
+		# can't show 8k-triangle fins, and every cascade drew it (key-frame view: ~7 M of 10.9 M triangles were fish shadows)
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF   # far fish cast no shadow at all (schoollab v47, Gary 2 Nov)
 		mi.custom_aabb = AABB(Vector3(-1e4, -1e4, -1e4), Vector3(2e4, 2e4, 2e4))   # fish roam; culled per fish below
 		add_child(mi)
 		_mm.append(mi)
+	# shadow proxy: the LOD2 mesh, shadows only, for every fish nearer than lod_dist.y (the ones that cast shadows before)
+	var smm := MultiMesh.new()
+	smm.transform_format = MultiMesh.TRANSFORM_3D; smm.use_custom_data = true
+	smm.mesh = asset.meshes[2] if not asset.is_empty() else StandIn.build(2)
+	smm.instance_count = n; smm.visible_instance_count = 0
+	_shadow = MultiMeshInstance3D.new(); _shadow.multimesh = smm; _shadow.top_level = true
+	if asset.is_empty(): _shadow.material_override = _mat
+	_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+	_shadow.custom_aabb = AABB(Vector3(-1e4, -1e4, -1e4), Vector3(2e4, 2e4, 2e4))
+	add_child(_shadow)
 	_spawn_outside_rock()
 	_take_snapshot(); _take_snapshot()
 	_bank.resize(n)
@@ -287,6 +300,9 @@ func _draw(alpha: float) -> void:
 	var has_asset := not asset.is_empty()
 	var lx: float = lod_dist.x * lod_dist.x; var ly: float = lod_dist.y * lod_dist.y
 	var mms: Array = [_mm[0].multimesh, _mm[1].multimesh, _mm[2].multimesh]
+	var blo := [Vector3.INF, Vector3.INF, Vector3.INF]; var bhi := [-Vector3.INF, -Vector3.INF, -Vector3.INF]; var rmax := 0.0
+	var ns := 0; var slo := Vector3.INF; var shi := -Vector3.INF
+	var sm: MultiMesh = _shadow.multimesh if _shadow != null else null
 	for i in n:
 		var pos := _prev[i].lerp(_cur[i], alpha)
 		_look(i, alpha)
@@ -300,13 +316,27 @@ func _draw(alpha: float) -> void:
 		var lod := 0 if d2 < lx else (1 if d2 < ly else 2)
 		var mm: MultiMesh = mms[lod]
 		var k: int = counts[lod]
-		mm.set_instance_transform(k, Transform3D(fish_basis(drawn_heading(i), _bank[i]).scaled(Vector3(r, r, r)), pos))
-		if has_asset:
-			mm.set_instance_custom_data(k, Color(_swim_ph[i], look_u[i], look_bend[i], look_amp[i]))
-		else:
-			mm.set_instance_custom_data(k, Color(_swim_ph[i], look_amp[i], look_bend[i], _d_s[i]))
+		var xf := Transform3D(fish_basis(drawn_heading(i), _bank[i]).scaled(Vector3(r, r, r)), pos)
+		var cd := Color(_swim_ph[i], look_u[i], look_bend[i], look_amp[i]) if has_asset else Color(_swim_ph[i], look_amp[i], look_bend[i], _d_s[i])
+		mm.set_instance_transform(k, xf)
+		mm.set_instance_custom_data(k, cd)
 		counts[lod] = k + 1
-	for lod in 3: (mms[lod] as MultiMesh).visible_instance_count = counts[lod]
+		blo[lod] = (blo[lod] as Vector3).min(pos); bhi[lod] = (bhi[lod] as Vector3).max(pos); rmax = maxf(rmax, r)
+		if lod < 2 and sm != null:
+			sm.set_instance_transform(ns, xf); sm.set_instance_custom_data(ns, cd)
+			ns += 1; slo = slo.min(pos); shi = shi.max(pos)
+	for lod in 3:
+		(mms[lod] as MultiMesh).visible_instance_count = counts[lod]
+		# tight bounds of the fish drawn this frame: with the old +-10 km box every shadow cascade (and every other view) drew
+		# every fish; with real bounds each cascade culls the school as a whole (key-frame view: ~9 M shadow triangles)
+		if counts[lod] > 0:
+			var m := Vector3.ONE * (rmax * 1.5 + 0.1)
+			_mm[lod].custom_aabb = AABB(blo[lod] - m, bhi[lod] - blo[lod] + m * 2.0)
+	if _shadow != null:
+		_shadow.multimesh.visible_instance_count = ns
+		if ns > 0:
+			var ms := Vector3.ONE * (rmax * 1.5 + 0.1)
+			_shadow.custom_aabb = AABB(slo - ms, shi - slo + ms * 2.0)
 	main_ms += (Time.get_ticks_usec() - t0) / 1000.0
 
 ## Caches the export's swim numbers (U_min, beat table) for the per-frame drawing.
