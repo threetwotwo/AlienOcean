@@ -26,6 +26,7 @@ uniform float fine3 = 1.0;              // v89: the finest cascade, underside on
 uniform float sun_size = 1.0;           // x the real sun's disc (0.533 deg)
 uniform float mirror_k = 1.0;
 #include "res://look/sea_floor_map.gdshaderinc"
+#include "res://look/hot_probe.gdshaderinc"
 varying vec2 still;
 varying vec3 wi;                        // island world point
 
@@ -118,5 +119,6 @@ void fragment() {
 	vec3 u_mir = glow + f_lit * exp(-c * uL);
 	acc += (1.0 - tr) * mirror_k * u_mir;
 	acc = sea_foam_under_haze(fo, acc);                     // the bubble cloud under breaking water: a bright haze
-	ALBEDO = min(acc * water_exposure, vec3(30000.0));
+	ALBEDO = hot_probe_paint(acc * water_exposure, vec3(1.0, 0.0, 0.0));   // stress-shot switch (look/hot_probe), off in play
+	if (hot_probe <= 0.0) ALBEDO = min(ALBEDO, vec3(30000.0));
 }
