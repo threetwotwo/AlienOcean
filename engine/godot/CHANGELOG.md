@@ -1,5 +1,12 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, look thread): the GI forgets the old light after a jump in the hour
+- Surface thread report: after the hour slider jumped noon -> 23:00 the lagoon stayed noon-lit (sand, fish blown-out cyan at
+  night exposure). Reproduced (shot 09, AO_HOUR 12 then 23 six frames before the shot): frame mean 135/205/210; GI off 6/15/21.
+  Cause: SDFGI keeps its probes' light over ~30 frames (light updates every 8). WorldRoot.apply now drops the cache when EV100
+  jumps more than 3 stops: SDFGI off until two frames are drawn without it, then rebuilt from the new light (a toggle inside one
+  frame is never drawn: tried, no effect). After: 6/15/21.
+
 ## 0.6.0-dev (28 Nov 2026, look thread): the sun under water is as wide as the waves make it
 - Blind critique item 6 ("shadows razor-hard regardless of height"): the sun light had no angular size. Under water it is now
   the refracted disc (0.53 / 1.333 deg) widened by the waves' slope, each facet bending the beam by (1 - 1/1.333) x slope:
