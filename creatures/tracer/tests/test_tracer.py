@@ -98,3 +98,13 @@ def test_views_top_and_apply():
     O = D['record']['outline']
     assert abs(max(w for u, w in O['hw']) - 17.0) < 2 and O['hw'][-1][0] == 180
     assert len(O['sections']) == 1 and abs(sil['front'][0][0] - 0.1) < 0.012
+
+
+def test_front_level_finds_roll():
+    """an egg-shaped head-on section rolled by 6 degrees is levelled back to near-perfect mirror symmetry."""
+    import cv2, numpy as np
+    from species_tracer import views
+    m = np.zeros((300, 300), np.uint8); cv2.ellipse(m, (150, 150), (50, 110), 0, 0, 360, 1, -1); cv2.circle(m, (150, 210), 60, 1, -1)
+    r = cv2.warpAffine(m, cv2.getRotationMatrix2D((150, 160), 6, 1.0), (300, 300), flags=cv2.INTER_NEAREST) > 0
+    a, s0, s1 = views.level(r)
+    assert abs(a + 6) < 1.0 and s1 > 0.97 and s1 > s0

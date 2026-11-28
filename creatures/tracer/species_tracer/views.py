@@ -10,7 +10,7 @@ top    snout and caudal-fin tip marked by eye on the photo; SL = that length / (
        narrower one over the trunk), not the average; a level fish with a bent body uses half the total width instead
        (mode 'half_total'), since the axis line then wanders off the midline. Behind the widest station the width is held non-increasing (a rise is the caudal fin
        swung sideways). Writes "top" (symmetric polygon) and outline.hw (record units).
-front  the body's top and bottom on the photo (excluding median fins) marked by eye; the photo is scaled so that body height =
+front  the photo is first levelled (the roll that makes the mask most mirror symmetric, see level()); the body's top and bottom on the photo (excluding median fins) marked by eye; the photo is scaled so that body height =
        the record's greatest depth, and placed at that station's top and bottom. Writes "front" (mask polygon, median fins
        kept, paired fins removed by the same opening) and one outline.sections entry at that station: w(s) = half-width at
        normalised height s (-1 belly, +1 back) over the section's greatest half-width.
@@ -76,9 +76,15 @@ def front(path, body_top_px, body_bot_px, rec_top_y, rec_bot_y, m=None, n=21):
         t, bt = (Rm @ np.r_[t, 1]), (Rm @ np.r_[bt, 1])
     k = (rec_top_y - rec_bot_y) / np.linalg.norm(t - bt)                       # SL units per pixel
     mo = opened(m, OPEN_SL / max(k, 1e-9))
+    roll, sym0, sym = level(mo)                                                # a fish is mirror symmetric: undo the roll
+    if abs(roll) > 0.25:
+        ys, xs = np.nonzero(mo); c0 = (float(xs.mean()), float(ys.mean()))
+        Rm = cv2.getRotationMatrix2D(c0, roll, 1.0)
+        mo = cv2.warpAffine(mo.astype(np.uint8), Rm, (mo.shape[1], mo.shape[0]), flags=cv2.INTER_NEAREST) > 0
+        t, bt = (Rm @ np.r_[t, 1]), (Rm @ np.r_[bt, 1])
     cs, _ = cv2.findContours(mo.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     c = max(cs, key=cv2.contourArea)[:, 0, :].astype(float)
-    ys, xs = np.nonzero(mo); xmid = 0.5 * (t[0] + bt[0])
+    ys, xs = np.nonzero(mo); xmid = float(xs.mean())                          # the mirror axis after levelling
     to = lambda P: np.c_[-(P[:, 0] - xmid) * k, rec_top_y - (P[:, 1] - t[1]) * k]   # z to the fish's left = image right for a fish facing the camera
     F = to(c[:: max(1, len(c) // 400)])
     S = np.linspace(-1, 1, n); w = []
@@ -87,7 +93,22 @@ def front(path, body_top_px, body_bot_px, rec_top_y, rec_bot_y, m=None, n=21):
         w.append(0.5 * (row.max() - row.min()) * k if len(row) else 0.0)
     w = np.array(w); wn = w / w.max() if w.max() > 0 else w
     return dict(front=[[round(float(z), 4), round(float(y), 4)] for z, y in F], w=[[round(float(s), 3), round(float(x), 3)] for s, x in zip(S, wn)],
-                half_width_max=round(float(w.max()), 4))
+                half_width_max=round(float(w.max()), 4), roll_deg=round(float(roll), 2), mirror_iou=[round(sym0, 3), round(sym, 3)],
+                w_from='half the total width on each row of the levelled outline (both sides averaged)')
+
+
+def level(m, span=15.0, step=0.25):
+    """the roll of a head-on fish mask: the angle (deg, cv2 sense) that makes it most mirror symmetric about a vertical axis
+    through its centroid. -> (angle, mirror IoU before, after)."""
+    import cv2
+    ys, xs = np.nonzero(m); c0 = (float(xs.mean()), float(ys.mean())); u8 = m.astype(np.uint8)
+    def iou(a):
+        r = cv2.warpAffine(u8, cv2.getRotationMatrix2D(c0, a, 1.0), (m.shape[1], m.shape[0]), flags=cv2.INTER_NEAREST) > 0
+        yy, xx = np.nonzero(r); cx = xx.mean(); f = np.zeros_like(r); xf = np.round(2 * cx - xx).astype(int)
+        ok = (xf >= 0) & (xf < r.shape[1]); f[yy[ok], xf[ok]] = True
+        return (r & f).sum() / max((r | f).sum(), 1)
+    A = np.arange(-span, span + 1e-9, step); s = [iou(a) for a in A]; i = int(np.argmax(s))
+    return float(A[i]), float(iou(0.0)), float(s[i])
 
 
 def deepest(O):
