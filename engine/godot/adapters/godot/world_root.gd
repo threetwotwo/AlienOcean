@@ -89,6 +89,7 @@ var key := ""
 var last := {}
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
+var _surface: SeaSurface          # make_surface's: its floor map is captured again when the light changes (apply)
 var under_mat: ShaderMaterial       # the underwater view quad's material (attach_camera)
 var caustics: CausticsMap           # the light net's map, drawn once a frame (adapters/godot/caustics_map.gd)
 var _dome_g := 0.0
@@ -195,9 +196,11 @@ func make_surface(_size_m := 160.0) -> Node3D:
 	## rings, seen from above and below. Its level is water_y (the tide); nothing to place or stream.
 	var s := SeaSurface.new()
 	water.waves = s.fft            # water.water_y(x, z) follows the drawn crests
+	_surface = s
 	return s
 
 func apply(cam_y: float) -> Dictionary:
+	if is_instance_valid(_surface) and _surface.floor_map: _surface.floor_map.refresh()   # its radiance was lit by the old light
 	if tide_on: water.set_clock(hours)   # the sea level follows the two moons (core/world/tide.gd)
 	var water_y := water.level
 	var st := SkyClock.sky_state(hours, noon_yaw)

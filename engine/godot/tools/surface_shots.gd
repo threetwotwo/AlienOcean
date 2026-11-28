@@ -3,7 +3,7 @@
 ## ceiling at the level; from above: low over the water toward the sun and away, and high over it (tile check).
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/surface_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
 ## Env as lagoon_shots, plus AO_TIDE=1 (let the tide move the level; default pinned at the mean so frames compare),
-## AO_SEA=B0..B12 (the open sea at that Beaufort force, no floor: shots o1-o5 over the crests and under the troughs), AO_DRESS (lagoon_shots': adds s8_arch_mirror, the key frame's arch in the ceiling), AO_SEA_T (the waves' clock, s; default 37.0, held), AO_SURF_SHOTS (two-character prefixes, e.g. s1,s4; AO_SHOTS
+## AO_SEA=B0..B12 (the open sea at that Beaufort force, no floor: shots o1-o5 over the crests and under the troughs), AO_DRESS (lagoon_shots': adds s8_arch_mirror, the key frame's arch in the ceiling), AO_SEA_T (the waves' clock, s; default 37.0, held), AO_HOUR_THEN (the clock jumps there just before each shot, the eye still), AO_SURF_SHOTS (two-character prefixes, e.g. s1,s4; AO_SHOTS
 ## filters lagoon_shots' own list and must stay unset here).
 extends "res://tools/lagoon_shots.gd"
 
@@ -61,6 +61,10 @@ func _setup():
 	_next()
 
 func _process(d):
+	# AO_HOUR_THEN (check): the clock jumps to this hour 6 frames before each shot, without the eye moving (as the test
+	# level's hour slider does), so whatever was captured under the old light must follow
+	if OS.get_environment("AO_HOUR_THEN") != "" and wait == 18:
+		wr.hours = float(OS.get_environment("AO_HOUR_THEN")); print("HOUR THEN ", wr.hours, " ", wr.apply(cam.global_position.y).get("under", "?"))
 	if OS.get_environment("AO_DUMP_FLOOR") != "" and wait == 20:   # the sea floor map, for checks
 		var fm := root.find_child("SeaFloorMap", true, false)
 		if fm:
