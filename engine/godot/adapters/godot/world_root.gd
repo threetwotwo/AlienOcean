@@ -196,10 +196,14 @@ func _init() -> void:
 func set_ao(mode: String) -> void:
 	## "ssao" = Godot's SSAO (the look until now), "cortao" = CORTAO (third_party/cortao) through look/screen_ao.gdshaderinc, "off" = none.
 	## Both occlude only the ambient / GI fill (ao = min(ao, x)), never the sun. SSIL is separate and stays as it is.
+	## "gtao" (XeGTAO) / "vbao" (visibility bitmask): the head to head's other screen AO methods, run in CORTAO's place on the same
+	## inputs, filter and material path (adapters/godot/cortao_effect.gd algo).
 	ao_mode = mode
+	var screen := mode in ["cortao", "gtao", "vbao"]
 	env.ssao_enabled = mode == "ssao"
-	cortao_fx.enabled = mode == "cortao"
-	RenderingServer.global_shader_parameter_set("cortao_on", 1.0 if mode == "cortao" else 0.0)
+	cortao_fx.enabled = screen
+	if screen: cortao_fx.algo = mode
+	RenderingServer.global_shader_parameter_set("cortao_on", 1.0 if screen else 0.0)
 
 func set_agx(on: bool) -> void:
 	## on: the Unreal AgX tonemapper (look/agx_post.glsl) replaces Godot's; LINEAR leaves only the sRGB encoding and
