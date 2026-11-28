@@ -137,6 +137,10 @@ def test_bake_keeps_interior_and_linings_off_the_skin_maps(tmp_path):
     assert good['P6_pass'], good
     bad = bake(dict(CREATURE_PLANT_BAKE_FAULT='interior_on_skin'))
     assert not bad['P6_pass'] and bad['P6_backward_texels'] > 20 * max(good['P6_backward_texels'], 1), bad
+    # the skin's shading stops at the lips: with the lip normals averaged into the lining again (the edges between skin and
+    # interior faces left smooth) the map must lean the other way over every skin face at a lip, and P6 sees it
+    lean = bake(dict(CREATURE_PLANT_BAKE_FAULT='lips_shaded_with_lining'))
+    assert lean['P6_normal_z_p1'] < good['P6_normal_z_p1'] - 0.03 and lean['P6_normal_z_p1'] < checks.P6_Z_P1_MIN, (good, lean)
 
 
 def test_ventral_vs_from_the_record():
@@ -173,7 +177,8 @@ def test_traced_cross_section_reaches_the_form_and_the_front_gate(tmp_path):
     D['record']['outline']['sections'] = [dict(u=0.4 * SL, w=[[float(a), float(b)] for a, b in zip(s, w)])]
     rp = str(tmp_path / 'sec.json'); json.dump(D, open(rp, 'w'))
     F = Form(adapt(rp)); x = np.full(5, 0.4); ss = np.array([-0.8, -0.3, 0.3, 0.6, 0.9])
-    assert np.allclose(F.wnorm(x, ss), np.interp(ss, s, w) / w.max(), atol=0.02)
+    # the rows are faired by at most SECT_FAIR_TOL (2 %) of the section's half-size, measured from its centre: a little more in w where the side is steep
+    assert np.allclose(F.wnorm(x, ss), np.interp(ss, s, w) / w.max(), atol=0.035) and F.SECT_FAIRED <= 0.02 + 1e-9
     th = np.linspace(0.1, np.pi - 0.1, 9); P = F.loft_point(np.full(9, 0.4), th); c, a, b = F.sec(0.4)
     assert np.allclose(F.rnorm(np.full(9, 0.4), (P[:, 1] - c) / a, P[:, 2] / b), 1, atol=1e-6)
     o1, o2 = str(tmp_path / 'oval'), str(tmp_path / 'sec')
@@ -377,3 +382,39 @@ def test_a_stated_aim_wins_and_the_eyeball_is_a_flat_window():
     o = optics(rec['eye'], rec['eye']['d'] / 2)
     assert CORNEA_SAG[0] <= o['cornea_sag_R'] <= CORNEA_SAG[1] and o['lens_under_cornea_R'] > 0
     assert o['lens_r'] < o['pupil_r'] < rec['eye']['d'] / 2                 # the lens stands in a pupil wider than itself (aphakic gap)
+
+def test_traced_tables_are_faired_and_the_loft_has_no_crease_or_ripple(tmp_path):
+    """a traced top view and a traced section carry the trace's jitter (export r5: vertical bands, stripes along the body,
+    dark rims). The form fairs each table by no more than its named tolerance, the section's boundary and its blend along
+    the body are smooth (C1), and FM1 passes; jitter larger than the tolerance, or a section with a corner, is caught."""
+    from creature_maker.record import adapt
+    from creature_maker.form import Form, HW_FAIR_TOL, SECT_FAIR_TOL
+    from creature_maker.checks import form_fair, FM1_RIPPLE_MAX, FM1_CREASE_MAX, _loft_normal
+    D = json.load(open(REC)); O = D['record']['outline']; SL = O['end']; hw = np.array(O['hw']); rng = np.random.default_rng(3)
+    s = np.linspace(-1, 1, 21); w = np.sqrt(np.clip(1 - s ** 2, 0, 1)) ** 0.8; w2 = np.clip(1 - np.abs(s) ** 3, 0, 1)
+
+    def rec(name, jit_hw, jit_w, sections=True):
+        E = json.loads(json.dumps(D)); xk = np.linspace(0, hw[-1, 0], 51); sg = np.where(np.arange(51) % 2, 1, -1) * (np.arange(51) % 50 > 0)
+        E['record']['outline']['hw'] = [[float(a), float(max(b, 0))] for a, b in zip(xk, np.interp(xk, hw[:, 0], hw[:, 1]) + sg * jit_hw * SL)]
+        if sections:
+            E['record']['outline']['sections'] = [dict(u=u * SL, w=[[float(a), float(np.clip(b + jit_w * rng.uniform(-1, 1) * (0 < i < 20), 0, 1))] for i, (a, b) in enumerate(zip(s, w_))])
+                                                  for u, w_ in ((0.35, w), (0.7, w2))]
+        p = str(tmp_path / f'{name}.json'); json.dump(E, open(p, 'w')); return adapt(p)
+    F = Form(rec('jit', 0.9 * HW_FAIR_TOL, 0.5 * SECT_FAIR_TOL)); R = form_fair(F)
+    assert F.HW_FAIRED <= HW_FAIR_TOL + 1e-9 and F.SECT_FAIRED <= SECT_FAIR_TOL + 1e-9
+    assert R['FM1_pass'], R
+    # theta and the loft are inverses in the head (plain angle) and in the trunk (angle round the section's own shape)
+    x = np.array([0.05, 0.2, 0.45, 0.6, 0.9]) * F.XEND; th = np.array([0.2, 1.0, 1.7, 2.6, 3.0]); P = F.loft_point(x, th)
+    assert np.allclose(F.theta_of(P[:, 0], P[:, 1], P[:, 2]), th, atol=1e-9) and np.abs(F.sd_body(P)).max() < 1e-9
+    # C1 along the body at a station: the normal just in front of the station is the normal just behind it
+    for th_ in (0.4, 1.2, 2.5):
+        n = _loft_normal(F, F.loft_point(np.array([0.35 - 2e-4, 0.35 + 2e-4]), np.full(2, th_)), 2e-5)
+        assert np.degrees(np.arccos(np.clip(n[0] @ n[1], -1, 1))) < 0.5
+    # the two sides meet on the midline without a crease: the normal a hair off the dorsal and ventral edge is the edge's own
+    for x_ in (0.35, 0.55, 0.7):
+        n = _loft_normal(F, F.loft_point(np.full(2, x_), np.array([1e-4, np.pi - 1e-4])), 2e-6)
+        assert abs(n[0, 2]) < 0.05 and abs(n[1, 2]) < 0.05, n
+    assert form_fair(Form(rec('ripple', 4 * HW_FAIR_TOL, 0.0, sections=False)))['FM1_ripple_deg'] > FM1_RIPPLE_MAX
+    G = Form(rec('corner', 0.0, 0.0)); ph = G.SECT['phi']; c_, s_ = np.abs(np.cos(ph)), np.sin(ph)     # a rhombus, drawn row to row
+    G.SECT['rho'][:] = 1 / (c_ + s_); G.SECT['drho'][:] = -(np.where(ph < np.pi / 2, -s_, s_) + np.cos(ph)) / (c_ + s_) ** 2
+    assert form_fair(G)['FM1_crease_deg'] > FM1_CREASE_MAX

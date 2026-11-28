@@ -10,8 +10,8 @@ EDGE_RAYS = 25      # DEFAULT: most columns on a traced median fin card (a falca
 EDGE_ROWS, RELAX_IT = 6, 60     # DEFAULTS: rows on a traced card and relaxation passes between root and outline
 SOFT_FRAY = 0.015   # DEFAULT: a soft-ray fin's edge recedes this share of the ray length between ray tips (a whole edge, faintly frayed)
 SPINE_W = 0.12      # DEFAULT: half-width of a spine's free tip, share of the spacing between spines
-RAY_RELIEF = 0.06   # DEFAULT: ray ridge relief in the fin normal map (tilt of the ray flanks stays under ~20 deg: rays read in the
-                    # texture, not as a pleated card)
+RAY_RELIEF = 0.10   # DEFAULT: ray ridge relief in the fin normal map (rays read in the texture, not as a pleated card). 0.06
+                    # (fins step 1) left the paired fins reading as flat boards (export r5 pixel check, item 9)
 SHEATH = 0.12       # DEFAULT: body skin colour carries onto the base of the median fins and caudal over this share of the ray length
 
 
