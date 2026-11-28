@@ -2,9 +2,9 @@
 collision, so a blockout drops into the same engine code (swim, schools, collision, riding, scale) as a finished fish.
 
 Usage: python -m creature_maker blockout OUT --record RECORD.json        (writes blockout.json, then runs this)
-Differences from blender/export_glb.py: no bake, no maps, no interior, no eyes, no LODs. Body segments are rigid (one bone each), the
-jaw and gill covers are bones with no weight (their clips move nothing), and colours are flat greys: alternate segments differ in
-shade so the bend reads in a test scene.
+Differences from blender/export_glb.py: no bake, no maps, no interior, no LODs. Body segments are rigid (one bone each); the lower jaw
+block rides the jaw bone and the cover plates the opercle bones, so gape and flare open the cut mouth and gill slits; colours are flat
+greys: alternate segments differ in shade so the bend reads in a test scene.
 """
 import bpy, json, sys, os
 import numpy as np
@@ -36,6 +36,14 @@ for p in me.polygons:
     p.use_smooth = True; p.material_index = int(VB[p.vertices[0]] % 2)
 body = bpy.data.objects.new('body', me); scn.collection.objects.link(body)
 
+GREY_JAW, GREY_COVER, GREY_EYE = (0.36, 0.30, 0.30), (0.50, 0.47, 0.42), (0.06, 0.06, 0.07)   # DEFAULT: moving head blocks a shade apart
+mat_p = dict(jaw=flat('jaw', GREY_JAW), cover=flat('cover', GREY_COVER), eye=flat('eyeball', GREY_EYE))
+piece_obs = {}
+for p in D.get('pieces', []):    # tier 2 head blocks: lower jaw (jaw bone), gill-cover plates (opercle bones), eyeballs (their spine bone)
+    m_ = bpy.data.meshes.new(p['name']); m_.from_pydata([B(v) for v in p['V']], [], p['F']); m_.update(); m_.materials.append(mat_p[p['mat']])
+    for q in m_.polygons: q.use_smooth = True
+    ob = bpy.data.objects.new(p['name'], m_); scn.collection.objects.link(ob); piece_obs[p['name']] = (ob, p['bone'])
+
 fin_obs = {}
 for k, f in D['fins'].items():
     m_ = bpy.data.meshes.new(k); m_.from_pydata([B(v) for v in f['V']], [], f['F']); m_.update(); m_.materials.append(mat_f)
@@ -52,6 +60,7 @@ rig = rigging.build_armature(scn, BL, D['fins'], B, spine_at)
 W = {f'spine_{i:02d}': (VB == i).astype(float) for i in range(NB)}                 # rigid segments
 W.update(jaw=np.zeros(len(V)), opercleL=np.zeros(len(V)), opercleR=np.zeros(len(V)))
 rigging.bind_groups(body, rig, W)
+for k, (ob, bn) in piece_obs.items(): rigging.bind_groups(ob, rig, {bn: np.ones(len(ob.data.vertices))})
 for k, ob in fin_obs.items():   # as export_glb: fin vertices follow the spine at their x, paired fins hand over to their root bone
     fv = np.array(D['fins'][k]['V']); T = np.clip(np.array(D['fins'][k]['T'], float), 0, 1)
     share = T if k.startswith(('pectoral', 'pelvic')) else np.zeros(len(fv))
@@ -69,8 +78,16 @@ chain = swim_clip.chain_names(NB); cmap = {chain[i]: f'spine_{i:02d}' for i in r
 rigging.key_clip(rig, 'swim_loop', [(k / SW['swim_fps'], P) for k, P in enumerate(rigging.engine_frames(rig, SW['swim'], cmap))], FPS)
 cmap_b = dict(opercleL='opercleL', opercleR='opercleR')
 rigging.key_clip(rig, 'breathe_loop', [(k / SW['breathe_fps'], P) for k, P in enumerate(rigging.engine_frames(rig, SW['breathe'], cmap_b))], FPS)
-SW['extras']['clips'].pop('gape', None); SW['extras']['clips'].pop('flare', None)
-SW['extras']['blockout'] = dict(rule='rigid ellipsoid segments, one spine bone each; fin plates from the record; jaw and covers unweighted',
+moving = set(bn for _, bn in piece_obs.values())
+bspec = {b['name']: b for b in BL}
+def hinge(name):
+    b = bspec[name]; ax = B(b['axis']) / S; return (name, B(b['pivot']), ax)
+from creature_maker.pose import FLARE_REAL
+for clip, names, deg in (('gape', ['jaw'], float(D.get('gape_deg', 30.0))), ('flare', ['opercleL', 'opercleR'], FLARE_REAL)):
+    if all(n in moving for n in names):   # the jaw block and the cover plates move: their clips open the mouth and the gill slits
+        rigging.key_clip(rig, clip, rigging.hinge_frames(rig, [hinge(n) for n in names], deg), FPS); SW['extras']['clips'][clip]['peak_deg'] = deg
+    else: SW['extras']['clips'].pop(clip, None)
+SW['extras']['blockout'] = dict(rule='rigid superquadric segments, one spine bone each; fin plates from the record; tier 3 cutters (mouth, gill slits, eye sockets) with a jaw block and cover plates on their bones',
                                 checks=D['checks'], segments=len(D['segments']))
 
 # ---------------------------------------------------------------- collision: hulls of the segments, each run on its first bone
@@ -86,16 +103,31 @@ bpy.context.view_layer.update()
 
 EXP = dict(export_format='GLB', export_animations=True, export_skins=True, export_animation_mode='NLA_TRACKS', export_force_sampling=True,
            export_extras=False, export_optimize_animation_size=True, export_optimize_animation_keep_anim_armature=False)
-objs = [body, rig] + list(fin_obs.values()) + col_obs
+objs = [body, rig] + list(fin_obs.values()) + [o for o, _ in piece_obs.values()] + col_obs
 for o in scn.objects: o.select_set(False)
 for o in objs: o.select_set(True)
 glb = os.path.join(OUT, 'fish_blockout.glb')
 bpy.ops.export_scene.gltf(filepath=glb, use_selection=True, **EXP)
 glbpatch.patch(glb, node_extras={'rig': {'alien_ocean': dict(swim=SW['extras'], lod='blockout', species=D['species'])}},
-               anim_extras={n: dict(loop=True) for n in ('swim_loop', 'breathe_loop')})
-tris = sum(sum(len(p.vertices) - 2 for p in o.data.polygons) for o in [body] + list(fin_obs.values()))
+               anim_extras={n: dict(loop=n.endswith('_loop')) for n in ('swim_loop', 'breathe_loop', 'gape', 'flare') if n in SW['extras']['clips']})
+# ---------------------------------------------------------------- LODs = the primitive tiers: LOD1 masses + forms (no cutters, no head
+# pieces), LOD2 masses only; both keep the fin plates, the rig and the clips (a clip with no weighted geometry moves nothing)
+lod_stats = {}
+for n, L in sorted(D.get('lods', {}).items(), key=lambda kv: int(kv[0])):
+    VL = np.array(L['V']); VBL = np.array(L['vbone'])
+    ml = bpy.data.meshes.new(f'body_LOD{n}'); ml.from_pydata([B(v) for v in VL], [], L['F']); ml.update(); ml.materials.append(mat_a); ml.materials.append(mat_b)
+    for p in ml.polygons: p.use_smooth = True; p.material_index = int(VBL[p.vertices[0]] % 2)
+    bl = bpy.data.objects.new(f'body_LOD{n}', ml); scn.collection.objects.link(bl)
+    rigging.bind_groups(bl, rig, {f'spine_{i:02d}': (VBL == i).astype(float) for i in range(NB)})
+    for o in scn.objects: o.select_set(False)
+    for o in [bl, rig] + list(fin_obs.values()): o.select_set(True)
+    gl = os.path.join(OUT, f'fish_blockout_LOD{n}.glb'); bpy.ops.export_scene.gltf(filepath=gl, use_selection=True, **EXP)
+    glbpatch.patch(gl, node_extras={'rig': {'alien_ocean': dict(swim=SW['extras'], lod=f'blockout_LOD{n}', species=D['species'])}},
+                   anim_extras={k: dict(loop=k.endswith('_loop')) for k in ('swim_loop', 'breathe_loop', 'gape', 'flare') if k in SW['extras']['clips']})
+    lod_stats[f'LOD{n}'] = dict(glb=os.path.basename(gl), tris=sum(len(p.vertices) - 2 for p in ml.polygons) + sum(sum(len(p.vertices) - 2 for p in o.data.polygons) for o in fin_obs.values()))
+tris = sum(sum(len(p.vertices) - 2 for p in o.data.polygons) for o in [body] + list(fin_obs.values()) + [o for o, _ in piece_obs.values()])
 stats = dict(glb=os.path.basename(glb), kb=round(os.path.getsize(glb) / 1024), tris=tris, bones=len(rig.data.bones),
              hulls=len(HUL), swim_loop_closure_BL=SW['loop_err'], beat_Hz=SW['extras']['clips']['swim_loop']['beat_Hz'],
-             swim_keys_hz=round(SW['swim_fps'], 1), jitter=SW['extras']['jitter'])
+             swim_keys_hz=round(SW['swim_fps'], 1), jitter=SW['extras']['jitter'], lods=lod_stats)
 json.dump(stats, open(os.path.join(OUT, 'blockout_glb.json'), 'w'), indent=1)
 print('BLOCKOUT_GLB', json.dumps(stats))

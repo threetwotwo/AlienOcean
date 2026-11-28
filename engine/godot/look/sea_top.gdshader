@@ -1,4 +1,4 @@
-// Sea seen from above 0.8.0 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
+// Sea seen from above 0.8.1 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
 // 0.2.0 (28 Nov): the water's own colour, one model from the lagoon's sand to the open sea (Rrs x Ed where the floor
 // fades; it read jet black: the lagoon's path only saw the floor).
 // 0.5.0 (28 Nov): the sun's glitter sparkles (the tank's moon sparkle, run for the sun).
@@ -173,8 +173,18 @@ void fragment() {
 	}
 	// the bent point is above the water (an edge), or still on something far shallower than the floor it was bent for
 	// (a body or rock between: sampling it there drew it twice, Gary 28 Nov "a doubling of the player body"): no shift
-	if (hb < 0.0 || hb < 0.5 * h - 0.25) uvb = SCREEN_UV;
-	vec3 scene = textureLod(screen_tex, uvb, 0.0).rgb;
+	// 0.8.1: and the point sampled must lie beyond this bit of surface, seen from the eye: the bent ray goes on away from
+	// the eye, so it cannot meet anything nearer. In shallow water (a girl standing on a rock skirt, 0.5 m of water behind
+	// her) her submerged hips, nearer than the water seen beside them, passed the depth test above and were drawn a
+	// second time on that water (Gary 28 Nov playtest, "double ghosting of refraction still present")
+	float kb = (hb < 0.0 || hb < 0.5 * h - 0.25) ? 0.0 : 1.0;
+	if (kb > 0.0 && length(V.xy) > 0.05) {
+		vec4 vs = INV_PROJECTION_MATRIX * vec4(uvb * 2.0 - 1.0, texture(depth_tex, uvb).r, 1.0);
+		vec3 qs = sea_isl((INV_VIEW_MATRIX * vec4(vs.xyz / vs.w, 1.0)).xyz);   // the point the bent sample shows
+		kb *= smoothstep(-0.3, -0.05, dot(qs.xy - wi.xy, -normalize(V.xy)));
+	}
+	vec3 scene = mix(textureLod(screen_tex, SCREEN_UV, 0.0).rgb, textureLod(screen_tex, uvb, 0.0).rgb, kb);
+	float hsc = mix(max(wi.z - q.z, 0.0), max(hb, 0.0), kb);   // the depth of what the screen shows there
 	vec3 c = water_a + water_b;
 	// 0.8.0: where the bent ray really lands, followed through the floor map (adapters/godot/sea_floor_map.gd: the floor's
 	// light and top round the eye) and past it the floor beyond (sea_bathy). The screen alone cannot say: at a slant the
@@ -204,7 +214,6 @@ void fragment() {
 	float Lg = min(min(Hg, 60.0) / max(-T.z, 0.05), 400.0);
 	vec3 under = (fl * exp(-c * Lg) + w_glow(sea_gdt(T), 0.0, Lg)) * water_exposure;
 	bool nofloor = depth <= 1e-7;                           // nothing drawn under this point (and none of the screen shows)
-	float hsc = (hb >= 0.0 && uvb != SCREEN_UV) ? hb : max(wi.z - q.z, 0.0);   // the depth of what the screen shows there
 	// the screen is kept unless it lies well deeper than the landing (the straight view ran on past the floor the bent ray
 	// meets: a reef's slope); something nearer (a rock, a body, a fish) stays where the screen has it, as the bend has
 	// already placed it (0.7.0); only the slant fades it, below
@@ -252,4 +261,9 @@ void fragment() {
 	// under and behind a whitecap adds its turquoise to the water
 	ALBEDO = (R * refl * water_exposure + (1.0 - R) * under) * (1.0 - fo.foam)
 		+ (sea_foam_top_nits(fo, N) + sea_foam_plume_nits(fo, R) + glow) * water_exposure;
+	// 0.8.1: art direction: the last half degree of sea under the horizon melts into the sky's horizon (look/sky does the
+	// same past the far plane). Physically the far sea sits a little darker than the haze above it, and beyond the reef
+	// the deep's own blue made that a thin dark band a few pixels high, which read as a seam (Gary 28 Nov playtest)
+	float melt = sea_horizon_melt * (1.0 - smoothstep(0.0, 0.012, V.z));
+	if (melt > 0.0) ALBEDO = mix(ALBEDO, sky_dome_nits(sea_gdt(normalize(vec3(-V.xy, 0.0015)))) * water_exposure, melt);
 }
