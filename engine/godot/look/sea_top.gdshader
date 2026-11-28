@@ -1,4 +1,4 @@
-// Sea seen from above 0.8.1 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
+// Sea seen from above 0.8.2 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
 // 0.2.0 (28 Nov): the water's own colour, one model from the lagoon's sand to the open sea (Rrs x Ed where the floor
 // fades; it read jet black: the lagoon's path only saw the floor).
 // 0.5.0 (28 Nov): the sun's glitter sparkles (the tank's moon sparkle, run for the sun).
@@ -45,6 +45,8 @@ global uniform float sea_crest_glow;    // art lever on the light through the cr
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 uniform float nq = 32.0;
 uniform float sun_size = 1.0;
+uniform float sea_body_wobble = 3.0;   // art lever (0.8.2): how much the waves wiggle the edges of things under the surface (1 = the waves' true share)
+uniform float sea_body_veil = 2.5;     // art lever (0.8.2): how much water a body under the surface is seen through, as a multiple of the true path
 uniform float sea_horizon_lift = 1.0;   // art lever: how far up the sky the rough sea's mean mirrored ray comes from (1 = as measured)
 varying vec2 still;
 varying vec3 wi;
@@ -154,6 +156,25 @@ void fragment() {
 	// 0.7.0: two passes. The bend assumes the floor lies at the straight view's depth h; where the floor rises toward the
 	// eye (looking down past a reef wall) the bent point lands on the shallow reef flat and its sand glowed cyan over
 	// the deep (water surface thread, 28 Nov). The second pass bends again by the depth found there (a fixed-point step).
+	vec2 tl = T.xy / max(-T.z, 0.05);                       // m along per m down
+	float Hg = max(wi.z - floor_top(wi.xy), 0.0);
+	for (int k = 0; k < 4; k++) Hg = mix(Hg, max(wi.z - floor_top(wi.xy + tl * Hg), 0.0), 0.7);   // damped: walls
+	// 0.8.2 (Gary 28 Nov: bodies under the surface "flat and cut out", independent review): the mean bend slides the picture
+	// along an upright body, so its sides stayed straight; only the waves' share of the bend moves an edge sideways. A body
+	// (anything standing clear above the floor map, which leaves movers out) is drawn from the screen moved by that share
+	// alone, scaled by the art lever and capped at 8 cm: a wiggle of its own outline, never a copy
+	vec3 T0 = refract(-V, vec3(0.0, 0.0, 1.0), 1.0 / 1.333);
+	vec2 dw = (tl - T0.xy / max(-T0.z, 0.05)) * min(h / max(V.z, 0.2), 2.0) * sea_body_wobble;
+	dw *= min(1.0, 0.08 / max(length(dw), 1e-5));
+	vec4 cw = PROJECTION_MATRIX * VIEW_MATRIX * vec4(sea_gdt(q + vec3(dw, 0.0)), 1.0);
+	vec2 uvw = clamp(cw.xy / cw.w * 0.5 + 0.5, vec2(0.0), vec2(1.0));
+	vec4 vw = INV_PROJECTION_MATRIX * vec4(uvw * 2.0 - 1.0, texture(depth_tex, uvw).r, 1.0);
+	float hw = wi.z - sea_isl((INV_VIEW_MATRIX * vec4(vw.xyz / vw.w, 1.0)).xyz).z;
+	// the wiggle never carries a shallower thing out over deeper water beside it (a fringe of the body on the water: the
+	// ghost rule's test, 0.8.1): edges move inward only
+	if (hw < 0.0 || hw < 0.5 * h - 0.1) { uvw = SCREEN_UV; hw = h; }
+	float body = smoothstep(0.08, 0.30, Hg - hw);
+	bool occl = false;                                      // the bent ray's sample lands on a body (it hides the floor there)
 	vec2 uvb = SCREEN_UV; float hb = h;
 	for (int it = 0; it < 2; it++) {
 		float hs = it == 0 ? h : clamp(hb, 0.0, h);
@@ -169,6 +190,7 @@ void fragment() {
 		vec4 vb = INV_PROJECTION_MATRIX * vec4(uvb * 2.0 - 1.0, db, 1.0);
 		vb.xyz /= vb.w;
 		hb = wi.z - sea_isl((INV_VIEW_MATRIX * vec4(vb.xyz, 1.0)).xyz).z;
+		if (it == 0 && Hg - hb > 0.4) { occl = true; break; }   // 0.8.2: never bend again by a body's depth (a third patch)
 		if (hb < 0.0 || hb > h - 0.5) break;                  // above the water (an edge), or the floor where it was assumed
 	}
 	// the bent point is above the water (an edge), or still on something far shallower than the floor it was bent for
@@ -183,8 +205,12 @@ void fragment() {
 		vec3 qs = sea_isl((INV_VIEW_MATRIX * vec4(vs.xyz / vs.w, 1.0)).xyz);   // the point the bent sample shows
 		kb *= smoothstep(-0.3, -0.05, dot(qs.xy - wi.xy, -normalize(V.xy)));
 	}
-	vec3 scene = mix(textureLod(screen_tex, SCREEN_UV, 0.0).rgb, textureLod(screen_tex, uvb, 0.0).rgb, kb);
-	float hsc = mix(max(wi.z - q.z, 0.0), max(hb, 0.0), kb);   // the depth of what the screen shows there
+	if (occl) kb = 0.0;
+	// 0.8.2: a body pixel is its own picture moved by the waves; elsewhere the bent sample. Where the bent sample was
+	// refused (kb 0: a body hides the floor the ray lands on) the unshifted screen showed the floor 0.9 m out of register,
+	// a body-shaped patch beside her (the "halo"): the landing model fills it now (wsc below), not the screen
+	vec3 scene = mix(textureLod(screen_tex, uvb, 0.0).rgb, textureLod(screen_tex, uvw, 0.0).rgb, body);
+	float hsc = mix(max(hb, 0.0), hw, body);               // the depth of what the screen shows there
 	vec3 c = water_a + water_b;
 	// 0.8.0: where the bent ray really lands, followed through the floor map (adapters/godot/sea_floor_map.gd: the floor's
 	// light and top round the eye) and past it the floor beyond (sea_bathy). The screen alone cannot say: at a slant the
@@ -194,9 +220,6 @@ void fragment() {
 	// deg from the vertical, never meets (it was seen as clearly as looking down, a hard cut-out: Gary 28 Nov "a cardboard
 	// effect" at the waterline). The screen's picture is kept where its depth agrees with the landing (the near floor,
 	// rocks under the eye) and fades out as the view goes grazing, where it holds nothing the bent ray sees.
-	vec2 tl = T.xy / max(-T.z, 0.05);                       // m along per m down
-	float Hg = max(wi.z - floor_top(wi.xy), 0.0);
-	for (int k = 0; k < 4; k++) Hg = mix(Hg, max(wi.z - floor_top(wi.xy + tl * Hg), 0.0), 0.7);   // damped: walls
 	// the landing's light: the screen's, where the eye sees that very spot (the drawn floor as lit, net and all), else the
 	// floor map's, else the floor beyond's sand at that depth
 	vec3 lw = vec3(wi.xy + tl * Hg, wi.z - Hg);
@@ -209,7 +232,10 @@ void fragment() {
 		vec3 sl = sea_isl((INV_VIEW_MATRIX * vec4(vl.xyz / vl.w, 1.0)).xyz);
 		if (dl > 1e-7 && distance(sl, lw) < 0.3 + 0.01 * distance(cam, lw)) fl = textureLod(screen_tex, luv, 0.0).rgb / max(water_exposure, 1e-12);
 	}
-	if (fl.x < 0.0) fl = floor_light(lw.xy);
+	if (fl.x < 0.0) {                                       // the floor map's light is a 1 m average: give it the light net (0.8.2)
+		fl = floor_light(lw.xy);
+		if (fl.x >= 0.0) fl *= caustic_sun(sea_gdt(lw), Hg, water_sun_w, 0.05, TIME, 1.0);
+	}
 	if (fl.x < 0.0) fl = sea_bathy_sand(Hg);
 	float Lg = min(min(Hg, 60.0) / max(-T.z, 0.05), 400.0);
 	vec3 under = (fl * exp(-c * Lg) + w_glow(sea_gdt(T), 0.0, Lg)) * water_exposure;
@@ -218,9 +244,9 @@ void fragment() {
 	// meets: a reef's slope); something nearer (a rock, a body, a fish) stays where the screen has it, as the bend has
 	// already placed it (0.7.0); only the slant fades it, below
 	float agree = nofloor ? 0.0 : 1.0 - smoothstep(0.5, 1.5, max(hsc - Hg, 0.0) / max(3.0, 0.5 * Hg));
-	float wsc = agree * smoothstep(0.10, 0.30, V.z);       // the view's slant, not the facet's (waves must not flicker it)
+	float wsc = agree * smoothstep(0.10, 0.30, V.z) * max(kb, body);   // the view's slant, not the facet's (waves must not flicker it)
 	if (wsc > 0.0) {
-		float Lp = min(min(hsc, 60.0) / max(-T.z, 0.05), 400.0);
+		float Lp = min(min(hsc, 60.0) / max(-T.z, 0.05), 400.0) * mix(1.0, sea_body_veil, body);
 		under = mix(under, scene * exp(-c * Lp) + w_glow(sea_gdt(T), 0.0, Lp) * water_exposure, wsc);
 	}
 	float H = mix(Hg, hsc, wsc);

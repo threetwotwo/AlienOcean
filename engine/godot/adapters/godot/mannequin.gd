@@ -111,6 +111,7 @@ static func _limb(r_top: float, r_mid: float, r_bot: float) -> ArrayMesh:
 	return m.mesh()
 
 func _ready() -> void:
+	SeaFloorMap.mark_mover(self)   # moves: never frozen into the sea floor map (the water drew stale copies, Gary 28 Nov)
 	mat.shader = load("res://look/standin_lit_2sided.gdshader"); mat.set_shader_parameter("roughness_v", 0.62)
 	var meshes := {}
 	var jm := MB.new(); jm.sphere(Vector3.ZERO, Vector3.ONE * 0.92, 14, 10, JOINT_SLATE); joint_mesh = jm.mesh()

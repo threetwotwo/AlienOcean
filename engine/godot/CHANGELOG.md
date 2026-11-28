@@ -1,5 +1,45 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, M04 breath 0.1): breath as the master clock: the body breathes, strokes and glances keep its time
+- Gary 28 Nov: "Breath is also important. make sure everything syncs to the breath." The brain's breath phase
+  (character_brain.gd) is now the one clock the body's secondary motion locks to. All of it is off when thalassa_exact is
+  set: tests/test_golden_body.gd MATCH unchanged (worst 0.000051 m), tests/test_golden_brain.gd MATCH (worst 3.89e-6).
+- Breathing body (body_rig.gd _breath_body, skeleton only like the follow-through; body_skin.gd applies the chest bone
+  scale): on the inhale the thoracic spine extends 0.57 deg (prone 0.34) about spine_02 and the chest lifts 2 mm (prone
+  1 mm), the chest opens 1.2 % across / 2.8 % front to back (ribs 0.6 x that), the belly fills 2 %, the clavicles lift the
+  shoulders 3 mm (prone 1.8) with the arms carried, the head counters the chest's tilt and nods 0.23 deg more. Depth
+  follows the brain's breath amplitude (1 at rest to ~2.1 x at full exertion). Sternum: 2.9 mm at rest standing and
+  hovering, 5.0 mm standing after a run, 5.5 mm hovering after a sprint. Swimming, the buoyant body pitch bob (was
+  sin(0.55 t)) rides the breath: the chest rises on the inhale; the chest matrix's breath scale uses the brain's breath
+  (was the rig's own 0.21 Hz clock).
+- Sync: the stroke's pull falls as the exhale begins and the kick's beat on the stroke (_breath_lock): the stroke's rate
+  goes to N x the breath's frequency (N whole, or 1/2 while she pants at rest after a sprint) less 0.35 turn/s per turn
+  of phase error, held within +-60 % idle .. +-20 % at full stroke and eased in at 2/s, so the phase never steps; the
+  kick locks to the stroke the same way (N ~2 at every pace). The time-based tempo wobbles (sin 0.48 t, 0.41 t) give way to
+  it. The brain draws the breath's frequency to a whole fraction of the cadence (stroke frequency swimming, steps on land
+  from the foot placer's step count above 0.35 m/s), within -15 % / +18 % of what effort asks, N picked from where effort is
+  taking the breath with hysteresis; frequency only, through the breath's own spring. The idle swim roll sways one way per
+  breath (two-breath period, four for the drift). A free look (not the camera's intent, not a sound) starts as the breath
+  turns (top of the inhale or its start) and waits at most half a breath (2.5 s cap); intent and sound turns are not held.
+  Land idle weight shift and glances were already on breath inflections (Thalassa).
+- Hooks: brain_out.exhaleStart / inhaleStart (true on the step the phase crosses), exhaleCount (only grows), focusStartKind,
+  breathLockN / breathLockW; body_rig.underwater_exhales and exhale_underwater (head 5 cm under the surface; counts every
+  sub-step) and brain_out.exhaleUnderwater for bubbles.
+- FIX (stress J2, B18 at 60/120 Hz once the stroke followed the breath): blend_swim_walk lerped two rigid spines and
+  shortened pelvis-waist up to 22 %; the waist is re-placed so both segments keep their length (no side flip near straight).
+- FIX (stress B42 at 30 Hz, found once the kick followed the breath): rising past a slab edge at 4 m/s a trailing ankle sat
+  inside the slab, where the toe/heel rays start in rock; rays from the hip to the ankle and sole plate bring it back out.
+- Body stress J13 (every case): breath clock (cycles + phase) never backwards nor over 0.6 Hz, stroke / kick phase rates in
+  0..14 rad/s, the skeleton's sternum, shoulders and head facing pass J11. New cases: B60 long idle stand among still
+  things (rest depth, free looks on the breath 5/5), B61 swim hover > cruise > sprint > rest (depth rest / exertion, stroke
+  within 0.10 turn of its beat on the breath and kick 0.065 of the stroke in the cruise, sprint and rest windows), B62
+  walk > run > stop (steps per breath 10.0 / 8.0 against N 10 / 8, depth after the run). Planted fault --fault breathjump
+  (phase skips 0.35 cycle) caught by J9 and J13; in run_all.sh. Results: 52/52 at 30, 60 and 120 Hz; J11 worst 6 (B15 at
+  120 Hz, as on main), else <= 5.
+- Open: no land gait phase lock (the breath matches the step frequency, not the footfall); bubbles themselves; the brain's
+  ping-pong rule fails a long idle stand in the "senses" world where the camera sweeps (circler > ahead > sound > circler by
+  camera intent), with or without the breath gate (found writing B60, which now uses still things instead).
+
 ## 0.6.0-dev (28 Nov 2026, M04 brain port step 1): the character brain and her senses, breath outputs ready
 - Gary 28 Nov: port brain and sense organs from Thalassa, everything synced to the breath. Step 1: the brain and its sense
   input. core/m04_body/character_brain.gd is a port of Thalassa v20.19 core/character-brain.js: point-of-interest scoring

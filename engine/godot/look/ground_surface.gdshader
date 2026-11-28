@@ -1,9 +1,16 @@
-// Ground surface 0.2.0 (engine thread): the shared world material M_Ground_Blend (WorldSurface.ush GroundBlend, Textures thread,
+// Ground surface 0.3.0 (engine thread; 0.3.0 test level thread 28 Nov: WS_BAKED sand fields): the shared world material M_Ground_Blend (WorldSurface.ush GroundBlend, Textures thread,
 // generated into look/world_surface.gdshaderinc by tools/ws_to_godot.py), lit through the ported lagoon water like the seabed.
 // Locked art bible v1.6 colours come in as uniforms (look/world_textures.gd), tiles colour-free as in Unreal.
 // Frame: the library works in the island frame (x east, y north, z up, metres); Godot (x, y, z) -> island (x, -z, y).
 shader_type spatial;
 render_mode blend_mix, cull_back, diffuse_lambert, specular_disabled;
+// WS_BAKED: the sand's fixed noise fields from textures baked once at load (adapters/godot/sand_bake.gd); sand_on = 0 = all procedural
+#define WS_BAKED
+uniform sampler2D sandA : filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D sandB : filter_linear_mipmap_anisotropic, repeat_disable;
+uniform vec4 sand_box = vec4(0.0, 0.0, 1.0, 1.0);   // island xy (m) of the first texel centre, span to the last
+uniform vec2 sand_px = vec2(2.0);
+uniform float sand_on = 0.0;
 #include "res://look/world_surface.gdshaderinc"
 #include "res://look/water_physics.gdshaderinc"
 #include "res://look/caustics.gdshaderinc"
