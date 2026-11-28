@@ -42,3 +42,14 @@ keyframe_view). Pass = that station is the slowest and over 40 ms, files written
 `swim_shots.gd`: the girl swims by herself (real `move_forward` input) across the biggest seagrass meadow; pictures at the
 start, half way, leaving, then looking back after `--after` s and 4 s later (grass push and trail), plus swim.json.
 `godot --path . --script res://tools/perf_runner/swim_shots.gd -- --out DIR [--speed 0.35] [--pitch -0.45] [--after 2]`
+
+## Surface shots, video, and full screen (28 Nov, later)
+- `surface_shots.gd`: the girl swims up and breaches (real `ascend` + `move_forward`), pictures under/looking up, in the air,
+  back in, treading; surface.json records mode and lens height above the water at each shot.
+- Video without any macOS permission: add `--write-movie DIR/x.avi` to any of these scripts (Godot's own recorder, 60 fps, at
+  the project's base size), then `swift tools/perf_runner/jpg2mp4.swift FRAMES_DIR out.mp4 960 540 60` after pulling the
+  JPEG frames out of the AVI (chunks `00db`).
+- Runs are full screen by default (Gary 28 Nov); `PROFILES=window` or `WxH` only when asked. Stations may carry
+  `"toggles": {"sea": false}`.
+- Known: Godot 4.7 on Metal sometimes hangs the GPU ("timeout waiting for fence"); every number after it is a flat ~7 ms.
+  A run whose godot.log has that line is invalid. A second Godot open at the same time makes it likelier.
