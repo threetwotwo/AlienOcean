@@ -149,7 +149,7 @@ def test_ventral_vs_from_the_record():
     assert {'jaw.dentary', 'jaw.mandibleLow'} <= set(rec['defaults_used'])          # the proof record has no jaw bones: listed
     assert [p[0] for p in form.VPLATES] == ['mandible', 'branchiostegal'] and form.vedge['za'] < form.vedge['zc']
     e = form.vedge; xm = 0.5 * (e['xa'] + e['xc']); zm = float(form.vedge_z(xm)); y = float(form.BOT(xm)) + 0.004
-    d_in, d_out = (float(form.sd_full(np.array([[xm, y, z]]))[0] - form.sd_body(np.array([[xm, y, z]]))[0]) for z in (zm - 0.004, zm + 0.004))
+    d_in, d_out = (float(form.sd_full(np.array([[xm, y, z]]))[0] - form.sd_body(np.array([[xm, y, z]]))[0]) for z in (zm - 0.004, zm + 0.008))     # outside: past the edge's chamfer (form.PLATE_CHAMFER)
     assert d_out < d_in - 1e-4                                                      # the membrane stands proud outside the V edge only
     # the proof record's slit is 14 columns long, so the 17-edge cap leaves no leg that reaches the cavity slot; a cover
     # with a lower top (as most records have) gets the leg
@@ -182,3 +182,134 @@ def test_traced_cross_section_reaches_the_form_and_the_front_gate(tmp_path):
     (C1, V1), (C2, V2) = load(o1), load(o2)
     ref = dict(front=S.outline2(C2, V2, 'front'))
     assert S.score2(C2, V2, ref)['SIL2_pass'] and not S.score2(C1, V1, ref)['SIL2_pass']
+
+
+def _cage(rec_dict, tmp_path, name):
+    """build the cage only (no maps) from a record dict; returns (cage dict as pose.py reads it, V, adapted record, form, builder)."""
+    from creature_maker.record import adapt
+    from creature_maker.form import Form
+    from creature_maker.chart import Chart
+    from creature_maker.cage import build_cage
+    p = str(tmp_path / f'{name}.json'); json.dump(rec_dict, open(p, 'w'))
+    rec = adapt(p); form = Form(rec); B = build_cage(form, Chart(form), rec); M, G = B.mouth, B.gill
+    C = dict(faces=[list(map(int, f)) for f in B.mesh.faces], ftag=B.mesh.ftag, rolls=B.rolls(), junctions=B.junctions(), commissures=B.commissures,
+             xend=form.XEND, openings=dict(jr=M.jr, mouth_rows=[list(map(int, r)) for r in M.MROWS], mouth_lining_rows=M.NF,
+                                           cavity_rows=[list(map(int, r)) for r in M.CROWS + M.DOME] + [[int(M.gut)]],
+                                           gill_flaps=[list(map(int, s['A'])) for s in G.slits], gill_rows=[[list(map(int, r)) for r in s['rows']] for s in G.slits],
+                                           jaw_joint=rec['jaw_joint'], opercle_hinge=rec['opercle_hinge'],
+                                           gill_v=dict(edge=[[float(x), float(form.vedge_z(x))] for x in np.linspace(form.vedge['xa'], form.vedge['xc'], 16)], under=form.vunder, apex=G.apex) if G.apex else None))
+    return C, B.V, rec, form, B
+
+
+def test_jaws_enclose_the_mouth_line(tmp_path):
+    """planted: an outline traced round an overhanging upper lip, its lower edge above the mouth line for the first 3 % SL
+    (triggerfish, blenny, porcupinefish records). The form carries the outline round the seam, so the lips keep their width;
+    without the rule they fell on the midline (z = 0) and the lip roll crossed the first loops."""
+    from creature_maker.form import JAW_MIN
+    raw = json.load(open(REC)); O = raw['record']['outline']
+    O['bot'] = [[0.0, -0.2], [3.0, -0.2], [9.0, -0.2]] + [p for p in O['bot'] if p[0] > 9.5]      # the seam at x 9 is at y -6.2
+    C, V, rec, form, B = _cage(raw, tmp_path, 'overhang')
+    ml = np.array(rec['mouth']['line']); xs = np.linspace(0.002, ml[:, 0].max(), 20); ys = np.interp(xs, ml[:, 0], ml[:, 1])
+    assert form.JAW_LIFT > 0.01 and (ys - form.BOT(xs)).min() > 0.8 * JAW_MIN and (form.TOP(xs) - ys).min() > 0.8 * JAW_MIN
+    lips = np.array(B.mouth.LIP3); NT = len(lips)
+    assert np.abs(lips[1:NT // 2, 2]).min() > 1e-3, np.abs(lips[1:NT // 2, 2]).round(4)      # every lip vertex off the midline
+    C0, V0, rec0, form0, B0 = _cage(json.load(open(REC)), tmp_path, 'plain')
+    assert form0.JAW_LIFT < 1e-6                                                             # a mouth inside its outline moves nothing
+
+
+def test_lower_lip_tip_is_charted_under_the_mouth(tmp_path):
+    """the snout chart's angle of a front-disc point: straight below the mouth tip is pi, not 2 pi (the lookup answered
+    2 pi for every angle, and the loops under the chin started above the lips)."""
+    C, V, rec, form, B = _cage(json.load(open(REC)), tmp_path, 'plain'); S = B.mouth.snout
+    assert abs(float(S.disc_theta(np.array(S.y_m0 - 0.001), np.array(0.0))) - np.pi) < 1e-6
+    assert 0.2 < float(S.disc_theta(np.array(S.y_m0), np.array(0.001))) < np.pi - 0.2
+    assert abs(B.mouth.LIPT[len(B.mouth.LIPT) // 2] - np.pi) < 1e-6 and B.mouth.LIPT[0] < 1e-6
+
+
+def test_jaw_field_holds_when_the_joint_sits_on_the_rictus(tmp_path):
+    """planted: the jaw joint 0.5 % SL above the rictus (sweetlips, blenny records). The field's frame is the jaw's own
+    line (mouth tip to joint), so the jaw is still the part under the mouth in front of the joint: the lip tips part by
+    the whole gape, the upper head stays, and the throat far behind the joint stays. Framed on the line from rictus to
+    joint the field turned a quarter turn: half weight on the throat floor far behind the joint, a fold at gape 10."""
+    from creature_maker.pose import jaw_weights, OPEN_MIN
+    raw = json.load(open(REC)); R = raw['record']; xr, yr = R['mouth']['seam'][-1]
+    R['skeleton']['jawJoint'] = [xr + 0.3, yr + 1.5]
+    C, V, rec, form, B = _cage(raw, tmp_path, 'joint_on_rictus'); w = jaw_weights(C, V, rec); J = np.array(rec['jaw_joint'])
+    lips = C['openings']['mouth_rows'][0]
+    assert w[lips[len(lips) // 2]] - w[lips[0]] >= OPEN_MIN
+    ml = np.array(rec['mouth']['line']); ml = ml[np.argsort(ml[:, 0])]
+    skin = np.zeros(len(V), bool); skin[[v for f, t in zip(C['faces'], C['ftag']) if t in ('mouth', 'body') for v in f]] = True
+    behind = V[:, 0] > J[0] + 0.08; above = skin & (V[:, 0] < ml[-1, 0] - 0.01) & (V[:, 1] > np.interp(V[:, 0], ml[:, 0], ml[:, 1]) + 0.01)
+    assert w[behind].max() < 0.05 and above.sum() > 10 and w[above].max() < 0.05, (w[behind].max(), above.sum(), w[above].max())
+    chin = skin & (V[:, 0] < 0.6 * ml[0, 0] + 0.4 * ml[-1, 0]) & (V[:, 1] < np.interp(V[:, 0], ml[:, 0], ml[:, 1]) - 0.01)
+    assert chin.sum() > 5 and w[chin].min() > 0.95, (chin.sum(), w[chin].min())
+
+
+def test_corner_blend_stops_short_of_the_lip_tips(tmp_path):
+    """planted: the jaw joint as far behind the rictus as the mouth is long (trevally, damsel, hawkfish records). The
+    corner's blend is capped at half the mouth, so the lip tips still part by the whole gape (GP1's opening share);
+    uncapped they stood at 0.2 and 0.8 and the snout drooped with the jaw."""
+    from creature_maker.pose import jaw_weights, OPEN_MIN
+    raw = json.load(open(REC)); R = raw['record']; xr, yr = R['mouth']['seam'][-1]
+    R['skeleton']['jawJoint'] = [xr + 22.0, yr - 6.0]
+    C, V, rec, form, B = _cage(raw, tmp_path, 'joint_far_behind'); w = jaw_weights(C, V, rec); lips = C['openings']['mouth_rows'][0]
+    assert w[lips[len(lips) // 2]] - w[lips[0]] >= OPEN_MIN
+    assert abs(w[lips[C['openings']['jr']]] - 0.5) < 1e-6                              # the corner itself still sits half way
+
+
+def test_gill_slit_opens_as_a_lens(tmp_path):
+    """the first passage row is designed all along each slit (flap lining under the flap, lip lining straight in), the
+    slit's ends go with the skin round them and every lining vertex follows its own slit vertex: no crossing at rest
+    between passage and skin, none in the real flare, and the flap's middle goes with the cover."""
+    from creature_maker.pose import cover_weights, stress, self_intersections, triangles
+    C, V, rec, form, B = _cage(json.load(open(REC)), tmp_path, 'plain')
+    T = triangles(C['faces']); tt = [t for f, t in zip(C['faces'], C['ftag']) for _ in range(len(f) - 2)]
+    _, pairs = self_intersections(V, T)
+    assert not [p for p in pairs if 'gill' in (tt[p[0]], tt[p[1]])]
+    w = cover_weights(C, V, rec)
+    for s, rows in zip(C['openings']['gill_flaps'], C['openings']['gill_rows']):
+        assert w[s].max() > 0.5 and w[s[0]] < w[s].max()                               # open in the middle, closing toward the ends
+        for r, row in enumerate(rows[1:-1], 1):
+            assert np.allclose(w[row], w[rows[0]] * (1 - r / (len(rows) - 1)))         # lining follows its slit vertex
+    assert stress(C, V, rec)['GF1_pass']
+    from creature_maker.pose import jaw_weights
+    assert (w + jaw_weights(C, V, rec)).max() <= 1 + 1e-9                              # the cover takes what the jaw leaves: the rig never scales
+
+
+def test_lower_jaw_plate_has_no_ledge():
+    """the plates drawn from below (lower-jaw rami, branchiostegal membrane) end in chamfers. Cut off square in the side
+    view, the mandible's upper limit was a ledge along the lower jaw whose face leaned over the skin: a flat shelf with a
+    jagged edge in the engine, backward texels in the bake. Nowhere on the lower jaw may the form's normal face away from
+    the bare body's."""
+    from creature_maker.record import adapt
+    from creature_maker.form import Form
+    form = Form(adapt(REC)); k = [p[0] for p in form.VPLATES].index('mandible'); poly = np.array(form.VPLATES[k][1]); n = 140
+    X, T = np.meshgrid(np.linspace(poly[:, 0].min(), poly[:, 0].max(), n), np.linspace(np.pi * 0.5, np.pi, n)); X, T = X.ravel(), T.ravel()
+    top, bot = form.TOP(X), form.BOT(X); D = np.stack([np.zeros_like(X), np.cos(T), np.sin(T)], 1); O = np.stack([X, (top + bot) / 2, np.zeros_like(X)], 1)
+    lo, hi = np.zeros(len(X)), 1.5 * np.maximum(form.HW(X), (top - bot) / 2) + 0.02; f = lambda P: form.sd_full(P, cleft=False)
+    for _ in range(30):                                                                # the form's surface along each ray from the axis
+        m = (lo + hi) / 2; ins = f(O + D * m[:, None]) < 0; lo = np.where(ins, m, lo); hi = np.where(ins, hi, m)
+    P = O + D * hi[:, None]; e = 2e-4
+    g = lambda fn: np.stack([fn(P + e * np.eye(3)[i]) - fn(P - e * np.eye(3)[i]) for i in range(3)], 1)
+    a, b = g(f), g(form.sd_body); c = (a * b).sum(1) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1) + 1e-15)
+    ids = form.sd_full(P - b / np.linalg.norm(b, axis=1)[:, None] * 5e-4, parts=True)[1]
+    jaw = np.asarray(ids) == len(form.PLATES) + k + 1
+    assert jaw.sum() > 50 and c[jaw].min() > 0, (int(jaw.sum()), float(c[jaw].min()))
+
+
+def test_top_view_closing_to_a_point_at_the_snout_builds(tmp_path):
+    """a traced top view may close to zero width at the snout while the side view still has height there; the form keeps
+    a least half-width (form.HW_MIN) instead of dividing by zero."""
+    from creature_maker.form import Form, HW_MIN
+    from creature_maker.record import adapt
+    D = json.load(open(REC)); D['record']['outline']['hw'][0][1] = 0.0
+    p = str(tmp_path / 'pointy.json'); json.dump(D, open(p, 'w'))
+    F = Form(adapt(p)); assert abs(float(F.HW(np.array(0.0))) - HW_MIN) < 1e-12
+    P = F.loft_point(np.array([0.0, 0.0]), np.array([0.3, 1.5]))
+    assert np.isfinite(P).all()
+
+
+def test_front_reference_marked_body_only_is_gated_without_fins():
+    from creature_maker.silhouette import front_has_fins
+    assert front_has_fins({}) and front_has_fins({'front_fins': True})
+    assert not front_has_fins({'front_fins': False}) and not front_has_fins({'front_fins': 'body only: spine folded'})

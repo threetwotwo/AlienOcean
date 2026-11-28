@@ -44,15 +44,33 @@ def split_from_corners(B):
     rank = {}
     for ch in B.commissures:
         for k, v in enumerate(ch): rank.setdefault(v, k)
+    # the mouth corner's spoke carries the corner out over the skin: every loop turns back on itself there, and the
+    # diagonal that skips the spoke vertex leaves a sliver along the spoke (trevally: 0.9e-6 SL2, flipped at gape 10)
+    NT = len(B.mouth.MROWS[0])
+    for j in (B.mouth.jr, NT - B.mouth.jr):
+        for k, r in enumerate(B.mouth.MROWS): rank.setdefault(int(r[j]), k)
     faces = B.mesh.faces
     for k, f in enumerate(faces):
         c = [(rank[v], i) for i, v in enumerate(f) if v in rank]
         if len(f) == 4 and c and min(c)[1] % 2: faces[k] = f[1:] + f[:1]
 
 
-def snap(P, N, f, reach=0.008, it=22):
-    """move each point along its normal onto the zero set of f (bounded bisection)."""
-    lo, hi = -reach * np.ones(len(P)), reach * np.ones(len(P))
+SNAP_REACH = 0.008      # DEFAULT: a vertex moves at most 0.8 % SL along its normal (plates and the orbit ring are thinner)
+SNAP_SCAN = 16          # DEFAULT: samples per reach when looking for the surface: 0.05 % SL apart, a quarter of the dense
+                        # form's cell (0.2 % SL), so nothing the bake can see is stepped over
+
+
+def snap(P, N, f, reach=SNAP_REACH, it=22):
+    """move each point along its normal onto the zero set of f: the outermost crossing within reach, which is the surface
+    the bake's rays meet first. (Plain bisection from the point itself was a coin toss wherever the form has a second
+    surface above the body, a bone plate's edge or the orbit ring: every template vertex starts exactly on the loft, where
+    f is zero to rounding, so the sign of a 1e-18 decided between staying on the body and jumping onto the plate, and it
+    fell differently on the two sides of 7 of the 28 traced species: mouth corners up to 0.6 % SL apart.)
+    A point with the form above it all the way out goes to +reach, one with none within reach to -reach, as before."""
+    ms = np.linspace(reach, -reach, 2 * SNAP_SCAN + 1)                      # from outside in
+    ins = np.stack([f(P + N * m) < 0 for m in ms], 1)                       # (points, samples)
+    k = np.where(ins.any(1), ins.argmax(1), len(ms) - 1)                    # first sample inside the form
+    hi = np.where(k > 0, ms[np.maximum(k - 1, 0)], reach); lo = np.where(ins.any(1), ms[k], -reach)
     for _ in range(it):
         m = (lo + hi) / 2; inside = f(P + N * m[:, None]) < 0
         lo = np.where(inside, m, lo); hi = np.where(inside, hi, m)

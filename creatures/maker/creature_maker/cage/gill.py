@@ -121,11 +121,12 @@ def build_slits(B):
             if leg:                                                        # under the head: over and toward the midline
                 d = verts[grid[i, col(jb + 1)]] - p; t += d / (np.linalg.norm(d) + 1e-12)
             t /= np.linalg.norm(t); k = float(np.clip(form.HW(p[0]) / 0.04, 0.3, 1)) if leg else 1.0    # a slender head: smaller lens
-            # first passage row under the head, designed: the flap's lining turns back under the flap through the gap over
-            # the body lip, the lip's lining goes straight in. Left to the relax the two linings crossed there: the cavity
-            # is narrower than the head, so the hole lies inward of the slit, not under the flap.
-            q = jb - jj if ia is not None else 9                           # columns from the corner; eases in over 3
-            if q < 3: under[v] = (p - k * (t * 0.004 + n * 0.0025), p - n * 0.0052 * k, 1 - q / 3)
+            # first passage row, designed all along the slit: the flap's lining turns back under the flap through the gap
+            # over the body lip, the lip's lining goes straight in. Left to the relax the two linings crossed: under the
+            # head the cavity is narrower than the head, so the hole lies inward of the slit, not under the flap; on the
+            # side the relax drew the row's ends in along the slit, and near each end the flap's lining ran slantwise
+            # through the body lip and the skin behind it (damsel, batfish, angelfish, puffers: 10 to 40 rest crossings).
+            under[v] = (p - k * (t * 0.004 + n * 0.0025), p - n * 0.0052 * k, 1.0)
             if m in (0, len(path) - 1): continue
             Amap[v] = mesh.add_v(p + k * (n * 0.0010 + t * 0.0025), *vuv[v]); order.append(v)
             verts[v] = p - n * 0.0012 * k                                                     # body lip: tucked under
