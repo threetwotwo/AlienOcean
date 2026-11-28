@@ -307,3 +307,9 @@ def test_top_view_closing_to_a_point_at_the_snout_builds(tmp_path):
     F = Form(adapt(p)); assert abs(float(F.HW(np.array(0.0))) - HW_MIN) < 1e-12
     P = F.loft_point(np.array([0.0, 0.0]), np.array([0.3, 1.5]))
     assert np.isfinite(P).all()
+
+
+def test_front_reference_marked_body_only_is_gated_without_fins():
+    from creature_maker.silhouette import front_has_fins
+    assert front_has_fins({}) and front_has_fins({'front_fins': True})
+    assert not front_has_fins({'front_fins': False}) and not front_has_fins({'front_fins': 'body only: spine folded'})

@@ -111,9 +111,16 @@ SIL2_MIN = 0.90       # DEFAULT: same pass mark as the side view
 VIEW2 = {'front': lambda Q: np.c_[Q[:, 2], Q[:, 1]], 'top': lambda Q: np.c_[Q[:, 0], Q[:, 2]]}
 
 
-def _faces2(C, V, view):
+def front_has_fins(ref):
+    """a "front" reference holds the median fins unless the tracer marks it body only ("front_fins": false, or a note that
+    starts "body only": a folded spine or edge-on fins in the head-on photo)."""
+    v = ref.get('front_fins', True)
+    return not (v is False or (isinstance(v, str) and v.strip().lower().startswith('body only')))
+
+
+def _faces2(C, V, view, fins=True):
     F = [V[f] for f, t in zip(C['faces'], C['ftag']) if t in ('body', 'eye', 'mouth', 'cap')]
-    if view == 'front':
+    if view == 'front' and fins:
         for k, fn in C.get('fins', {}).items():
             if k.startswith(MEDIAN): FV = np.array(fn['V']); F += [FV[f] for f in fn['F']]
     return [VIEW2[view](q) for q in F]
@@ -134,8 +141,8 @@ def score2(C, V, ref):
     R = {}
     for view in ('front', 'top'):
         if not ref.get(view): continue
-        P = np.asarray(ref[view], float); box = _box2(np.vstack([P] + _faces2(C, V, view)))
-        R[f'SIL2_{view}_iou'] = round(iou(mask2(_faces2(C, V, view), box), mask2([P], box)), 3)
+        P = np.asarray(ref[view], float); F = _faces2(C, V, view, front_has_fins(ref)); box = _box2(np.vstack([P] + F))
+        R[f'SIL2_{view}_iou'] = round(iou(mask2(F, box), mask2([P], box)), 3)
     if R: R['SIL2_pass'] = all(v >= SIL2_MIN for v in R.values())
     return R
 
@@ -149,8 +156,8 @@ def outline2(C, V, view, res=500):
 
 
 def overlay2(C, V, ref, view, out_png):
-    P = np.asarray(ref[view], float); box = _box2(np.vstack([P] + _faces2(C, V, view)))
-    A, B = mask2(_faces2(C, V, view), box), mask2([P], box)
+    P = np.asarray(ref[view], float); F = _faces2(C, V, view, front_has_fins(ref)); box = _box2(np.vstack([P] + F))
+    A, B = mask2(F, box), mask2([P], box)
     img = np.full(A.shape + (3,), 245, np.uint8); img[B & ~A] = (90, 130, 255); img[A & ~B] = (255, 90, 90); img[A & B] = (150, 110, 190)
     Image.fromarray(img).save(out_png)
 
