@@ -1,4 +1,4 @@
-// Creature school 0.2.0: a creature maker export drawn in a MultiMesh school (fish/creature_school_mesh.gd). The maker's
+// Creature school 0.3.0 (0.3.0, look thread: lit by look/creature_light.gdshaderinc, caustics on the fish): a creature maker export drawn in a MultiMesh school (fish/creature_school_mesh.gd). The maker's
 // PBR material, and its swim wave from the glTF extras (alien_ocean.swim.wave.amplitude_envelope_BL: per station s, half
 // sideways swing in BL with recoil included, phase lag in turns behind the snout), played back as the extras' rule says:
 // lateral z(s) = A(s) x amp_scale x sin(phase - 2 pi lag(s)), phase advancing at f(U) (beat_law), amp_scale = A_U / A.
@@ -30,6 +30,8 @@ uniform float env_a2[16];
 uniform float env_lag2[16];
 uniform vec3 env_u = vec3(1.0, 2.0, 3.0);   // the speeds (BL/s) of the three tables
 uniform int env_n = 0;
+// lit by the water physics like the seabed: the sun's beam at the fish's depth with the light net, the fill's depth change, GGX specular
+#include "res://look/creature_light.gdshaderinc"
 
 // the three tables blended at U: linear between the two nearest speeds, end tables held outside (export r2 rule)
 float row_a(int i, float u01, float u12, bool hi) { return hi ? mix(env_a1[i], env_a2[i], u12) : mix(env_a0[i], env_a1[i], u01); }
@@ -80,6 +82,7 @@ void vertex() {
 	float c = cos(ang), sn = sin(ang);
 	NORMAL = normalize(vec3(NORMAL.x * c - NORMAL.z * sn, NORMAL.y, NORMAL.x * sn + NORMAL.z * c));
 	TANGENT = normalize(vec3(TANGENT.x * c - TANGENT.z * sn, TANGENT.y, TANGENT.x * sn + TANGENT.z * c));
+	cl_wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;   // the swum position (look/creature_light.gdshaderinc)
 }
 
 void fragment() {
@@ -91,4 +94,7 @@ void fragment() {
 	METALLIC = m;
 	ROUGHNESS = r;
 	if (use_normal_tex > 0.5) { NORMAL_MAP = texture(normal_tex, UV).rgb; NORMAL_MAP_DEPTH = normal_scale; }
+	cl_fill = creature_fill(cl_wpos, (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	ALBEDO *= cl_fill;
+	ALBEDO = creature_debug_albedo(ALBEDO, TIME, INV_VIEW_MATRIX, PROJECTION_MATRIX, VIEWPORT_SIZE);
 }
