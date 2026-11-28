@@ -1,5 +1,16 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, blockout kit 0.2.0): rideable creature stand-ins that swim like their animal
+- Gary 28 Nov 07:20Z: vary creature sizes and swimming motion for riding stress tests ("a dolphin swims differently from a
+  whale"). blockout/blockout_species.gd: dolphin 2.6 m (up-down body wave, ~1 Hz), humpback 14 m (up-down, 0.24 Hz),
+  whale shark 10 m (side-to-side, 0.24 Hz), manta 6 m span (wing flap, wave out along the span), turtle 1.1 m (flipper
+  strokes), all scalable. Swim waves and grab slots from Thalassa v20.19 (wildlife-ecosystem.js getCreatureGripWorld,
+  GPU modes 1 and 5): dolphin dorsal fin both flanks (palms 1.3 cm off the skin at any size), whale shark dorsal /
+  pectorals / tail lobe, manta dorsal chevron, turtle front shell rim; humpback pectorals and hump. Each slot has
+  hand_l, hand_r and body frames riding the swim wave. Rider 0.2.0 takes species + scale; the gym has a station each.
+- tests/test_blockout.gd Y1: each species at 0.6-1.3x swims in its own plane, beats at its own frequency, holds its speed,
+  every slot within a 1.38 m girl's reach; 81/81 at 30/60/120 Hz, rates agree 0.0 cm.
+
 ## 0.6.0-dev (28 Nov 2026, blockout kit): one grey test kit, grey mode in any level, the blockout gym
 - Gary 28 Nov 06:50Z: blockouts are the standard for testing and fast iteration. blockout/blockout_kit.gd 0.1.0 is the one kit
   (24 kinds in metres: steps, stairs, ramps, slope across, ledge, drop, gaps, beams, grown rough field, walls, corner, low
