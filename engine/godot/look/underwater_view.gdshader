@@ -36,16 +36,20 @@ void fragment() {
 		float z0 = water_y - cam.y;
 		float ocean = sea_bathy_ss(20.0, 120.0, sea_bathy_depth(cam.xz));   // past the reef: the open ocean's water (as sea_top)
 		vec3 glow;
+		// Is there a floor under this ray? Not when the eye is below the lagoon floor (down a reef wall), nor where the floor map
+		// round the eye holds nothing (open water past the drawn floor); outside the map the lagoon's floor plane is assumed, as
+		// the surface's mirror does (sea_under floor_top). Asked for every ray, so a level or upward ray over open water (one that
+		// ends on the surface's underside) lights its water as the abyss beside it does: the horizon seam (Gary 28 Nov 13:56).
+		float fd = w_floor_dist(d, z0);
+		// probed where the ray lands, or for a level or upward ray far off along it; past the map's edge the edge goes on, so
+		// a ray just under the horizon and one just over it read the same water (the old 20 m probe drew a pale strip there)
+		vec2 probe = cam.xz + d.xz * (fd > 0.0 ? fd : 1e5);
+		bool has_floor = z0 < water_y - water_floor_y - 0.05;
+		vec2 fuv = clamp((probe - water_floor_org.xy) / water_floor_org.z + 0.5, vec2(0.002), vec2(0.998));
+		if (has_floor && water_floor_org.w > 0.5)
+			has_floor = textureLod(water_floor_height, fuv, 0.0).a > 0.5;
 		if (depth <= 1e-7) {
-			// no geometry on this ray (depth at the far plane: reversed z 0). Is there a floor under it? Not when the eye is below
-			// the lagoon floor (down a reef wall), nor where the floor map round the eye holds nothing (open water past the drawn
-			// floor); outside the map the lagoon's floor plane is assumed, as the surface's mirror does (sea_under floor_top).
-			float fd = w_floor_dist(d, z0);
-			vec2 probe = cam.xz + d.xz * (fd > 0.0 ? fd : 20.0);
-			bool has_floor = z0 < water_y - water_floor_y - 0.05;
-			vec2 fuv = (probe - water_floor_org.xy) / water_floor_org.z + 0.5;
-			if (has_floor && water_floor_org.w > 0.5 && all(greaterThan(fuv, vec2(0.0))) && all(lessThan(fuv, vec2(1.0))))
-				has_floor = textureLod(water_floor_height, fuv, 0.0).a > 0.5;
+			// no geometry on this ray (depth at the far plane: reversed z 0)
 			if (has_floor && fd > 0.0) {
 				// the lagoon floor goes on past the drawn floor: the ray ends on sand lit as the drawn sand is (the white void fix)
 				L = min(fd, L); scene = w_floor_nits() * water_exposure; glow = w_glow(d, z0, L);
@@ -58,7 +62,7 @@ void fragment() {
 			// the lagoon's sand bounce: blend to the deep light field over the first 10 m past the floor, so it matches the open-water
 			// ray beside it (water surface thread's drop-off views, 28 Nov: these read near black on w_glow alone)
 			float zend = z0 + max(-d.y, 0.0) * L;
-			float kd = clamp((zend - (water_y - water_floor_y)) / 10.0, 0.0, 1.0);
+			float kd = has_floor ? clamp((zend - (water_y - water_floor_y)) / 10.0, 0.0, 1.0) : 1.0;
 			glow = w_glow(d, z0, L);
 			if (kd > 0.0) glow = mix(glow, w_deep_o(d, z0, L, ocean), kd);
 		}

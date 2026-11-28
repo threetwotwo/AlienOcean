@@ -35,6 +35,7 @@ void fragment() {
 	float z = max(water_y - wpos.y, 0.0);
 	float up = 0.5 + 0.5 * wnorm.y;
 	if (water_fill_ao > 0.5) {   // the fill through Godot's ambient (occluded by SSAO / SSIL / AO); light() divides the ratio back out
+		AO = min(AO, screen_ao(SCREEN_UV));   // CORTAO when on (look/screen_ao.gdshaderinc)
 		ALBEDO *= w_fill_ratio(z, up);
 	} else {
 		EMISSION = ALBEDO * w_fill(z, up);   // nits; Godot applies the exposure

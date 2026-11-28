@@ -13,6 +13,7 @@
 | core/m31_school/, adapters/godot/school_node.gd, fish/, tests/test_school.gd, tests/test_golden_school.gd, tests/golden/school_*, tests/run_school.sh, tools/school_film.gd | Fish schools (Build the fish school system) |
 | VERSION bumps and CHANGELOG release headings (game code owner) | Gameplay |
 | core/m32_game/, core/world/sim_clock.gd, adapters/godot/game_root.gd, game_services.gd, actor_rig.gd, scenes/game*, tests/test_game_root.gd, tests/run_game_root.sh, tools/game_film.gd | Game root (Build the shared game root) |
+| blockout/, tests/test_blockout.gd, tests/run_blockout.sh, tools/blockout_shots.gd, run_blockout.command; tests/harness/test_worlds.gd is now its shim | Blockout kit (Build the blockout test kit) |
 | README.md, CHANGELOG.md entries | shared: each owner edits only its own section / appends its own entries |
 
 Rules: re-read a shared file just before editing it (this is a network folder; last write wins). A change that touches the

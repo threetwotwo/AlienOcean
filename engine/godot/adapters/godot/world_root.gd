@@ -115,6 +115,8 @@ var last := {}
 var _gi_reset := 0   # frames left with SDFGI off to drop its cache after a jump in the light (apply)
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
+var cortao_fx: CortaoEffect      # CORTAO screen AO (adapters/godot/cortao_effect.gd); set_ao picks it or Godot's SSAO
+var ao_mode := "ssao"
 var _surface: SeaSurface          # make_surface's: its floor map is captured again when the light changes (apply)
 var under_mat: ShaderMaterial       # the underwater view quad's material (attach_camera)
 var caustics: CausticsMap           # the light net's map, drawn once a frame (adapters/godot/caustics_map.gd)
@@ -182,10 +184,19 @@ func _init() -> void:
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	env.glow_enabled = true; env.glow_intensity = 0.3
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
-	agx_fx = AgxEffect.new(); var comp := Compositor.new(); comp.compositor_effects = [agx_fx]; we.compositor = comp
+	agx_fx = AgxEffect.new(); cortao_fx = CortaoEffect.new(); cortao_fx.enabled = false
+	var comp := Compositor.new(); comp.compositor_effects = [cortao_fx, agx_fx]; we.compositor = comp
 	set_agx(true)
 	cam_attr = CameraAttributesPhysical.new(); cam_attr.auto_exposure_enabled = false
 	cam_attr.frustum_near = 0.02; cam_attr.frustum_far = 400.0
+
+func set_ao(mode: String) -> void:
+	## "ssao" = Godot's SSAO (the look until now), "cortao" = CORTAO (third_party/cortao) through look/screen_ao.gdshaderinc, "off" = none.
+	## Both occlude only the ambient / GI fill (ao = min(ao, x)), never the sun. SSIL is separate and stays as it is.
+	ao_mode = mode
+	env.ssao_enabled = mode == "ssao"
+	cortao_fx.enabled = mode == "cortao"
+	RenderingServer.global_shader_parameter_set("cortao_on", 1.0 if mode == "cortao" else 0.0)
 
 func set_agx(on: bool) -> void:
 	## on: the Unreal AgX tonemapper (look/agx_post.glsl) replaces Godot's; LINEAR leaves only the sRGB encoding and
@@ -392,7 +403,9 @@ static func declare_globals() -> void:
 		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)],
 		# the sea surface (water surface thread): the sky dome's shape sun and scale, the key body in air and its beam lux
 		"water_amb_ref": [V, Vector3.ONE], "water_fill_ao": [F, 1.0], "water_amb_sky": [F, 0.0],
-		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "sky_turbidity": [F, turbidity], "sky_overcast": [F, 0.0], "sky_oc_zenith": [F, 0.0], "sky_rayleigh": [V, rayleigh], "sky_horizon_k": [F, horizon_k], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
+		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "sky_turbidity": [F, turbidity], "sky_overcast": [F, 0.0], "sky_oc_zenith": [F, 0.0], "sky_rayleigh": [V, rayleigh], "sky_horizon_k": [F, horizon_k], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0],
+		# CORTAO screen AO (look/screen_ao.gdshaderinc): the result texture and 1 = on
+		"cortao_ao": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()], "cortao_on": [F, 0.0]}
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)
