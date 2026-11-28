@@ -9,7 +9,7 @@
 ##     Hs within 25 % of 4 sqrt(continuous band sum).
 ##  S4 planted fault: a sea drawn with the wrong slick (calm_k 4 instead of 16) must FAIL S3 for the 2.56 m cascade.
 ##  S5 height read back (FftSea.height_at, what LagoonWaterField.water_y adds): at 300 drawn points (a still point X
-##     moved by its push, X + D(X), as the vertex shader places it) the height must be D(X).z of cascades 0 + 1 from a
+##     moved by its push, X + D(X), as the vertex shader places it) the height must be D(X).z of cascades 0-2 from a
 ##     direct GPU read, within 2 mm; planted fault: the island y axis not flipped (Godot z = -y) must miss.
 ## Needs the renderer (compute): xvfb-run -a godot --path . --rendering-driver vulkan --script res://tests/test_fft_sea.gd
 extends SceneTree
@@ -87,12 +87,12 @@ func _bilin(f: PackedFloat32Array, X: Vector2, L: float) -> Vector3:
 	return r
 
 func _height_check() -> int:
-	var f0 := sea.read_layer("disp", 0); var f1 := sea.read_layer("disp", 1)
+	var f0 := sea.read_layer("disp", 0); var f1 := sea.read_layer("disp", 1); var f2 := sea.read_layer("disp", 2)
 	var rng := RandomNumberGenerator.new(); rng.seed = 5
 	var err := 0.0; var err_flip := 0.0; var s2 := 0.0
 	for k in 300:
 		var X := Vector2(rng.randf_range(-400.0, 400.0), rng.randf_range(-400.0, 400.0))
-		var D := _bilin(f0, X, 250.0) + _bilin(f1, X, 21.4)
+		var D := _bilin(f0, X, sea.patch.x) + _bilin(f1, X, sea.patch.y) + _bilin(f2, X, sea.patch.z)
 		var w := X + Vector2(D.x, D.y)
 		err = maxf(err, absf(sea.height_at(w.x, -w.y) - D.z))
 		err_flip = maxf(err_flip, absf(sea.height_at(w.x, w.y) - D.z))

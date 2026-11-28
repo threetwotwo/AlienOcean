@@ -23,7 +23,7 @@ const float GOD_FLOOR = 0.9;       // PHYS_CODE 2539: dark gaps never below -0.9
 // the caustic sum along the ray, metres (the god-ray node's return with GodPhys 1, GodUnits 1).
 // cam, dir: Godot world; len_m: the path to the scene; frag: the pixel; frame8: the frame count mod 8 (0 without TAA)
 float god_acc(vec3 cam, vec3 dir, float len_m, vec2 frag, float frame8) {
-	if (cam.y >= water_y) return 0.0;                              // above water: nothing to add
+	// wet or dry is the caller's (look/underwater_view: per pixel at the drawn waves, look/sea_side.gdshaderinc)
 	float a = 3.0 / max(GOD_VIS, 0.1);                              // haze per metre: 95% after Visibility metres
 	float Lm = min(len_m, 5.0 / a);                                 // beyond that, under 1% of the haze is left to add
 	// sun down: no shafts (Unreal: sunD.z < 0.02, the sun in air; here from the refracted sun, n 1.333)
