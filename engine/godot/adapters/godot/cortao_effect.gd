@@ -17,7 +17,7 @@ var backface_threshold := 0.5
 var backface_boost := 0.0
 var filter_depth := 512.0
 var filter_normal := 16.0           # CORTAO default 128; 16 with shape normals: key frame grain 3.70 -> 3.35 (SSAO 3.05)
-var animate := false              # new seed every frame (only with a temporal filter: TAA / FSR2); constant otherwise, no flicker
+var animate := false              # force a new seed every frame; otherwise it follows the viewport's TAA (constant seed without TAA: no flicker)
 var invert_flip := false          # checks only: the planted fault (AO lands mirrored)
 var depth_normals := true         # the shape's normal from depth, not the materials' detail normal (see cortao_prepass.glsl)
 var samples := int(OS.get_environment("CORTAO_SAMPLES")) if OS.get_environment("CORTAO_SAMPLES") != "" else 16
@@ -185,7 +185,7 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	var P := rsd.get_view_projection(0)
 	var I := P.inverse()
 	if frame == 5 and OS.get_environment("CORTAO_DEBUG") != "": print("CORTAO P ", P, " size ", sz, " mips ", mips)
-	var seed := (frame * 2654435761) & 0xFFFFFFFF if animate else 0x9E3779B9
+	var seed := (frame * 2654435761) & 0xFFFFFFFF if (animate or rsb.get_use_taa()) else 0x9E3779B9
 	frame += 1
 	var res := sz.x | (sz.y << 16)
 	# Godot hands over the projection already corrected for Vulkan (measured 28 Nov: Y flipped, reverse-Z remapped to 0..1:
