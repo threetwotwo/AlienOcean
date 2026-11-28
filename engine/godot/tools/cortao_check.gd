@@ -7,8 +7,12 @@
 ##   C5 grain: high-pass std of the AO in the soft shadow < 0.02 (no speckle: SIMPLICITY, noise is not detail)
 ##   C6 no screen door: the periodic part of the grain (grain x the high-pass's correlation at CORTAO's filter tap spacing:
 ##      3 px, or 6 px at half resolution) < 0.0035 (under 1/255: invisible). A correlation alone means nothing when there is almost no grain (XeGTAO: 0.002).
+##   C7 screen edges: the shape normal (prepass) along the bottom row and the right column of open floor is within 5 deg of the
+##      one just inside. The floor's shading normal is rippled, like the sand; the shape normal must not fall back to it at the
+##      edge (key frame 28 Nov: dark dashes along the bottom row).
 ## Planted faults: --fault flip renders with flip_y inverted (the AO lands mirrored), which must fail C1 or C3;
-## --fault coarse makes the last filter pass use CORTAO's 3 px taps again (the lattice comes back), which must fail C6.
+## --fault coarse makes the last filter pass use CORTAO's 3 px taps again (the lattice comes back), which must fail C6;
+## --fault edge plants the old edge-normal bug (the clamped neighbour's zero difference wins), which must fail C7.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- <out dir> [--fault flip]
 extends SceneTree
 
@@ -34,7 +38,19 @@ func _run() -> void:
 	sm.shader.code = """shader_type spatial;
 #include "res://look/screen_ao.gdshaderinc"
 void fragment() { ALBEDO = vec3(0.7); ROUGHNESS = 1.0; AO = min(AO, screen_ao(SCREEN_UV)); }"""
-	_box(Vector3(0, -0.05, 0), Vector3(20, 0.1, 20), sm)
+	# the floor's shading normal is rippled like the sand (tilts up to 80 deg, 4 cm period): the shape normal must ignore it everywhere
+	var fm := ShaderMaterial.new()
+	fm.shader = Shader.new()
+	fm.shader.code = """shader_type spatial;
+#include "res://look/screen_ao.gdshaderinc"
+varying vec3 wp;
+void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
+void fragment() {
+	ALBEDO = vec3(0.7); ROUGHNESS = 1.0; AO = min(AO, screen_ao(SCREEN_UV));
+	vec2 t = vec2(sin(wp.x * 157.0), sin(wp.z * 131.0 + wp.x * 40.0)) * 4.0;
+	NORMAL = normalize((VIEW_MATRIX * vec4(normalize(vec3(t.x, 1.0, t.y)), 0.0)).xyz);
+}"""
+	_box(Vector3(0, -0.05, 0), Vector3(20, 0.1, 20), fm)
 	_box(Vector3(0, 0.5, 0), Vector3(1, 1, 1), sm)
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR; env.background_color = Color(0.3, 0.4, 0.5)
@@ -96,7 +112,25 @@ void fragment() { ALBEDO = vec3(0.7); ROUGHNESS = 1.0; AO = min(AO, screen_ao(SC
 			for x in 40:
 				c += hp[y * 40 + x] * hp[(y + L) * 40 + x]; cn += 1
 		lat = maxf(lat, (c / cn) / maxf(v / hp.size(), 1e-12))
-	var rows := [["C5 grain (high-pass std) < 0.02", grain < 0.02, grain], ["C1 contact r < 0.80", contact < 0.80, contact], ["C2 open floor r > 0.95", open > 0.95, open],
+	# C7: the prepass's shape normal along the bottom row and the right column of open floor vs 6-10 px inside them (the floor
+	# is flat, so they must agree; the bug left the rippled shading normal there)
+	var sn: Image = fx.captured_shape_n
+	var nw := sn.get_width(); var nh := sn.get_height()
+	var aw := ao.get_width(); var ah := ao.get_height()
+	var nrm := func(x: int, y: int) -> Vector3:
+		var c := sn.get_pixel(x, y); return Vector3(c.r, c.g, c.b) * 2.0 - Vector3.ONE
+	var edge_dev := 0.0
+	for side in 2:
+		var cnt := nw if side == 0 else nh
+		for i in range(4, cnt - 4):
+			var e: Vector3 = nrm.call(i, nh - 1) if side == 0 else nrm.call(nw - 1, i)
+			var inn := Vector3.ZERO
+			for k in range(6, 11): inn += nrm.call(i, nh - 1 - k) if side == 0 else nrm.call(nw - 1 - k, i)
+			if e.length() > 1.2 or inn.length() > 5.5: continue   # sky (no shape normal written: -1, -1, -1; five of them sum to 8.7)
+			inn = inn.normalized()
+			if (ao.get_pixel(i * aw / nw, ah - 8).r if side == 0 else ao.get_pixel(aw - 8, i * ah / nh).r) < 0.9: continue   # not open floor (the box)
+			edge_dev = maxf(edge_dev, rad_to_deg(acos(clampf(e.normalized().dot(inn), -1.0, 1.0))))
+	var rows := [["C7 screen edges: shape normal within 5 deg of just inside", edge_dev < 5.0, edge_dev], ["C5 grain (high-pass std) < 0.02", grain < 0.02, grain], ["C1 contact r < 0.80", contact < 0.80, contact], ["C2 open floor r > 0.95", open > 0.95, open],
 		["C6 no screen door: 3 / 6 px periodic grain < 0.0035", grain * maxf(lat, 0.0) < 0.0035, grain * maxf(lat, 0.0)], ["C3 box top r > 0.95", top > 0.95, top], ["C4 lit contact/open <= 0.90", lc / maxf(lo, 1e-4) <= 0.90, lc / maxf(lo, 1e-4)]]
 	var all := true
 	for r in rows:

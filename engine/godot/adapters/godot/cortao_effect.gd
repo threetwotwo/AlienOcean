@@ -48,6 +48,7 @@ var vbao_thickness := 0.4         # m: how deep an occluder is assumed to be (bi
 var half_res_ao := OS.get_environment("CORTAO_HALF") != "0"
 var capture_next := false         # checks: copy the next result into `captured` (stalls the GPU; tests only)
 var captured: Image
+var captured_shape_n: Image       # the prepass's shape normal (n * 0.5 + 0.5, view space), same capture
 var gpu_ms := 0.0                 # the three passes' GPU time, last frame read back (RD timestamps; 0 until measured)
 
 var rd: RenderingDevice
@@ -140,7 +141,8 @@ func _compile(path: String, defines := "", fine := false) -> RID:
 func _init_compute() -> void:
 	rd = RenderingServer.get_rendering_device()
 	if rd == null: return
-	sh_pre = _compile("res://look/cortao/cortao_prepass.glsl")
+	# checks only: env CORTAO_FAULT_EDGE=1 plants the old edge-normal bug (cortao_check --fault edge must fail C7)
+	sh_pre = _compile("res://look/cortao/cortao_prepass.glsl", "#define CORTAO_FAULT_EDGE 1\n" if OS.get_environment("CORTAO_FAULT_EDGE") != "" else "")
 	var hd := "#define CORTAO_HALF 1\n" if half_res_ao else ""
 	sh_main = _compile("res://look/cortao/cortao_main.glsl", "#define CORTAO_SAMPLES %d\n#define CORTAO_RAYS %d\n" % [samples, rays] + hd)
 	sh_filt = _compile("res://look/cortao/cortao_filter.glsl", "", fine_last)   # the last pass: fine taps
@@ -206,9 +208,9 @@ func _make_targets(sz: Vector2i) -> void:
 	half_packed = rd.texture_create(f, RDTextureView.new())
 	f.width = sz.x; f.height = sz.y
 	f.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+	f.usage_bits |= RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT   # cortao_check reads the shape normal back (C7)
 	shape_n = rd.texture_create(f, RDTextureView.new())
 	f.format = RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM
-	f.usage_bits |= RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	out = rd.texture_create(f, RDTextureView.new())
 	_publish.call_deferred(out)
 
@@ -378,3 +380,4 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 		capture_next = false
 		var bytes := rd.texture_get_data(out, 0)
 		captured = Image.create_from_data(sz.x, sz.y, false, Image.FORMAT_RGBA8, bytes)
+		captured_shape_n = Image.create_from_data(sz.x, sz.y, false, Image.FORMAT_RGBAH, rd.texture_get_data(shape_n, 0))
