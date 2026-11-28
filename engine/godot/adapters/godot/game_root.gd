@@ -118,7 +118,7 @@ func _ready() -> void:
 	girl.senses = bs
 	world_root.apply(spawn_feet.y + 1.0)
 	_applied_hours = clock.hours
-	if bubbles_on:
+	if bubbles_on and OS.get_environment("AO_BUBBLES") != "0":   # AO_BUBBLES=0: off (speed A/B on the Mac)
 		bubbles = Bubbles.new(); add_child(bubbles); register_plug(bubbles)
 	ready_done = true
 

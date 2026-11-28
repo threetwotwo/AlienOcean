@@ -148,7 +148,7 @@ func worst_frame_ms(seconds := 10.0) -> float:
 # ---- switches: every one has a getter and a setter, so the test can prove each one returns to where it was ----
 
 func toggle_names() -> Array:
-	return ["sdfgi", "god_rays", "caustics", "agx", "taa", "ssao", "cortao", "gtao", "vbao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider"]
+	return ["sdfgi", "god_rays", "caustics", "agx", "taa", "ssao", "cortao", "gtao", "vbao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider", "bubbles"]
 
 func get_toggle(n: String) -> bool:
 	var wr := game.world_root
@@ -171,6 +171,7 @@ func get_toggle(n: String) -> bool:
 		"lagoon": return game.mounts.is_mounted("lagoon")
 		"tide": return wr.tide_on
 		"collider": return _show_collider
+		"bubbles": return game.bubbles != null and game.bubbles.visible
 	push_error("TestLevel: unknown toggle " + n); return false
 
 func set_toggle(n: String, on: bool) -> void:
@@ -201,6 +202,7 @@ func set_toggle(n: String, on: bool) -> void:
 			if grass: grass.visible = on
 		"tide": wr.tide_on = on; game.tide_on = on
 		"collider": _set_collider(on)
+		"bubbles": if game.bubbles: game.bubbles.visible = on     # the draw (its births cost 0.03 ms CPU and keep running)
 		_: push_error("TestLevel: unknown toggle " + n); return
 	_relight()
 

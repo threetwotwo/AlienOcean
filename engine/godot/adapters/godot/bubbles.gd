@@ -50,10 +50,13 @@ var _last_cd := 0.0
 var _trail := 0.0
 var _splashes: Array = []
 var _motes = null
+var stress_rate := 0.0             # AO_BUBBLE_STRESS=<bubbles/s>: a plume 1.5 m in front of the camera (speed worst case)
+var _stress_acc := 0.0
 
 func _init() -> void:
 	name = "Bubbles"
 	rng.seed = 0x5eed
+	stress_rate = float(OS.get_environment("AO_BUBBLE_STRESS")) if OS.get_environment("AO_BUBBLE_STRESS") != "" else 0.0
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_colors = true
@@ -102,6 +105,7 @@ func plug_tick(dt: float, s) -> void:
 	for sp in _splashes: _splash_burst(sp[0], sp[1], sp[2], t - dt * 0.5)
 	_splashes.clear()
 	for r in riders: _rider_source(r, dt, t)
+	if stress_rate > 0.0: _stress(dt, t)
 	_prev_t = t
 	plug_us = Time.get_ticks_usec() - us0
 
@@ -286,3 +290,13 @@ func _rider_source(r: Dictionary, dt: float, t: float) -> void:
 		if t > r.until:
 			r.until = -1.0
 			r.next = t + rng.randf_range(7.0, 14.0)
+
+## speed worst case: a steady plume of mixed sizes 1.5 m in front of the eye (fills the ring at ~50 bubbles/s)
+func _stress(dt: float, t: float) -> void:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null: return
+	var c := cam.global_position - cam.global_transform.basis.z * 1.5 + Vector3(0, -0.6, 0)
+	_stress_acc += dt * stress_rate
+	while _stress_acc >= 1.0:
+		_stress_acc -= 1.0
+		emit(c + Vector3(rng.randfn(), 0.0, rng.randfn()) * 0.15, Vector3(0, 0.1, 0), _exhale_size(0.5), t - dt * rng.randf(), NAN, -1, "stress")
