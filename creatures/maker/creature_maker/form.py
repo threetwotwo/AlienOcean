@@ -21,6 +21,8 @@ def smax(a, b, k):
 
 JAW_MIN = 0.003    # DEFAULT: least thickness of each jaw at the mouth line (SL): one lip thickness (cage.mouth.TLIP)
 JAW_K = 0.002      # DEFAULT: the outline is carried round the mouth line over this height (SL), no crease
+HW_MIN = 0.002    # DEFAULT: least half-width of a cross-section (SL). A traced top view can close to a point at the snout
+                  # while the side view still has height there; a zero width is a section with no inside (the loft divided by it)
 PLATE_CHAMFER = 0.004   # DEFAULT: the edge of a plate drawn from below rises to full thickness over two cells of the dense form (0.2 % SL each)
 
 
@@ -66,6 +68,7 @@ class Form:
     def __init__(self, rec):
         self.rec = rec; O = self.O = rec['outline']
         self._TOP0, self._BOT0, self.HW, self.NUP, self.NLO = (pch(O[k]) for k in ('top', 'bot', 'hw', 'nUp', 'nLo'))
+        _hw = self.HW; self.HW = lambda x: np.maximum(_hw(x), HW_MIN)
         self.XEND = O['top'][-1][0]
         self.SECT = self._sections(O.get('sections'))
         self.EY = EY = rec['eye']; self.CV = CV = rec['cover']; self.MO = MO = rec['mouth']

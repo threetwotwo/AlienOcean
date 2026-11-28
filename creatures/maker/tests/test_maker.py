@@ -295,3 +295,15 @@ def test_lower_jaw_plate_has_no_ledge():
     ids = form.sd_full(P - b / np.linalg.norm(b, axis=1)[:, None] * 5e-4, parts=True)[1]
     jaw = np.asarray(ids) == len(form.PLATES) + k + 1
     assert jaw.sum() > 50 and c[jaw].min() > 0, (int(jaw.sum()), float(c[jaw].min()))
+
+
+def test_top_view_closing_to_a_point_at_the_snout_builds(tmp_path):
+    """a traced top view may close to zero width at the snout while the side view still has height there; the form keeps
+    a least half-width (form.HW_MIN) instead of dividing by zero."""
+    from creature_maker.form import Form, HW_MIN
+    from creature_maker.record import adapt
+    D = json.load(open(REC)); D['record']['outline']['hw'][0][1] = 0.0
+    p = str(tmp_path / 'pointy.json'); json.dump(D, open(p, 'w'))
+    F = Form(adapt(p)); assert abs(float(F.HW(np.array(0.0))) - HW_MIN) < 1e-12
+    P = F.loft_point(np.array([0.0, 0.0]), np.array([0.3, 1.5]))
+    assert np.isfinite(P).all()
