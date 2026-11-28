@@ -87,6 +87,8 @@ var results: Array = []
 # --shard i/n runs every n-th case starting at i (to film in parallel).
 const Mannequin := preload("res://adapters/godot/mannequin.gd")
 var film := ""
+var film_close := false     # --close: a near side-on camera that frames the body (Gary: clearer, bigger shots of the body), 30 fps
+var cam_side := Vector3.ZERO
 var shard := Vector2i(0, 1)
 var mq
 var cam: Camera3D
@@ -105,6 +107,7 @@ func _initialize() -> void:
 			"--fault": fault = a[i + 1]
 			"--out": out_path = a[i + 1]
 			"--film": film = a[i + 1]
+			"--close": film_close = true
 			"--shard":
 				var sp: PackedStringArray = a[i + 1].split("/")
 				shard = Vector2i(int(sp[0]), int(sp[1]))
@@ -337,7 +340,7 @@ func _physics_process(dt: float) -> bool:
 		a.mid = a.root + (a.root - a.mid)             # planted: elbow mirrored through the shoulder for one tick
 	t += dt
 	_check(pose, rdt)
-	if film != "" and int(rec.ticks) % maxi(1, tick / 15) == 0:
+	if film != "" and int(rec.ticks) % maxi(1, tick / (30 if film_close else 15)) == 0:
 		_film_frame(pose)
 	if t >= cur.dur - 1e-6:
 		_end_case()
@@ -655,6 +658,26 @@ func _film_frame(pose: Dictionary) -> void:
 	var side := Vector3(-3.2, 0.9, 1.6) if cur.kind in ["wall", "ramp", "step", "stairs", "overhang", "shore"] else Vector3(3.6, 0.8, 1.2)
 	if cur.kind == "cave": side = Vector3(4.5, 1.2, 0.5)
 	var tgt := p + Vector3(0, 0.75, 0)
+	if film_close:
+		# side-on to her heading, 2.3 m out, framing her from feet to head; the side follows her slowly so turns stay readable
+		var pel: Vector3 = pose.pelvisPos
+		var br: Vector3 = pose.get("bodyRight", Vector3.RIGHT)
+		br.y = 0.0
+		if br.length() < 0.1: br = Vector3.RIGHT
+		br = br.normalized()
+		if cam_side == Vector3.ZERO or frame_i == 0: cam_side = br
+		if cam_side.dot(br) < 0.0: br = -br     # (keep the same side when she reverses)
+		cam_side = cam_side.slerp(br, 0.06).normalized()
+		tgt = pel + Vector3(0, 0.08, 0)
+		var cp := tgt + cam_side * 2.6 + Vector3(0, 0.10, 0)
+		cam.fov = 38.0
+		cam.global_position = cam.global_position.lerp(cp, 0.35) if frame_i > 0 else cp
+		cam.look_at(tgt)
+		var fails0: String = "  ".join(rec.fail.map(func(f): return f.substr(0, f.find(" at t="))))
+		label.text = "%s\nt = %.1f s   %s   %s" % [cur.name, t, pose.mode, "all checks holding" if fails0 == "" else "FAILING: " + fails0]
+		RenderingServer.frame_post_draw.connect(_film_save.bind("%s/f%05d.png" % [film_case_dir, frame_i]), CONNECT_ONE_SHOT)
+		frame_i += 1
+		return
 	cam.global_position = cam.global_position.lerp(p + side, 0.15) if frame_i > 0 else p + side
 	cam.look_at(tgt)
 	var fails: String = "  ".join(rec.fail.map(func(f): return f.substr(0, f.find(" at t="))))
