@@ -53,7 +53,9 @@ def iou(a, b): return float((a & b).sum() / max(1, (a | b).sum()))
 
 
 def score(C, V, rec, ref):
-    """IoU whole and head; the head is everything in front of the cover's rear edge."""
+    """IoU whole and head; the head is everything in front of the cover's rear edge. A reference with views but no traced
+    side yet (a draft record) has no SIL1 score."""
+    if not ref.get('side'): return dict(SIL1_pass=False, SIL1_note='reference has no traced side outline yet')
     A, B = built_mask(C, V), poly_mask(ref['side'])
     x0, x1 = BOX[0], BOX[1]; xh = max(p[0] for p in rec['cover']['rear'])
     cut = int((xh - x0) / (x1 - x0) * A.shape[1])
@@ -249,7 +251,7 @@ def board(outroot, record_dirs, names=()):
         if ref is None: return n, dict(SIL1_pass=False, SIL1_note='no traced reference silhouette yet')
         C = json.load(open(os.path.join(d, 'cage.json'))); V = np.load(os.path.join(d, 'cage.npz'))['V']
         rec = adapt(rp, C.get('style')); RF = json.load(open(ref)); R = score(C, V, rec, RF); R.update(score2(C, V, RF))
-        overlay(C, V, RF, os.path.join(d, 'silhouette.png')); R['png'] = os.path.join(d, 'silhouette.png')
+        if RF.get('side'): overlay(C, V, RF, os.path.join(d, 'silhouette.png')); R['png'] = os.path.join(d, 'silhouette.png')
         for view in ('front', 'top'):
             if RF.get(view): overlay2(C, V, RF, view, os.path.join(d, f'silhouette_{view}.png'))
         return n, R
