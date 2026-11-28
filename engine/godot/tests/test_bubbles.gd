@@ -6,7 +6,7 @@
 ##                 step (|dp| < vmax dt) and no velocity step (|dv| < 80 m/s2 x dt); and sampled at the frame times of
 ##                 30/60/120/144 fps and an irregular 20-70 ms frame: the frame-to-frame velocity never reverses faster than the
 ##                 physics allows (|dv/dt| under the same bound); --fault jump plants a 1 cm hop that must FAIL
-##   B3 exhale     the girl hovering 3 m down in the 20 m pool (blockout gym): every underwater exhale lets 15-80 bubbles
+##   B3 exhale     the girl hovering 3 m down in the 20 m pool (blockout gym): every underwater exhale lets 40-200 bubbles (lush; 15-80 calm)
 ##                 go, from her face (within 15 cm of the head), spread through the tick (under 15 % share a birth time:
 ##                 no tick banding), all capped at the surface over them, alive through their life in the ring
 ##   B4 sprint     a boost press under water lets a kick burst go at her feet; holding it lays a trail
@@ -191,7 +191,10 @@ func _judge(c: Dictionary) -> void:
 			if n_ex < 2: _fail("B3", "fewer than 2 underwater exhales in 22 s"); return
 			var per := float(ex.size()) / n_ex
 			print("B3 %d exhaled bubbles over %d exhales (%.1f each)" % [ex.size(), n_ex, per])
-			if per < 15.0 or per > 80.0: _fail("B3", "bubbles per exhale out of 15-80")
+			var lush: bool = g.bubbles.exhale_style == "lush"     # lush (default, Gary 28 Nov) = 2.6x the calm stream
+			var lo := 40.0 if lush else 15.0
+			var hi := 200.0 if lush else 80.0
+			if per < lo or per > hi: _fail("B3", "bubbles per exhale out of %d-%d (%s)" % [lo, hi, g.bubbles.exhale_style])
 			var times := {}
 			var same := 0
 			for r in ex:

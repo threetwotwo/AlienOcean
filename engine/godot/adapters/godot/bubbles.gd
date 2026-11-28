@@ -50,7 +50,7 @@ var _last_cd := 0.0
 var _trail := 0.0
 var _splashes: Array = []
 var _motes = null
-var exhale_style := "calm"         # style choice "Exhale bubbles": calm (real, thin stream) | lush (fuller plume); AO_EXHALE=lush
+var exhale_style := "lush"         # style choice "Exhale bubbles" (Gary picked lush 28 Nov): lush (fuller plume) | calm (real, thin stream); AO_EXHALE=calm
 var stress_rate := 0.0             # AO_BUBBLE_STRESS=<bubbles/s>: a plume 1.5 m in front of the camera (speed worst case)
 var _stress_acc := 0.0
 
