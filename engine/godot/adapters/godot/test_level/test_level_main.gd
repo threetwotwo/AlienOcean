@@ -12,3 +12,5 @@ func _ready() -> void:
 		return
 	var panel = preload("res://adapters/godot/test_level/debug_panel.gd").new()
 	panel.level = lvl; add_child(panel)
+	lvl.ui.test_tools = func(): panel.set_open(true)        # pause menu (Options) -> Test tools opens this panel
+	lvl.ui.report_fn = panel.report

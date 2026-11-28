@@ -72,7 +72,7 @@ static func glyph(action: String, family: String, bindings: Dictionary = ACTIONS
 		if b.has("mouse"): return "Mouse %d" % b.mouse
 		return ""
 	var g: Dictionary = GLYPHS[family]
-	if b.has("pad_button"): return g.get(b.pad_button, "?")
+	if b.has("pad_button"): return g.get(b.pad_button, "Button %d" % b.pad_button)
 	if b.has("pad_axis"):
 		var ax: int = b.pad_axis[0]
 		if ax >= 4: return g["axis%d" % ax]

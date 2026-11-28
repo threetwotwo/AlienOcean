@@ -235,6 +235,9 @@ func _define_cases() -> void:
 	# Mac playtest: a foot poked into the sand while she hovered and drifted slowly just above the floor (pool floor y=-20)
 	_case("B44 hover low over the sand", "pool", {"start": Vector3(0, -17.5, 0), "mode": Motor.Mode.SWIM}, 12.0,
 		func(tt): var k = _pk(Vector2(0, 0.35) if fmod(tt, 4.0) < 2.0 else Vector2.ZERO, tt * 0.3); k.descend = true; k.descend_amount = 0.4 if fmod(tt, 3.0) < 1.5 else 1.0; return k)
+	# Mac breach test: holding ascend and forward from the 2.4 m lagoon floor skimmed 20 m through the air
+	_case("B47 lagoon: breach from the floor, ascend held", "lagoon_pool", {"start": Vector3(0, -1.4, 0), "mode": Motor.Mode.SWIM}, 12.0,
+		func(_t): var k = _pk(Vector2(0, 1)); k.thrust = 1.0; k.ascend = true; return k)
 	for m in monkey_runs:
 		var seed := 2000 + m
 		_case("BM monkey seed %d (%ds)" % [seed, int(monkey_secs)], "shore", {"start": Vector3(0, 1.05, 4), "waves": 0.5 if m % 2 == 1 else 0.0},
@@ -395,6 +398,7 @@ func _sole_points(fin: Transform3D) -> Array:
 ## What J7 tests: the four corners and the toe and heel ends of the mannequin's sole plate (adapters/godot/mannequin.gd:
 ## box centre (0, 0.058, -0.046), size 0.056 x 0.168), not just the centreline points the rig's toe lift uses (the review's
 ## point: a fix must not be graded only on its own samples). z -0.046 is 6 mm above the plate's underside.
+const BREACH_AIR_MAX := 1.4    # s: a 5.8 m/s launch is ~0.9 s out of the water
 const SWIM_SOLE_SINK := 0.010   # quality ceiling: sole sink <= 1 cm
 const SOLE_X := 0.028
 const SOLE_HEEL := -0.026
@@ -410,6 +414,13 @@ func _check(p: Dictionary, dt: float) -> void:
 	rec.ticks += 1
 	var mode: String = p.mode
 	if not rec.modes.has(mode): rec.modes.append(mode)
+	# J12 (Mac breach test at the 2.4 m lagoon): holding ascend kept relaunching her off the water, a 20 m skim. A breach
+	# is one arc: her eye may be out of the water (swimming, not standing or walking) for at most BREACH_AIR_MAX at a time
+	if env.level > -999.0 and mode == "swim" and not body.motor.swimmer.shore_grounded:
+		var sw_ = body.motor.swimmer
+		if sw_.pos.y > env.water_y(sw_.pos.x, sw_.pos.z, t) + 0.10: rec.air_t = rec.get("air_t", 0.0) + dt
+		else: rec.air_t = 0.0
+		if rec.air_t > BREACH_AIR_MAX: _fail("J12", "out of the water %.1f s in one breach" % rec.air_t)
 	var J := _joints(p)
 	if OS.has_environment("BS_DEBUG"):
 		var w0 := float(OS.get_environment("BS_T0")); var w1 := float(OS.get_environment("BS_T1"))

@@ -7,8 +7,12 @@ are tested on it. Muscle, skin and face detail come only after the blockout move
           Each ellipsoid rides ONE spine bone rigidly, so a bend shows as the segments turning, as a jointed toy does.
   fins    flat plates at their true sizes: the same fin cards the full build makes (fins.build_fins, from the record's traced fin
           outlines and base lines), drawn untextured.
-  rig     the export's own bones (rig.py: spine chain, jaw, gill covers) and fin root bones. The jaw and covers carry no weight here:
-          they are in the rig so the engine's clips and extras are the same for a blockout and a finished fish.
+  rig     the export's own bones (rig.py: spine chain, jaw, gill covers) and fin root bones, so the engine's clips and extras are the
+          same for a blockout and a finished fish.
+  head    tier 3 cutters (blockout_cut): a mouth cavity behind a lower-jaw block on the jaw bone, gill slits under cover plates on
+          the opercle bones, eye sockets with eyeballs. gape and flare open them. Off: CUTTERS = False.
+  tiers   1 masses (spine segments), 2 forms (joints, roots, fin plates, jaw, covers, eyeballs), 3 surgical (cutters); exported as
+          LOD0 (all), LOD1 (masses, joints, roots, fins: no cutters or head pieces), LOD2 (masses and fins).
   scale   record size.SL_mm (real adult size), as the full export.
 
 Checks (in blockout.json, all from the record, no picture):
@@ -16,6 +20,7 @@ Checks (in blockout.json, all from the record, no picture):
   BK2  top view: the same against the record's half-width
   BK3  fins: each fin plate seen from the side covers the record's traced fin outline (true size); for a traced paired fin, the plate's
        side view is its traced outline by construction, so this catches a plate that is rescaled or set off its base line
+  BK4-BK6 fin roots inside, bend gap, sections (below); CT1-CT3 jaw in its cut, slits under the covers, eyes in sockets (blockout_cut)
 """
 import json, os, time
 import numpy as np
@@ -130,9 +135,14 @@ def section_check(form, segs, k=81):
     return dict(BK6_section_iou_worst=round(worst, 4), BK6_worst_x=at, BK6_pass=bool(worst >= BK6_MIN))
 
 
-def body_mesh(segs):
-    V, F, B = [], [], []
+def body_mesh(segs, carved=None):
+    """one mesh of every block, each vertex labelled with its spine bone. carved {bone: (V, F)}: bones meshed from their field with
+    the tier 3 cutters taken out (blockout_cut), in place of their block meshes."""
+    V, F, B = [], [], []; carved = carved or {}
+    for b, (v, f) in sorted(carved.items()):
+        o = sum(len(q) for q in V); V.append(np.asarray(v)); F += [[o + i for i in q] for q in f]; B += [b] * len(v)
     for s in segs:
+        if s['bone'] in carved: continue
         sg, rg = (SEG, RINGS) if s.get('kind', 'segment') == 'segment' else PRIM_RES
         v, f = _ellipsoid(s['c'], s['r'], sg, rg, s.get('R'), s.get('n'), s.get('ry_lo')); o = len(V) if not V else sum(len(q) for q in V)
         V.append(v); F += [[o + i for i in q] for q in f]; B += [s['bone']] * len(v)
@@ -219,6 +229,7 @@ ROOT_T = 0.25         # DEFAULT: a root lozenge's thickness, x the local body ha
 ROOT_STEP = 0.04      # DEFAULT (SL): one lozenge per this much root row (a row along the back bends; one long lozenge would not)
 BK4_MAX = 1.0         # every fin root point inside the body: the worst point's ellipsoid measure (1 = on the surface)
 BK5_MIN_PCT = 0.2     # DEFAULT (% SL): BK5's least limit (1 mm on a 52 cm trevally)
+CUTTERS = True        # DEFAULT: tier 3 cutters (mouth cavity with a moving jaw, gill slits under moving covers, eye sockets): blockout_cut
 # BK5's limit for a fish is what its blockout already differs from the record at rest: between two block centres the union dips
 # to sqrt(1 - (1 / (2 OVERLAP))^2) of the block's half-height (OVERLAP 1.5: 5.7 %), so a bend that opens less than that dip shows
 # nothing the resting blockout does not already show. The limit is that dip on the deepest block, at least BK5_MIN_PCT.
@@ -245,6 +256,26 @@ def joints(form, rec, segs):
         t, b, w = float(form.TOP(x)), float(form.BOT(x)), float(form.HW(x))
         out.append(dict(kind='joint', c=[x, (t + b) / 2, 0.0], r=[JOINT_FILL * w, JOINT_FILL * (t - b) / 2, JOINT_FILL * w], bone=i))
     return out
+
+
+def sink_roots(form, prims, fins):
+    """median fins and caudal: each root-row point that stands off the blocks moves straight into the body until it is inside (the
+    plate itself closes the gap). Lozenges there (round 1) stood as a rope along the back over the plate's root in every 3/4 view."""
+    for k, f in fins.items():
+        if k.startswith(('pectoral', 'pelvic')): continue
+        V = np.asarray(f['V'], float); Mb = len(f['lens'])
+        for j in range(Mb):
+            p = V[j]; x = float(np.clip(p[0], 0, form.XEND))
+            c = np.array([x - 0.05, float(form.sec(max(x - 0.05, 0))[0]), 0.0]) if k == 'caudal' else np.array([x, float(form.sec(x)[0]), 0.0])
+            if _f(p[None], prims).min() <= 0.9: continue
+            d = c - p; L = np.linalg.norm(d); d /= max(L, 1e-9); t = np.linspace(0, L, 80)
+            hit = np.where(_f(p + t[:, None] * d, prims).min(1) <= 0.9)[0]
+            if not len(hit):            # a root end past the body's last block (a trailing fin lobe): head for the nearest block's centre
+                cs = np.array([q['c'] for q in prims]); c = cs[np.argmin(np.linalg.norm(cs - p, axis=1))]
+                d = c - p; L = np.linalg.norm(d); d /= max(L, 1e-9); t = np.linspace(0, L, 80)
+                hit = np.where(_f(p + t[:, None] * d, prims).min(1) <= 0.9)[0]
+            if len(hit): V[j] = p + t[hit[0]] * d
+        f['V'] = V
 
 
 def roots(form, rec, prims, fins):
@@ -331,8 +362,18 @@ def blockout(record_path, out, style=None, log=print, kit=True, gaps=True):
     segs, x_end = segments(form, rec)
     fins = build_fins(form, rec, out)
     prims = segs + (joints(form, rec, segs) if kit and JOINTS else [])
-    if kit: prims += roots(form, rec, prims, fins)
-    V, F, VB = body_mesh(prims)
+    if kit:
+        sink_roots(form, prims, fins); prims += roots(form, rec, prims, [k for k in fins if k.startswith(('pectoral', 'pelvic'))] and
+                                                      {k: v for k, v in fins.items() if k.startswith(('pectoral', 'pelvic'))})
+    for q in prims: q.setdefault('tier', 1 if q['kind'] == 'segment' else 2)
+    kit3, carved, pieces = None, {}, []
+    if kit and CUTTERS:      # tier 3: mouth, gill and eye cutters, and the moving head blocks they uncover
+        from . import blockout_cut as CUT
+        kit3 = CUT.head_kit(rec, segs); carved, pieces = CUT.build(prims, kit3)
+        Cb = dict(bones=rec['bones'], xend=form.XEND)
+        for p in pieces:
+            if p['bone'] == 'head': p['bone'] = f"spine_{RIG.spine_index(Cb, float(np.mean(np.asarray(p['V'])[:, 0]))):02d}"
+    V, F, VB = body_mesh(prims, carved)
     R = checks(form, segs, x_end, fins, rec); R.update(section_check(form, segs))
     R['BK_pass'] = R['BK_pass'] and R['BK6_pass']
     C = dict(bones=rec['bones'], xend=form.XEND, SL_mm=rec['SL_mm'], species=rec['species'], fins={k: dict(V=np.asarray(v['V']).tolist()) for k, v in fins.items()},
@@ -342,19 +383,29 @@ def blockout(record_path, out, style=None, log=print, kit=True, gaps=True):
         if R.get('BK5_pass') is not None: R['BK5_turn_x3_gap_pctSL'] = gap_checks(prims, fins, C, V, F, rec, raw, bend=3.0)['BK5_bend_gap_worst_pctSL']
     R['BK_pass'] = R['BK_pass'] and R.get('BK4_pass', True) is not False and R.get('BK5_pass', True) is not False
     R['kit'] = dict(joints=sum(q['kind'] == 'joint' for q in prims), roots=sum(q['kind'] == 'root' for q in prims)) if kit else None
-    tris = sum(len(q) - 2 for q in F) + sum(2 * len(v['F']) for v in fins.values())
+    if kit3 is not None:
+        R.update(CUT.cut_checks(kit3, pieces))
+        R['BK_pass'] = R['BK_pass'] and R['CT_pass'] is not False
+        R['cut'] = dict(cutters={k: sum(q['kind'] == k for q in kit3['cutters']) for k in ('cut_jaw', 'cut_mouth', 'cut_gill', 'cut_eye')},
+                        carved_bones=sorted(int(b) for b in carved), pieces=[p['name'] for p in pieces], notes=kit3['notes'])
+    tris = sum(len(q) - 2 for q in F) + sum(2 * len(v['F']) for v in fins.values()) + sum(len(p['F']) for p in pieces)
     D = dict(kind='blockout', species=rec['species'], SL_mm=rec['SL_mm'], xend=form.XEND, x_end_body=x_end, bones=rec['bones'],
              jaw_joint=rec['jaw_joint'], opercle_hinge=rec['opercle_hinge'], mouth_line=np.asarray(rec['mouth']['line']).tolist(),
-             cover_rear=np.asarray(rec['cover']['rear']).tolist(),
+             cover_rear=np.asarray(rec['cover']['rear']).tolist(), gape_deg=float(rec.get('gape_deg', 30.0)),
              segments=segs, prims=[{k: v for k, v in q.items()} for q in prims if q['kind'] != 'segment'], V=V.tolist(), F=F, vbone=VB.tolist(),
              fins={k: dict(V=np.asarray(v['V']).tolist(), F=v['F'], T=v['T']) for k, v in fins.items()},
+             pieces=[dict(name=p['name'], bone=p['bone'], mat=p['mat'], V=np.asarray(p['V']).tolist(), F=[list(map(int, f)) for f in p['F']]) for p in pieces],
+             kit3=None if kit3 is None else dict(blocks=kit3['blocks'], cutters=kit3['cutters']),
+             tiers={1: 'masses: spine segments', 2: 'forms: joints, roots, fin plates, jaw, covers, eyeballs', 3: 'surgical: cutters'},
+             lods={n: dict(zip(('V', 'F', 'vbone'), (m[0].tolist(), m[1], m[2].tolist()))) for n, m in
+                   ((1, body_mesh(prims)), (2, body_mesh([q for q in prims if q['tier'] == 1])))} if kit3 is not None else {},
              checks=R, tris=tris,
              rules=dict(PER_BONE=PER_BONE, OVERLAP=OVERLAP, SEG=SEG, RINGS=RINGS),
              inputs=rec['provenance'], defaults_used=rec['defaults_used'], build_s=round(time.time() - T0, 2))
     json.dump(D, open(os.path.join(out, 'blockout.json'), 'w'), default=lambda o: o.item() if hasattr(o, 'item') else str(o))
     log(f"{rec['species']}: {len(segs)} ellipsoids, {tris} tris, BK1 {R['BK1_side_iou']} BK2 {R['BK2_top_iou']} "
         f"BK3 {min(R['BK3_fin_iou'].values()) if R['BK3_fin_iou'] else None} BK4 {max(R['BK4_root_worst'].values()) if 'BK4_root_worst' in R else None} "
-        f"BK5 {R.get('BK5_bend_gap_worst_pctSL')}%SL kit {R['kit']} pass {R['BK_pass']} ({D['build_s']} s)")
+        f"BK5 {R.get('BK5_bend_gap_worst_pctSL')}%SL CT {[R.get(k) for k in ('CT1_pass', 'CT2_pass', 'CT3_pass')]} kit {R['kit']} pass {R['BK_pass']} ({D['build_s']} s)")
     return D
 
 
@@ -380,10 +431,13 @@ def board(out, sources, glb=True, log=print):
             if 'error' not in row['glb']:              # the blockout test kit's layout: one flat folder, <species_id>_blockout.glb
                 import shutil; os.makedirs(os.path.join(out, 'glb'), exist_ok=True)
                 shutil.copy(os.path.join(od, 'fish_blockout.glb'), os.path.join(out, 'glb', f'{name}_blockout.glb'))
+                for n in (1, 2):                          # the tier LODs beside it: <species_id>_blockout_LOD1.glb, _LOD2.glb
+                    src = os.path.join(od, f'fish_blockout_LOD{n}.glb')
+                    if os.path.exists(src): shutil.copy(src, os.path.join(out, 'glb', f'{name}_blockout_LOD{n}.glb'))
         rows[name] = row
     ok = [r for r in rows.values() if 'error' not in r]
     summary = dict(records=len(rows), built=len(ok), BK_pass=sum(r['BK_pass'] for r in ok),
                    glb_ok=sum(1 for r in ok if 'glb' in r and 'error' not in r['glb']),
-                   failing={n: [k for k in ('BK1_pass', 'BK2_pass', 'BK3_pass', 'BK4_pass', 'BK5_pass', 'BK6_pass') if r.get(k) is False] for n, r in rows.items() if 'error' not in r and not r['BK_pass']})
+                   failing={n: [k for k in ('BK1_pass', 'BK2_pass', 'BK3_pass', 'BK4_pass', 'BK5_pass', 'BK6_pass', 'CT1_pass', 'CT2_pass', 'CT3_pass') if r.get(k) is False] for n, r in rows.items() if 'error' not in r and not r['BK_pass']})
     json.dump(dict(summary=summary, rows=rows), open(os.path.join(out, 'board_blockout.json'), 'w'), indent=1, default=float)
     log(json.dumps(summary)); return summary
