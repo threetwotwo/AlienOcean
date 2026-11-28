@@ -36,6 +36,7 @@ var pivot_carry := {"L": Vector3.ZERO, "R": Vector3.ZERO}     # the planted foot
 var land_drop := {"L": -INF, "R": -INF}     # a foot that touched down above where it stands settles, not snaps
 var last_ank := {"L": NAN, "R": NAN}
 var last_stepping := {"L": false, "R": false}
+var swing_soft := {"L": 0.0, "R": 0.0}     # running: extra soft-reach margin of a swinging leg (see shore_leg)
 var plant_off := {"L": Vector2.ZERO, "R": Vector2.ZERO}     # where the contact touched down, against where the plant puts it
 var plant_fresh := {"L": true, "R": true}
 var land_age := {"L": 0.0, "R": 0.0}     # seconds each foot has been planted
@@ -1352,16 +1353,24 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 	else: floor_here = s.pos.y - 1.24
 	if not thalassa_exact and not is_finite(floor_here):
 		floor_here = s.pos.y - 1.24     # FIX (stress BM): no ground under her at all (walked off the world's edge) made the whole pose NaN
+	var air_rebase := 0.0
 	if not thalassa_exact:
 		# FIX (stress J5): follow the floor the way the motor's eye does (18/s, trailing by at most its step_lag), so
 		# the pelvis climbs a ledge with the eye instead of snapping 30 cm in one tick
 		var lag: float = s.config.get("step_lag", 0.04)
+		var gf_prev := ground_follow
 		if is_nan(ground_follow) or absf(floor_here - ground_follow) > 1.0:
 			ground_follow = floor_here
 		else:
 			ground_follow = lerpf(ground_follow, floor_here, BM.expk(18.0, sdt))
 			if not s.shore_is_airborne:
 				ground_follow = clampf(ground_follow, floor_here - lag, floor_here + lag)
+			elif not is_nan(gf_prev):
+				# ROOT (stress B39, running off a ledge: the pelvis fell 12 cm in a tick against the eye): in the air the
+				# smoothed ground under her still moves (towards the floor below the ledge) and her offset from it is
+				# re-based to match, so ground + offset stays her height. The body's own height state is measured from
+				# that ground too and has to move with it; left to catch up through its springs, it dropped with the ground
+				air_rebase = gf_prev - ground_follow
 		# airborne, the motor's jump offset is measured from the floor under her right now, which jumps at a ledge
 		# edge; re-base it on the smoothed ground so ground + offset stays her continuous height
 		if s.shore_is_airborne:
@@ -1397,7 +1406,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		"isAirborne": s.shore_is_airborne, "jumpOffset": air_offset, "jumpVelY": s.shore_jump_vel_y,
 		"jumpAnticipDip": s.shore_jump_anticip * 0.052, "jumpAnticip": s.shore_jump_anticip, "isDiveJump": s.shore_dive_arc_timer > 0.0,
 		"justLanded": s.shore_just_landed, "landingImpact": s.shore_landing_impact, "crouchBlend": s.shore_crouch_blend,
-		"brakingImpulse": s.shore_braking_impulse, "onFootstep": fs_cb})
+		"brakingImpulse": s.shore_braking_impulse, "onFootstep": fs_cb, "jumpRebase": air_rebase})
 	var up := Vector3.UP
 	var w_fwd := Vector3(-sin(yaw), 0, -cos(yaw))
 	var w_right := Vector3(cos(yaw), 0, -sin(yaw))
@@ -1661,10 +1670,26 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		var spj := fwf - fn * fwf.dot(fn)
 		var sfw := BM.nrm(spj) if spj.length() > 1e-4 else fwf
 		var boot_fwd := BM.nrm(sfw + fn * clampf(fst.toePitch, -0.62, 0.32))
+		var hip_ext := lerpf(lerpf(24.0, 30.0, rb), 46.0, air_b)
+		if not thalassa_exact and fst.stepping:
+			# (run, heel recovery: the limit is on the line from hip to ankle. With the knee folded 110 deg that line
+			# points 40 deg back while the thigh hangs about straight down, so the folded swing leg is given more of it)
+			hip_ext = lerpf(hip_ext, maxf(hip_ext, 42.0), loco.get("runGait", 0.0) * clampf(fst.heelKick, 0.0, 1.0))
+		var soft_m := 0.012
+		if not thalassa_exact:
+			# ROOT (run: knee pop, 14.7 m/s against the pelvis at 120 Hz): a running swing starts with the leg at full
+			# stretch and its foot beyond reach behind her, the knee locked; the tick the foot came back within reach the
+			# knee shot out 12 cm (near full stretch a millimetre of slack is a centimetre of knee). The swinging leg
+			# gives sooner: its reach limit is soft over 5 % of its length, not 1.2 % (eased in after lift-off and out
+			# again before touch-down and when she leaves the ground, so the planted leg's reach is what it was)
+			var sk := "L" if side < 0 else "R"
+			var want_soft: float = loco.get("runGait", 0.0) * smoothstep(0.0, 0.12, fst.t) * (1.0 - smoothstep(0.50, 0.85, fst.t)) if (fst.stepping and not s.shore_is_airborne) else 0.0
+			swing_soft[sk] = lerpf(swing_soft[sk], want_soft, BM.expk(30.0, sdt))
+			soft_m += 0.038 * swing_soft[sk]
 		var leg_opts := {
-			"preserveDown": true, "desiredYawOffsetRad": rel_yaw, "maxHipExtDeg": lerpf(lerpf(24.0, 30.0, rb), 46.0, air_b),
+			"preserveDown": true, "desiredYawOffsetRad": rel_yaw, "maxHipExtDeg": hip_ext,
 			"maxHipFlexDeg": lerpf(110.0, 124.0, air_b), "maxAdductionDeg": 6.0, "maxAbductionDeg": lerpf(32.0, 38.0, air_b),
-			"maxIntRotRad": 0.20, "maxExtRotRad": 0.48, "minFlexDeg": 5.0, "maxFlexDeg": 132.0, "softReach": 0.996, "softMargin": 0.012,
+			"maxIntRotRad": 0.20, "maxExtRotRad": 0.48, "minFlexDeg": 5.0, "maxFlexDeg": 132.0, "softReach": 0.996, "softMargin": soft_m,
 			"kneeOutBias": lerpf(0.07, 0.11, air_b), "kneeLiftBias": fst.heelKick * 0.24 + wade_b * 0.06,
 			"minAnklePitchRad": -0.82, "maxAnklePitchRad": 0.48, "maxAnkleYawRad": 0.16, "maxAnkleRollRad": 0.20,
 			"groundBlend": jmp.groundFootBlend, "groundFwd": boot_fwd, "groundUp": fn}
@@ -1685,12 +1710,22 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			var tl := INF
 			if not fst.stepping and not s.shore_is_airborne and s.shore_vel_xz.length() > 0.15:
 				var v3 := Vector3(s.shore_vel_xz.x, 0, s.shore_vel_xz.y)
+				var run_g: float = loco.get("runGait", 0.0)
 				var miss_at := func(tau: float) -> float:
 					var hp: Vector3 = hip + v3 * tau
 					if get_floor != null:
 						var gp: float = get_floor.call(s.pos.x + v3.x * tau, s.pos.z + v3.z * tau)
 						if is_finite(gp): hp.y += clampf(gp - floor_here, -0.36, 0.36)
-					var pr2 := BM.leg(hp, ft, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
+					var ft_t := ft
+					if run_g > 0.0:
+						# (running, the estimate was of a flat foot under a hip that stays where it is: it gave a stance out 18 cm
+						# behind her, where the leg really holds to 30. By then she has come up out of the stance dip to her
+						# take-off height, and the trailing foot is up on its ball, heel high: the ankle is higher and further
+						# forward than it stood (the placer's push-off pitch for a foot that far behind))
+						hp.y += run_g * maxf(0.0, 0.726 - FootPlacer.RUN_KNEE_BEND - hip_h) * minf(1.0, tau / 0.08)
+						var pk := clampf(((ft - hp).dot(pelv_fwd) + 0.03) * -2.2, 0.0, 0.62) * run_g
+						ft_t = ft + up * (0.11 * sin(pk) - 0.052 * (1.0 - cos(pk))) + pelv_fwd * (0.11 * (1.0 - cos(pk)) + 0.052 * sin(pk))
+					var pr2 := BM.leg(hp, ft_t, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
 					# ROOT (stress monkey landing slip): the reach box too, not only the leg. Landing in a side step the
 					# leading foot leaves the box sideways long before the leg runs out of length; timed by the leg
 					# alone the trailing foot went first and the leading one was dragged until it could step
@@ -1699,7 +1734,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 					var bf := clampf(rq.dot(pelv_fwd), lerpf(-0.34, -0.45, mra), lerpf(0.36, 0.45, mra))
 					var bc := hp + pelv_right_base * bl + pelv_fwd * bf
 					var box_ex := Vector2(bc.x - ft.x, bc.z - ft.z).length()
-					return maxf(pr2.ik.eff.distance_to(ft), box_ex - 0.013)
+					return maxf(pr2.ik.eff.distance_to(ft_t), box_ex - 0.013)
 				var TOL := 0.012
 				if miss_at.call(0.0) > TOL: tl = 0.0
 				elif miss_at.call(0.48) > TOL:

@@ -29,6 +29,8 @@ class Foot:
 	var toe_pitch := 0.0
 	var toe0 := 0.0     # toe pitch at take-off (the swing's own pitch blends in from it)
 	var heel_kick := 0.0
+	var down_t := 0.0     # s since it touched down (the run's stance clock)
+	var run_swing := 0.0     # how much of the run's swing (heel recovery) this swing has, set at lift-off
 
 var initialized := false
 var last_vessel_id = null
@@ -45,6 +47,21 @@ var target_filter = null
 ## Off (null) reproduces Thalassa. Vector3(hip half width, inward reach, outward reach), set by the rig: landing spots
 ## are kept inside the band the leg can reach sideways, so a strafe doesn't plant a foot the rig then has to drag.
 var lat_reach = null
+## ROOT (critique: "the run is a crouched fast walk": both feet down, support knee 80-90 deg, foot landing 36 cm ahead,
+## 2 cm of bounce). Running is a different gait from walking, not a faster one: each foot is down for a stance time
+## that shrinks with speed, then leaves the ground whether or not the other has landed, so every step has a flight
+## phase; the foot lands a little ahead of the hip, the leg takes the landing like a spring and throws her up again.
+## Only with target_filter set (the non-Thalassa rig), and weighted by run_w (0 below run blend 0.30: walking is as it was).
+const RUN_CONTACT := 0.47       # m her hip travels over a planted foot: stance time = RUN_CONTACT / speed
+const RUN_ST_MIN := 0.18        # s
+const RUN_ST_MAX := 0.27
+const RUN_FLIGHT := 0.40        # share of each step with both feet off the ground
+const RUN_LAND_AHEAD := 0.13    # m: the ankle lands this far ahead of the hip
+const RUN_SWING_H := 0.29       # m: heel recovery, the swing ankle comes up towards the seat
+const RUN_KNEE_BEND := 0.017    # m the pelvis rides below standing at touch-down and take-off (knee about 20 deg)
+const RUN_TRACK := 40.0         # rad/s: how fast the pelvis is brought back onto the stance bounce when something threw it off
+var run_w := 0.0
+var run_ref := Vector2(NAN, 0.0)     # the stance bounce's height and speed last tick (NAN: not on it)
 var last_stepped := "R"
 var step_count := 0
 var support_cooldown := 0.0
@@ -68,7 +85,7 @@ var jump := {
 	"style": "standing_spring", "landStyle": "standing_spring", "landLeadSide": -1, "landRecovery": 0.0, "landImpact": 0.0,
 	"varTuck": 1.0, "varSplit": 1.0, "varArm": 1.0, "varTwist": 0.0, "varReach": 1.0, "varPhase": 0.0,
 	"airBlend": 0.0, "groundFootBlend": 1.0, "elbowFlare": 0.0, "wristLagL": 0.0, "wristLagR": 0.0, "headLookDip": 0.0,
-	"launchVelFwd": 0.0, "launchVelRight": 0.0,
+	"launchVelFwd": 0.0, "launchVelRight": 0.0, "launchRun": 0.0,
 }
 
 func _init(cfg := {}) -> void:
@@ -100,7 +117,7 @@ func reset(lp: Vector3, yaw: float, vessel_id = null) -> void:
 		f.planted = pts[k]; f.from = pts[k]; f.to = pts[k]; f.cur = pts[k]
 		f.yaw = yaw; f.from_yaw = yaw; f.to_yaw = yaw
 		f.stepping = false; f.t = 1.0; f.toe_pitch = 0.0; f.heel_kick = 0.0
-		f.to_raw = pts[k]
+		f.to_raw = pts[k]; f.down_t = 0.0
 	com_y = 0.0; com_vel_y = 0.0; run_blend = 0.0
 	pelvis_offset_spring.reset(); pelvis_yaw_spring.reset(); pelvis_roll_spring.reset()
 	spine_lean_fwd_spring.reset(); spine_lean_lat_spring.reset(); spine_twist_spring.reset()
@@ -127,7 +144,7 @@ static func _frac(v: float) -> float:
 
 ## state keys (JS names): localPos (Vector3), velLocal, accelLocal, desiredVelLocal (Vector2 xz), localYaw, yawRate,
 ## vesselId, shipRoll, shipPitch, impactShake, isAirborne, jumpOffset, jumpVelY, jumpAnticipDip, jumpAnticip,
-## isDiveJump, justLanded, landingImpact, crouchBlend, brakingImpulse, onFootstep (Callable or null)
+## isDiveJump, justLanded, landingImpact, crouchBlend, brakingImpulse, onFootstep (Callable or null), jumpRebase
 func update(dt: float, s: Dictionary) -> Dictionary:
 	var sdt := clampf(dt, 0.0001, 0.05)
 	var lp: Vector3 = s.localPos
@@ -157,6 +174,16 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 	var target_run := smoothstep(1.52, 2.15, speed) * (1.0 - crouch)
 	run_blend = lerpf(run_blend, target_run, BM.expk(6.5, sdt))
 	var rb := run_blend
+	# the run gait (see RUN_CONTACT): its weight, stance time and flight time at this speed
+	var rc := 0.0
+	var st_run := 0.0
+	var fl_run := 0.0
+	if target_filter != null:
+		rc = smoothstep(0.30, 0.70, rb)
+		st_run = clampf(RUN_CONTACT / maxf(speed, 0.5), RUN_ST_MIN, RUN_ST_MAX)
+		fl_run = st_run * RUN_FLIGHT / (1.0 - RUN_FLIGHT)
+	run_w = rc
+	var run_cyc := rc > 0.5 and not is_air
 
 	var mfx: float = (feet.L.cur.x + feet.R.cur.x) * 0.5
 	var mfz: float = (feet.L.cur.z + feet.R.cur.z) * 0.5
@@ -186,6 +213,9 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 
 	var walk_dur := lerpf(config.walkStepDur + 0.04, config.walkStepDur - 0.015, clampf(speed / 1.35, 0.0, 1.0))
 	var planned := lerpf(walk_dur, config.runStepDur, rb)
+	if rc > 0.0:
+		# a running swing lasts the other foot's stance and the flight on either side of it
+		planned = lerpf(planned, st_run + 2.0 * fl_run, rc)
 	var traj := trajectory(Vector2(lp.x, lp.z), Vector2(vx, vz), Vector2(dvx, dvz), 0.14, [planned * 0.50, planned, planned * 1.5])
 
 	var ship_roll: float = s.get("shipRoll", 0.0)
@@ -206,6 +236,11 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var ll := Vector2(lx, lz).length()
 		if ll > max_reach and ll > 1e-4:
 			lx = lx / ll * max_reach; lz = lz / ll * max_reach
+		if rc > 0.0 and ll > 1e-4:
+			# running, the foot comes down just ahead of the hip (it was half a swing of travel ahead: 36 cm, a braking reach)
+			var l0 := minf(ll, max_reach)
+			var l1 := lerpf(l0, minf(l0, RUN_LAND_AHEAD), rc)
+			lx *= l1 / l0; lz *= l1 / l0
 		var ox := lx + rgt_x * (sg * hw) + fwd_x * idle_stag
 		var oz := lz + rgt_z * (sg * hw) + fwd_z * idle_stag
 		if lat_reach != null:
@@ -225,14 +260,24 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 			f.planted.y = lp.y
 			f.cur = f.planted
 			f.heel_kick = lerpf(f.heel_kick, 0.0, BM.expk(14.0, sdt))
+			f.down_t += sdt
 			var trail_fwd := (f.planted.x - lp.x) * fwd_x + (f.planted.z - lp.z) * fwd_z
 			var late_peel := clampf((trail_fwd + 0.09) * 0.90, -0.26, 0.0) if (speed > 0.18 and trail_fwd < -0.09) else 0.0
-			f.toe_pitch = lerpf(f.toe_pitch, late_peel, BM.expk(11.0, sdt))
+			var peel_k := 11.0
+			if rc > 0.0 and speed > 0.18 and trail_fwd < -0.03:
+				# running, she pushes off the ball of the foot: the heel comes right up behind her (that is what lets a
+				# straight leg reach a foot 35 cm back without the pelvis sinking to it)
+				late_peel = lerpf(late_peel, clampf((trail_fwd + 0.03) * 2.2, -0.62, 0.0), rc)
+				peel_k = lerpf(11.0, 30.0, rc)
+			f.toe_pitch = lerpf(f.toe_pitch, late_peel, BM.expk(peel_k, sdt))
 			return
 		var ok_ := "R" if key == "L" else "L"
 		if not feet[ok_].stepping and ttl[ok_] < 9.0:
 			# stance budget: this swing lands before the stance leg runs out of reach
 			var budget: float = maxf(0.0, ttl[ok_] - (2.0 * sdt + 0.015))
+			# running, the stance leg leaves the ground when its time is up or it runs out of reach: this foot lands a
+			# flight later
+			if run_cyc: budget = minf(ttl[ok_], maxf(0.0, st_run - feet[ok_].down_t)) + fl_run
 			if (1.0 - f.t) * f.dur > budget:
 				f.dur = maxf(DUR_MIN, budget / maxf(1.0 - f.t, 0.05))
 		var rem_t := maxf(0.0, (1.0 - f.t) * f.dur)
@@ -246,10 +291,14 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 				# ROOT (stress B37): a foothold is committed at take-off. The planner's drifting spot is followed raw;
 				# the committed spot follows its foothold only by small moves (blending between two treads stood a
 				# foot across the edge), and jumps to a new one only while the old became unusable early in the swing
+				var to_prev := f.to_raw
 				f.to_raw = Vector3(lerpf(f.to_raw.x, tg.x, rk), lp.y, lerpf(f.to_raw.z, tg.z, rk))
 				var cand: Vector3 = target_filter.call(f.from, f.to_raw, f.to_yaw)
 				var dxz := Vector2(cand.x - f.to.x, cand.z - f.to.z).length()
-				if dxz < 0.05:
+				if dxz < 0.05 or (rc > 0.0 and Vector2(cand.x - f.to_raw.x, cand.z - f.to_raw.z).length() < 0.001 and Vector2(f.to.x - to_prev.x, f.to.z - to_prev.z).length() < 0.001):
+					# (running, on open ground: the foothold is the planner's spot and was last tick too, so it is followed
+					# however fast it moves. A swing lasts 0.4 s; when she cut the other way the spot moved 9 cm in a tick,
+					# was taken for a different foothold and dropped, and the foot came down half a metre out to the side)
 					f.to.x = cand.x; f.to.z = cand.z     # (the raw spot is already smoothed; on open ground cand is it)
 				else:
 					# early in the swing (the foot has covered < 10 % of its way, so the jump moves it < 3 cm) or when the
@@ -267,9 +316,30 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var usk := pow(u, lerpf(0.86, 0.74, rb))
 		var sl := sin(PI * usk)
 		var lift := sl * sl * f.height
+		var rs := minf(rc, f.run_swing)
+		if rs > 0.0:
+			# running, heel recovery: the foot comes up behind her towards the seat (knee folded past 100 deg) while the
+			# thigh swings through, and comes down as it reaches forward: still clear of the ground when the other foot
+			# leaves it, so both are in the air through the flight. Up over the first 32 %, starting at the speed the
+			# heel was already rising at as she pushed off (no acceleration step); down quickly at first (by the time the
+			# foot passes under her the knee is opening again and the thigh is no higher than 50 deg), then a long shallow
+			# glide to the ground
+			var xd := clampf((u - 0.32) / 0.68, 0.0, 1.0)
+			xd = xd * xd * 1.1 / (xd + 0.1)     # (rounds the top: no speed step at the peak)
+			var xu := clampf(u / 0.32, 0.0, 1.0)
+			var x3 := xu * xu * xu
+			var bell := x3 * (xu * (xu * 6.0 - 15.0) + 10.0) + 0.25 * (xu - x3 * (6.0 - xu * (8.0 - 3.0 * xu))) if u < 0.32 else pow(1.0 - xd, 1.4)
+			lift = lerpf(lift, RUN_SWING_H * bell, rs)
+			# and it leaves with her: eased out and in as gently as a walking step, it stayed where it had stood while
+			# she ran on (out of the leg's reach: the knee locked straight for 3 ticks, then snapped shut), then ran 28 cm
+			# ahead of the hip and waited there to be caught up (thigh at 65 deg). A leg at full stretch can only follow
+			# the hip: the foot comes off the ground at about her speed (picked up over the first 3 % of the swing),
+			# and arrives at the pace of a smoothstep
+			var uw := (u - 0.03 * (1.0 - exp(-u / 0.03))) / 0.97
+			uh = lerpf(uh, 0.69 * uw * (uw - 1.0) * (uw - 1.0) + uw * uw * (3.0 - 2.0 * uw), rs)
 		var hk := rb * sin(PI * clampf(u / 0.72, 0.0, 1.0)) * (1.0 - smoothstep(0.55, 0.92, u))
 		f.heel_kick = hk
-		var kick_back := -hk * 0.068
+		var kick_back := -hk * 0.068 * (1.0 - rs)     # (running, the fold comes from the lift above; pushed back as well, the foot was out of the hip's range)
 		var ss := -1.0 if key == "L" else 1.0
 		var clear_lat := sl * 0.010 * ss
 		f.cur = Vector3(lerpf(f.from.x, f.to.x, uh) + rgt_x * clear_lat + fwd_x * kick_back,
@@ -293,6 +363,7 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 			f.cur = f.planted
 			f.yaw = f.to_yaw
 			f.heel_kick = 0.0
+			f.down_t = 0.0
 			last_stepped = key
 			step_count += 1
 			support_cooldown = lerpf(config.doubleSupportGap, 0.0, clampf(rb * 1.4, 0.0, 1.0))
@@ -301,6 +372,12 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 			if on_footstep != null and not is_air:
 				on_footstep.call({"foot": key, "pos": f.planted, "speed": speed, "runBlend": rb, "crouchBlend": crouch, "isLanding": false})
 
+	if is_air and target_filter != null:
+		# the rig moved the ground her jump offset is measured from (see jumpRebase there): her height state moves with it
+		var rebase: float = s.get("jumpRebase", 0.0)
+		com_y += rebase
+		pelvis_offset_spring.x.y += rebase
+	var land_swing := ""
 	var j := jump
 	if is_air and not j.wasAirborne:
 		j.count += 1
@@ -308,6 +385,7 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		j.peakVelY = maxf(1.8, absf(jump_vel_y) if absf(jump_vel_y) > 0.0 else 2.95)
 		j.launchVelFwd = v_fwd
 		j.launchVelRight = v_right
+		j.launchRun = rc
 		var seed: float = j.count * 1.61803398875 + absf(lp.x * 0.37 + lp.z * 0.53)
 		var u1 := _frac(seed * 1.0 + 0.13)
 		var u2 := _frac(seed * 1.73205 + 0.41)
@@ -325,6 +403,11 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 			var fr: float = (feet.R.cur.x - lp.x) * fwd_x + (feet.R.cur.z - lp.z) * fwd_z
 			if feet.L.stepping and not feet.R.stepping: j.leadSide = -1
 			elif feet.R.stepping and not feet.L.stepping: j.leadSide = 1
+			elif rc > 0.0 and feet.L.stepping and feet.R.stepping:
+				# (leaving the ground in a run's flight, both feet are swinging: the one further through its swing is the
+				# one coming forward. Judged by position, the foot that had just pushed off, still ahead of the folded
+				# swing leg behind her, was sent to the front and the two legs crossed over in the air)
+				j.leadSide = -1 if feet.L.t > feet.R.t else 1
 			elif absf(v_right) > absf(v_fwd) * 1.15: j.leadSide = 1 if v_right >= 0.0 else -1
 			else: j.leadSide = -1 if fl >= fr else 1
 		else:
@@ -433,6 +516,10 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 					heel = lerpf(lerpf(0.72 if tuck else 0.58, 0.20, air_launch), 0.18, air_desc)
 			var tgt := Vector3(lp.x + rgt_x * flat + fwd_x * ffwd, lp.y + jump_offset + flift, lp.z + rgt_z * flat + fwd_z * ffwd)
 			var ak := BM.expk(lerpf(11.5, 16.0, maxf(air_launch, air_desc)), sdt)
+			# (leaving the ground at a run the feet are far from their air pose, one trailing at full stretch: sent
+			# there at once it set off at 6 m/s in the first tick and the locked knee shot out, 14.6 m/s against the
+			# pelvis at 120 Hz off the ledge. The pull comes on over the first 60 ms)
+			ak *= lerpf(1.0, smoothstep(0.0, 0.06, j.airTime), j.launchRun)
 			f.cur = Vector3(lerpf(f.cur.x, tgt.x, ak), lerpf(f.cur.y, tgt.y, ak), lerpf(f.cur.z, tgt.z, ak))
 			f.planted = Vector3(f.cur.x, lp.y, f.cur.z)
 			f.yaw = BM.wrap_pi(f.yaw + BM.wrap_pi(fyaw - f.yaw) * BM.expk(10.0, sdt))
@@ -450,6 +537,12 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 				var sg: float = pair[1]
 				f.stepping = false
 				f.t = 1.0
+				if run_cyc and sg != j.leadSide and absf(v_fwd) > absf(v_right):
+					# (landing a jump at a run she comes down on the leading foot and runs on: the trailing foot is not
+					# put down beside it, it swings through from where it is. Both planted, both were out of reach within
+					# 3 ticks and stepped at once, a second hop with the knees drawn up)
+					land_swing = pair[0]
+					continue
 				var rx := f.cur.x - lp.x
 				var rz := f.cur.z - lp.z
 				var cur_lat := (rx * rgt_x + rz * rgt_z) * sg
@@ -460,7 +553,7 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 				var stag := lerpf(0.035, 0.115, cs) if lead else -lerpf(0.030, 0.085, cs)
 				var safe_fwd := clampf(lerpf(cur_fwd, stag, 0.35), -0.18, 0.20)
 				var pp := Vector3(lp.x + rgt_x * safe_lat + fwd_x * safe_fwd, lp.y, lp.z + rgt_z * safe_lat + fwd_z * safe_fwd)
-				f.planted = pp; f.cur = pp
+				f.planted = pp; f.cur = pp; f.down_t = 0.0
 				f.yaw = BM.wrap_pi(yaw + BM.wrap_pi(f.yaw - yaw) * 0.35)
 				f.heel_kick = 0.0
 				f.toe_pitch = 0.06 if lead else -0.04
@@ -485,10 +578,10 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var f: Foot = feet[key]
 		forced[key] = 0.0
 		f.from = f.cur
-		f.dur = clampf(planned * 0.88 if urgent else planned, 0.25, 0.46)
+		f.dur = clampf(planned * 0.88 if urgent else planned, 0.25, lerpf(0.46, 0.56, rc))
 		var ok2 := "R" if key == "L" else "L"
 		if not feet[ok2].stepping and ttl[ok2] < 9.0:
-			f.dur = clampf(ttl[ok2] - (2.0 * sdt + 0.015), DUR_MIN, f.dur)
+			f.dur = clampf(minf(ttl[ok2], maxf(0.0, st_run - feet[ok2].down_t)) + fl_run if run_cyc else ttl[ok2] - (2.0 * sdt + 0.015), DUR_MIN, f.dur)
 		f.to = target_at.call(key, f.dur)
 		f.to_raw = f.to
 		if target_filter != null: f.to = target_filter.call(f.from, f.to, yaw)
@@ -500,11 +593,27 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		var sd := Vector2(f.to.x - f.from.x, f.to.z - f.from.z).length()
 		var bh := lerpf(config.walkStepHeight, config.runStepHeight, rb)
 		f.height = clampf(bh + sd * lerpf(0.022, 0.056, rb), 0.032, lerpf(0.055, 0.118, rb))
+		# (the steps that sort her feet out as she lands a jump stay low, as they were: the full swing comes back as she
+		# recovers, over the next two steps)
+		f.run_swing = rc * (1.0 - clampf(j.landRecovery * 1.6, 0.0, 1.0))
 		if rb > 0.25:
 			com_vel_y = maxf(com_vel_y, rb * 0.29)
+		if run_cyc and feet[ok2].stepping and j.landRecovery <= 0.3:
+			# take-off: this was the foot on the ground. She leaves it with the upward speed that carries her through
+			# the flight and back to this height as the other foot lands (v = g t / 2, corrected for where she is now); a flight that would last too
+			# long (a foot forced up early) is cut by bringing the other foot down sooner
+			var o: Foot = feet[ok2]
+			var cap := fl_run * 1.5 + sdt
+			if (1.0 - o.t) * o.dur > cap: o.dur = maxf(DUR_MIN, cap / maxf(1.0 - o.t, 0.05))
+			var fl := maxf(ceilf((1.0 - o.t) * o.dur / sdt - 0.01), 1.0) * sdt     # (the other foot lands on a tick)
+			var eq := -lerpf(rb * 0.024, RUN_KNEE_BEND, rc)
+			# (+ sdt: the fall is stepped a tick at a time, speed first)
+			com_vel_y = lerpf(com_vel_y, clampf((eq - com_y) / fl + 0.5 * config.gravity * (fl + sdt), 0.0, 0.9), rc)
 
 	if is_air:
 		forced = {"L": 0.0, "R": 0.0}     # a request from before take-off must not fire on the landing tick
+	if land_swing != "":
+		trigger.call(land_swing, false)
 	if not (step_l and step_r) and not is_air:
 		var err_l := Vector2(feet.L.planted.x - ideal_l.x, feet.L.planted.z - ideal_l.z).length()
 		var err_r := Vector2(feet.R.planted.x - ideal_r.x, feet.R.planted.z - ideal_r.z).length()
@@ -547,6 +656,16 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 				trigger.call(nk, false)
 			elif oe / (trig * 1.25) + oy / config.turnTriggerRad >= 1.0:
 				trigger.call(ok, false)
+		elif run_cyc:
+			# running: the foot on the ground lifts when its stance time is up (or its leg is about to run out of
+			# reach: sideways or backwards it holds a foot for less), with the other still in the air a flight's length from landing. Not when it has fallen far enough
+			# behind an ideal spot: that waited for the other foot to be nearly down, so there was never a flight
+			for key in ["L", "R"]:
+				var o: Foot = feet["R" if key == "L" else "L"]
+				var f: Foot = feet[key]
+				if f.stepping or not o.stepping: continue
+				if (f.down_t >= st_run - 0.5 * sdt or ttl[key] < sdt + 0.016) and (1.0 - o.t) * o.dur <= fl_run * 1.5 + sdt:
+					trigger.call(key, false)
 		elif rb > 0.28:
 			if not step_l and step_r and feet.R.t >= 0.80 and last_stepped != "L" and err_l >= trig:
 				trigger.call("L", false)
@@ -563,30 +682,84 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 	var geom_drop := maxf(0.0, base_hip - max_geom)
 	var swing_u: float = feet.L.t if feet.L.stepping else (feet.R.t if feet.R.stepping else 0.0)
 	var swing_bell := sin(PI * swing_u) if either else 0.0
+	var stance := 1.0 if feet.L.stepping else (-1.0 if feet.R.stepping else 0.0)
+	if rc > 0.0:
+		# running, a swing overlaps the next one (the flight): the leading swing foot is the one nearer its landing,
+		# and its bell runs from the other foot's touch-down to its own, so sway and roll have no step at a landing
+		if feet.L.stepping and feet.R.stepping and feet.R.t > feet.L.t:
+			stance = lerpf(stance, -1.0, rc)
+			swing_u = lerpf(swing_u, feet.R.t, rc)
+		var u0 := fl_run / (st_run + 2.0 * fl_run)
+		swing_bell = lerpf(swing_bell, sin(PI * clampf((swing_u - u0) / (1.0 - u0), 0.0, 1.0)) if either else 0.0, rc)
+		# the crouch: geom_drop lowered the pelvis until a straight leg reached the further foot, flat on the ground,
+		# the swinging one too (40 cm behind her in the air: 13 cm of crouch). Running, only a foot on the ground
+		# holds the pelvis down, and its heel is up as it trails (the ankle rises and comes forward about the ball)
+		var need := 0.0
+		for key in ["L", "R"]:
+			var f: Foot = feet[key]
+			if f.stepping: continue
+			var pk := clampf(-f.toe_pitch, 0.0, 0.62)
+			var d := maxf(0.0, (trail_l if key == "L" else trail_r) - (0.11 * (1.0 - cos(pk)) + 0.052 * sin(pk)))
+			var rise := 0.11 * sin(pk) - 0.052 * (1.0 - cos(pk))
+			need = maxf(need, base_hip - rise - sqrt(maxf(0.20, (leg_total * 0.994) * (leg_total * 0.994) - minf(d, 0.45) * minf(d, 0.45))))
+		# (the run's own knee bend, RUN_KNEE_BEND, already covers that much of it, and replaces the 2.4 cm below)
+		geom_drop = lerpf(geom_drop, maxf(RUN_KNEE_BEND, need) - rb * 0.024, rc)
 	var walk_vault := (1.0 - rb) * swing_bell * 0.011 * move_w
 	var target_com := jump_offset if is_air else (walk_vault - rb * 0.024 - crouch * 0.225 - braking * 0.014 - anticip_dip - geom_drop)
 	var g: float = config.gravity
 	if is_air:
+		run_ref.x = NAN
 		com_y = lerpf(com_y, jump_offset, BM.expk(24.0, sdt))
 		com_vel_y = jump_vel_y
-	elif grounded_feet > 0:
+	elif grounded_feet > 0 or (rc > 0.0 and j.landRecovery > 0.3):
+		# (running, with both feet up while a jump's landing is still being taken up, that is a shuffle of the feet
+		# under a body the legs are carrying, not a flight: left to fall, she sank to the bottom of the crouch)
 		var k_leg := lerpf(102.0, 128.0, rb)
 		var c_leg := lerpf(24.0, 22.0, rb)
 		var grf := (target_com - com_y) * k_leg - com_vel_y * c_leg + g
-		com_vel_y += (grf - g) * sdt
-		com_y = clampf(com_y + com_vel_y * sdt, -0.275, 0.024)
+		var vy := com_vel_y + (grf - g) * sdt
+		var cy := com_y + vy * sdt
+		var dn := INF
+		for key in ["L", "R"]:
+			if not feet[key].stepping: dn = minf(dn, feet[key].down_t)
+		dn += sdt     # (a foot that came down this tick has been down for the tick)
+		if rc > 0.0 and dn < st_run + 0.5 * sdt:
+			# running, the stance leg is a spring whose half period is the stance time: she comes down on it at the
+			# flight's landing speed, is lowest at mid-stance and leaves it at the same speed upwards, so the bounce is
+			# the one that flight time and stance time imply (dip = g x flight x stance / 2 pi; the walking leg,
+			# critically damped, swallowed it). She is brought onto that path by an exact critically damped step, so a
+			# landing from a longer or shorter flight eases onto it, at any tick rate
+			var w_run := PI / st_run
+			var dip := g * fl_run * st_run / TAU
+			var ph := PI * minf(dn / st_run, 1.0)
+			var ref := Vector2(target_com - dip * sin(ph), -dip * w_run * cos(ph))
+			if is_nan(run_ref.x):
+				var ph0 := PI * clampf((dn - sdt) / st_run, 0.0, 1.0)
+				run_ref = Vector2(target_com - dip * sin(ph0), -dip * w_run * cos(ph0))
+			var e0 := com_y - run_ref.x
+			var j1 := (com_vel_y - run_ref.y) + RUN_TRACK * e0
+			var dec := exp(-RUN_TRACK * sdt)
+			vy = lerpf(vy, ref.y + (com_vel_y - run_ref.y - j1 * RUN_TRACK * sdt) * dec, rc)
+			cy = lerpf(cy, ref.x + (e0 + j1 * sdt) * dec, rc)
+			run_ref = ref
+		else:
+			run_ref.x = NAN
+		com_vel_y = vy
+		com_y = clampf(cy, -0.275, 0.024)
 	else:
+		run_ref.x = NAN
 		com_vel_y -= g * sdt
 		com_y = clampf(com_y + com_vel_y * sdt, -0.275, 0.038)
 
-	var stance := 1.0 if feet.L.stepping else (-1.0 if feet.R.stepping else 0.0)
 	var sway_amp := lerpf(0.018, 0.014, rb)
 	var air_side := 0.0
 	if is_air:
 		air_side = (signf(j.launchVelRight if j.launchVelRight != 0.0 else 1.0) * 0.022) if j.style == "side_hop" else (-j.leadSide * 0.010 * air_apex)
 	var com_lat_goal := air_side if is_air else (stance * sway_amp * (0.25 + 0.75 * swing_bell) * move_w)
 	var com_lat: float = com_shift_lat_spring.step(com_lat_goal, 0.18, sdt)
-	var pelvis_off: Vector3 = pelvis_offset_spring.step(Vector3(com_lat, com_y, 0.0), 0.055 if is_air else 0.095, sdt)
+	# (running, the pelvis follows the bounce closely: at the walk's half-life it lagged a third of a stance behind it;
+	# not while a jump's landing is being taken up, which the slower spring spreads over several ticks)
+	var pelvis_off: Vector3 = pelvis_offset_spring.step(Vector3(com_lat, com_y, 0.0), 0.055 if is_air else lerpf(0.095, 0.028, rc * (1.0 - clampf(j.landRecovery, 0.0, 1.0))), sdt)
 	var air_proll := clampf(j.leadSide * (0.048 * air_apex + 0.025 * air_launch) + j.varTwist * 0.018 * air_apex, -0.09, 0.09) if is_air else 0.0
 	var list_goal := air_proll if is_air else (-stance * lerpf(0.040, 0.052, rb) * move_w * swing_bell)
 	var pelvis_roll: float = pelvis_roll_spring.step(list_goal, 0.14 if is_air else 0.19, sdt)
@@ -705,7 +878,7 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 	var fl_: Foot = feet.L
 	var fr_: Foot = feet.R
 	return {
-		"gaitMode": gait, "runBlend": rb, "speed": speed, "speedNorm": speed_norm, "vFwd": v_fwd, "vRight": v_right,
+		"gaitMode": gait, "runBlend": rb, "runGait": rc, "speed": speed, "speedNorm": speed_norm, "vFwd": v_fwd, "vRight": v_right,
 		"trajectory": traj,
 		"footL": {"pos": fl_.cur, "yaw": fl_.yaw, "stepping": fl_.stepping, "t": fl_.t, "toePitch": fl_.toe_pitch, "heelKick": fl_.heel_kick, "from": fl_.from, "to": fl_.to, "dur": fl_.dur},
 		"footR": {"pos": fr_.cur, "yaw": fr_.yaw, "stepping": fr_.stepping, "t": fr_.t, "toePitch": fr_.toe_pitch, "heelKick": fr_.heel_kick, "from": fr_.from, "to": fr_.to, "dur": fr_.dur},

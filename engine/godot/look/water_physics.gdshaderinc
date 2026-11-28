@@ -3,6 +3,7 @@
 global uniform float water_y;
 global uniform float water_floor_y;
 global uniform vec3 water_rrs;      // the deep water's Rrs (/sr, above the surface; WaterOptics.optics)
+global uniform vec3 water_rrs_deep;  // the open ocean's Rrs (WaterOptics.OCEAN), past the reef (sea_top blends by floor depth 20-120 m)
 global uniform float sea_open_gain;  // open water art levers (FftSea adds both: 2, 0.5 = the lifted Abzu blue Gary picked 28 Nov; 1, 0 = physical)
 global uniform float sea_open_teal;
 global uniform vec3 water_a;
@@ -50,7 +51,8 @@ vec3 w_glow(vec3 d, float z0, float L) {
 // with depth as Kd; the view fades into it at the beam attenuation c, so the visibility is the real one. Plus the sun's beam
 // scattered toward the eye, as w_glow's (HG, through the haze), so the god rays and the sun's glow carry on over the deep.
 // Rrs = water_rrs (WaterOptics.optics: Gordon / Lee from the water's own a and bb, the ocean's for open water).
-vec3 w_deep(vec3 d, float z0, float L) {
+// ocean 0..1: the share of the open ocean's water (sea_top's floor-depth blend, 20-120 m, at the eye), so above and below match
+vec3 w_deep_o(vec3 d, float z0, float L, float ocean) {
 	vec3 c = water_a + water_b;
 	float az = 1.0 - abs(d.y);
 	vec3 shape = vec3(1.0 + 2.0 * az * az);
@@ -58,7 +60,8 @@ vec3 w_deep(vec3 d, float z0, float L) {
 	vec3 fade = 1.0 - exp(-k * min(L, 1e4));
 	vec3 Ed = water_es0 * exp(-water_kd * z0) + water_ek0 * exp(-water_ku * z0);
 	// the open sea's art levers, as the sea seen from above (sea_top): the same deep water from both sides
-	vec3 rrs = mix(water_rrs, water_rrs.z * vec3(0.03, 0.55, 1.0), sea_open_teal) * sea_open_gain;
+	vec3 rrs0 = mix(water_rrs, max(water_rrs, water_rrs_deep), ocean);
+	vec3 rrs = mix(rrs0, rrs0.z * vec3(0.03, 0.55, 1.0), sea_open_teal) * sea_open_gain;
 	vec3 inf = Ed * 1.8 * rrs * (c + water_kd) / k * shape;
 	vec3 ch = water_a + water_b * mix(1.0, 1.0 - W_G, water_glow_ms);
 	float muw = max(water_sun_w.y, 0.05);
@@ -67,6 +70,7 @@ vec3 w_deep(vec3 d, float z0, float L) {
 	float ph = (1.0 - W_G * W_G) / (4.0 * PI * pow(1.0 + W_G * W_G - 2.0 * W_G * ct, 1.5));
 	return water_glow_k * (inf * fade + water_b * Es * ph * w_G(ch - water_kd * d.y, L));
 }
+vec3 w_deep(vec3 d, float z0, float L) { return w_deep_o(d, z0, L, 0.0); }
 // the floor plane seen along a downward ray that meets no geometry (past the drawn floor): the distance to it (m, or -1 when the ray
 // does not go down) and its radiance in nits (sand lit by the water's light at that depth, as the drawn sand is)
 float w_floor_dist(vec3 d, float z0) {
