@@ -167,7 +167,9 @@ void fragment() {
 		hb = wi.z - sea_isl((INV_VIEW_MATRIX * vec4(vb.xyz, 1.0)).xyz).z;
 		if (hb < 0.0 || hb > h - 0.5) break;                  // above the water (an edge), or the floor where it was assumed
 	}
-	if (hb < 0.0) uvb = SCREEN_UV;                         // the bent point is above the water (an edge): no shift
+	// the bent point is above the water (an edge), or still on something far shallower than the floor it was bent for
+	// (a body or rock between: sampling it there drew it twice, Gary 28 Nov "a doubling of the player body"): no shift
+	if (hb < 0.0 || hb < 0.5 * h - 0.25) uvb = SCREEN_UV;
 	vec3 scene = textureLod(screen_tex, uvb, 0.0).rgb;
 	float Lp = min(h / max(-T.z, 0.05), 400.0);
 	vec3 c = water_a + water_b;

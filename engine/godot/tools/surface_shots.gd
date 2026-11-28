@@ -3,7 +3,7 @@
 ## ceiling at the level; from above: low over the water toward the sun and away, and high over it (tile check).
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/surface_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
 ## Env as lagoon_shots, plus AO_TIDE=1 (let the tide move the level; default pinned at the mean so frames compare),
-## AO_ISLAND=<dir> (the eroded atoll, world/erosion/handover/godot: edges E S W N x views a s e w u v, blue hole Ha Hu), AO_REEF=1 (the reef drop-off's stress-test matrix: per sector views a s e w d u v (+p in the pass), AO_REEF_SECTORS=0,2 picks sectors; with AO_SEA=Bn that sea over it), AO_SEA=B0..B12 (the open sea at that Beaufort force, no floor: shots o1-o5 over the crests and under the troughs), AO_DRESS (lagoon_shots': adds s8_arch_mirror, the key frame's arch in the ceiling), AO_SEA_T (the waves' clock, s; default 37.0, held), AO_HOUR_THEN (the clock jumps there just before each shot, the eye still), AO_FILM=<frames> (videos: the waves run, frames to <out>/<shot>/, use --fixed-fps 30), AO_SURF_SHOTS (two-character prefixes, e.g. s1,s4; AO_SHOTS
+## AO_REFR=1 (refraction check: a body at the surface, a post half out, a rock 1.5 m down; shots f1-f4), AO_ISLAND=<dir> (the eroded atoll, world/erosion/handover/godot: edges E S W N x views a s e w u v, blue hole Ha Hu), AO_REEF=1 (the reef drop-off's stress-test matrix: per sector views a s e w d u v (+p in the pass), AO_REEF_SECTORS=0,2 picks sectors; with AO_SEA=Bn that sea over it), AO_SEA=B0..B12 (the open sea at that Beaufort force, no floor: shots o1-o5 over the crests and under the troughs), AO_DRESS (lagoon_shots': adds s8_arch_mirror, the key frame's arch in the ceiling), AO_SEA_T (the waves' clock, s; default 37.0, held), AO_HOUR_THEN (the clock jumps there just before each shot, the eye still), AO_FILM=<frames> (videos: the waves run, frames to <out>/<shot>/, use --fixed-fps 30), AO_SURF_SHOTS (two-character prefixes, e.g. s1,s4; AO_SHOTS
 ## filters lagoon_shots' own list and must stay unset here).
 extends "res://tools/lagoon_shots.gd"
 
@@ -121,6 +121,25 @@ func _setup():
 			["o5_under_window", Vector3(0, dn, 0), Vector3(0, dn, 0) + Vector3(0.05, 10.0, -0.3), 90.0],
 		]
 		print("SEA ", sea_env, " ", SeaSpectrum.BEAUFORT[force][2], " Hs ", hs)
+	if OS.get_environment("AO_REFR") != "":         # refraction check (Gary 28 Nov: the body doubled from above): a body
+		# at the surface, a post half in and half out, a rock 1.5 m down, seen from above at three angles
+		var base := Vector3(0.0, y, 10.0)
+		var mk := func(m: Mesh, at: Vector3, rot: Vector3, c: Color) -> void:
+			var mi := MeshInstance3D.new(); mi.mesh = m; mi.position = at; mi.rotation = rot
+			var sm := StandardMaterial3D.new(); sm.albedo_color = c; sm.roughness = 0.6; mi.material_override = sm
+			root.add_child(mi)
+		var body := CapsuleMesh.new(); body.radius = 0.18; body.height = 1.4
+		mk.call(body, base + Vector3(0.0, -0.25, 0.0), Vector3(0, 0, PI * 0.5), Color(0.85, 0.82, 0.78))     # lying at the surface, like the girl swimming
+		var post := CylinderMesh.new(); post.top_radius = 0.12; post.bottom_radius = 0.12; post.height = 2.0
+		mk.call(post, base + Vector3(2.2, 0.1, 0.5), Vector3.ZERO, Color(0.9, 0.35, 0.2))                   # half in, half out
+		var rock := BoxMesh.new(); rock.size = Vector3(1.2, 0.8, 0.9)
+		mk.call(rock, base + Vector3(-2.0, -1.5, 1.0), Vector3(0.2, 0.5, 0.1), Color(0.35, 0.38, 0.32))   # 1.5 m down
+		shots = [
+			["f1_refr_down60", base + Vector3(0, 3.0, 4.0), base + Vector3(0, -0.3, 0), 60.0],
+			["f2_refr_down35", base + Vector3(0, 2.2, 6.5), base + Vector3(0, -0.3, 0), 60.0],
+			["f3_refr_low", base + Vector3(0.5, 0.9, 7.0), base + Vector3(0, -0.2, 0), 60.0],
+			["f4_refr_top", base + Vector3(0.1, 5.0, 0.6), base + Vector3(0, -0.3, 0), 60.0],
+		]
 	if OS.get_environment("AO_FAR") != "": wr.cam_attr.frustum_far = float(OS.get_environment("AO_FAR"))   # check: the far plane (m)
 	if OS.get_environment("AO_SURF_SHOTS") != "":
 		var keep := OS.get_environment("AO_SURF_SHOTS").split(",")
