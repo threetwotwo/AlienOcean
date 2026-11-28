@@ -77,6 +77,18 @@ The branchiostegal angles are read round the section scaled to its half-width (0
 du` place the rays inside the head and are not used. The record has no field yet for membranes joined to the isthmus (gobies,
 blennies): those get a V like the others.
 
+### The eye and the head round it (`form.py` `_orbit`, `_tissue`)
+
+| What | From | Rule |
+|---|---|---|
+| eye aim | `skeleton.eye.aim {up, fwd}`, else the elevation of a measured `skeleton.eye.gaze`, else the head's skin ring less 7.5 deg (DEFAULT `AIM_BELOW_SKIN`), kept in -6..12 deg up and 4..26 deg forward | the globe sits in the skull: its aim is its own, not the skin's. The eye's plane is square to the aim and touches the loft at the rim's outermost point, proud by `eye.bulge`; where it cannot lie inside the top view the aim gives way toward the skin |
+| swelling round the rim | `eye.bulge`, `eye.groove`; DEFAULTS `SWELL_REACH` 1.6, `SWELL_SLOPE` 0.75, `SWELL_MAX` 3.0 eye radii, `ROOF_EDGE` 0.25 | the skin leaves the eye's plane at the rim with the plane's slope and has joined the record's loft 1.6 eye radii out, where the scans' skin ring begins. Where the swelling stands high (the brow of a high eye) it runs out further, no steeper than 0.75, as far as the scans' band lets the ring fill. Under the dorsal outline it closes as a roof with a round edge. It only changes a section's width: the side and top outlines stay the record's |
+| the head round the eye | record sections; scans' line `RING_LINE` (skin ring up = -57.4 + 103.8 x eye height) or `skeleton.eye.skin_up`; DEFAULT `RING_HOLD` 7 deg | the skin ring (best plane of the skin 1.6-2.4 eye radii out) is the record's own. A head whose ring lies more than 7 deg over the line (it falls away round the eye) is turned back to it; a head the record draws flatter than the line keeps the record's shape |
+
+Checks: EA1 (ring no more than 8 deg over the line, and not filled by the builder to more than 8 deg under it: `EA1_flat_by_record`
+lists the heads the record itself draws under the band), EA2 (aim in the scans' range, rim seated within 6 deg of it), FM1 on
+sections through the swelling (`FM1_orbit_crease_deg`, gated). `cage.json` `form_rules.orbit` carries the numbers.
+
 Designed creases are registered where they are made (`rolls`, `junctions`, `commissures` in `cage.json`), so the fold
 check can tell a designed crease from a fault.
 
@@ -129,8 +141,8 @@ over in the side view (1.5 % of its area at most).
 
 Cage (no Blender): P2 quad share and corners, P3 manifold, P4 skin on the form, P5 skin UV stretch, folds and overlap (no texel
 under two skin faces), IC1 parts
-from the record, EY1 eye size, OP1 openings are topology (genus 2, the lips reach both gill slits through interior faces),
-OP2 interior inside the body, OP3 no fold outside designed creases, FM1 the body loft is fair (no crease round a section: its normal turns at most 8 deg over 0.005 % SL of arc; no ripple along the flank: at most 1.5 deg rms about a 6 % SL running mean; traced half-widths and section rows are faired within named tolerances first, form.py `fair`), FM2 bone plates have no wall (thickness of bone over the bare body, sampled on the skin every 0.1 % SL, rises nowhere faster than 1.25: a plate cut off square is sharper than the dense form carries and bakes as saw teeth), GP0 no crossing faces at rest, GP1 gape to the record's real gape
+from the record, EY1 eye size, EY2 cornea window, EA1 the skin ring round the eye against the scans' line, EA2 the eye's aim, OP1 openings are topology (genus 2, the lips reach both gill slits through interior faces),
+OP2 interior inside the body, OP3 no fold outside designed creases, FM1 the body loft is fair (no crease round a section: its normal turns at most 8 deg over 0.005 % SL of arc; no ripple along the flank: at most 1.5 deg rms about a 6 % SL running mean; traced half-widths and section rows are faired within named tolerances first, form.py `fair`; the swelling round the eye is held to the same crease limit on 13 sections of its own), FM2 bone plates have no wall (thickness of bone over the bare body, sampled on the skin every 0.1 % SL, rises nowhere faster than 1.25: a plate cut off square is sharper than the dense form carries and bakes as saw teeth), GP0 no crossing faces at rest, GP1 gape to the record's real gape
 (`jaw.linkage.gape`, DEFAULT 30; the two lip tips must part by at least 95 % of the gape angle, `GP1_opening_share`: a jaw weight smeared over the snout opens nothing and crosses nothing) and GF1 gill flare 0-20 deg (cover and branchiostegal membrane together, about the hinge-to-apex line when there is a gill V) add no crossings or flipped faces and leave the eye rims in place (`pose.py`), SR1 stylized range:
 gape, flare, body C-bend, S-wave, arch and all of them at once are each swept until the first new crossing, fold
 (neighbours turning past 90 deg) or crush (a skin triangle under 10 % of its rest area). The target is what the species

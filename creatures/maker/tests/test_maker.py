@@ -381,12 +381,14 @@ def test_front_reference_marked_as_a_section_is_scored_against_a_slice():
     assert section_u({'front_kind': 'section', 'front_u': 0.57}) == 0.57
 
 
-def test_eye_aims_down_its_own_axis_and_the_head_has_volume_round_it(tmp_path):
+def test_eye_aims_down_its_own_axis_from_a_swelling_and_the_head_keeps_the_scan_line(tmp_path):
     """planted: a record whose eye sits high on a round head (the proof record with its eye moved up to 0.15 eye radii under
     the dorsal outline). On the bare loft the rim's own plane leans far up there (the old aim); the eye's aim stays in the
-    scan range, the rim is plane and square to it, the tissue only widens the head and stays inside the top view."""
+    scan range, the rim is plane and square to it, the swelling round the rim stays inside the top view and has run out by
+    SWELL_MAX eye radii, and the skin ring stays the head's own (inside the scans' band, or where the record's loft put it).
+    A head whose ring lies over the band is turned back to it."""
     from creature_maker.record import adapt
-    from creature_maker.form import Form, AIM_UP, AIM_FWD
+    from creature_maker.form import Form, AIM_UP, AIM_FWD, SWELL_MAX, RING_HOLD
     from creature_maker.cage.eye import rim3
     D = json.load(open(REC)); R = D['record']; E = R['skeleton']['eye']; top = np.array(R['outline']['top'])
     E['y'] = float(np.interp(E['u'], top[:, 0], top[:, 1])) - 1.15 * E['R']
@@ -403,7 +405,18 @@ def test_eye_aims_down_its_own_axis_and_the_head_has_volume_round_it(tmp_path):
     assert (rim[:, 2] >= bare[:, 2] - rec['eye']['groove'] * F.er - 1e-9).all()      # tissue is added; the furrow is the only way in
     assert (rim[:, 2] <= F.HW(rim[:, 0]) + rec['eye']['bulge'] * F.er + 1e-9).all()  # and stays inside the top view + the bulge
     assert np.allclose(F.eye_axis(-1), n * [1, 1, -1])
-    assert O['skin_up_deg'] < O['bare_skin_up_deg']                        # the skin round the eye faces less up than before
+    # the head is the record's: the ring is not filled past the band's lower edge (or past the record's own loft, if that lies lower)
+    assert O['skin_up_deg'] >= min(O['bare_skin_up_deg'], O['ring_target_deg'] - RING_HOLD) - 0.15, O
+    far = np.stack([F.ex + 1.02 * SWELL_MAX * F.er * np.cos(ph), F.eyy + 1.02 * SWELL_MAX * F.er * np.sin(ph)], -1)
+    far = far[(far[:, 1] < F.TOP(far[:, 0])) & (far[:, 1] > F.BOT(far[:, 0])) & (far[:, 0] > 0)]; z1 = F.z_on(far[:, 0], far[:, 1])
+    F._orb = None; z0 = F.z_on(far[:, 0], far[:, 1]); F._orb = keep
+    assert len(far) > 100 and np.allclose(z1, z0, atol=1e-9)              # past the swelling's longest run the loft is the record's
+    from creature_maker.checks import form_fair, FM1_ORBIT_GATED
+    Rf = form_fair(F); assert FM1_ORBIT_GATED and Rf['FM1_pass'] and Rf['FM1_orbit_crease_deg'] <= 8.0, Rf    # no crease from the swelling
+    # a head that falls away round the eye (its ring 12 deg over the stated facing) is turned back into the band
+    D2 = json.load(open(REC)); D2['record']['skeleton']['eye']['skin_up'] = Form(adapt(REC)).ORBIT['bare_skin_up_deg'] - 12.0
+    p2 = str(tmp_path / 'falls_away.json'); json.dump(D2, open(p2, 'w')); O2 = Form(adapt(p2)).ORBIT
+    assert O2['head_turn'] < 0 and abs(O2['skin_up_deg'] - (O2['ring_target_deg'] + RING_HOLD)) < 0.1, O2
     out = str(tmp_path / 'b'); build(p, out, res=64, dense_form=False, log=lambda *a: None)
     Rk = check(out, p, sweep=False)
     assert Rk['EA2_pass'] and Rk['EY1_pass'] and Rk['EY2_pass'] and Rk['OP1_pass'], {k: Rk[k] for k in Rk if k.startswith(('EA', 'EY'))}

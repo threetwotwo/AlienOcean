@@ -8,7 +8,8 @@ Cage checks (no Blender):
   IC1 every part the record names exists; input faults and defaults listed
   EY1 eye rim radius within 5 % of the record eye
   EY2 the eyeball is no goggle: the cornea window stands 0.04-0.40 eye radii over its rim and clears the lens
-  EA1 the skin round the eye (best plane of the 1.6-2.4 eye radii ring) faces no further up than the scans' line for the eye's height + 8 deg
+  EA1 the skin round the eye (best plane of the 1.6-2.4 eye radii ring) faces no further up than the scans' line for the eye's height + 8 deg,
+      and the builder has not filled the head to more than 8 deg under it
   EA2 the eye's own aim lies in the range real eye discs keep to (up -6..12, forward 4..26 deg), and the eye sits true in its rim
   OP1 openings are topology: genus 2 (mouth -> throat -> two gill exits), 2 border loops (eyes), consistent winding,
       and the lips reach each gill slit through interior faces only
@@ -142,6 +143,8 @@ def uv_overlap(C, res=UV_OVERLAP_RES):
 # round 1" and eye_aim_r1/skin_targets.json + gaze_report.json (meta).
 EA1_LINE = (-57.4, 103.8)    # skin ring degrees above horizontal = a + b x eye height in the local body depth (79 species, r 0.84)
 EA1_TOL = 8.0                # leave-one-out error of that line (7.7 over all scans, 8.0 inside the board's eye heights)
+EA1_FILL_TOL = 1.0          # DEFAULT (deg): under the band, the built skin ring may lie this far below the bare loft's (the swelling's run-out
+                             # just reaches the ring's inner edge on some heads: 0.0-0.6 on the 28 traced fish)
 EA2_UP = (-6.0, 12.0)        # eye disc, degrees above horizontal: scan median 2, spread 8-10 (regression error 10.7; "noise 10-17 on dead scans")
 EA2_FWD = (4.0, 26.0)        # eye disc, degrees toward the snout: scan median 14.3, IQR 10.2-19.6, error 7.8 -> median +- 1.5 errors
 EA2_STATED_TOL = 3.0         # DEFAULT: a record that states its own aim (skeleton.eye.aim, or a gaze that is not the stand-in) is held to it within 3 deg
@@ -158,11 +161,17 @@ def eye_aim_checks(C, V, form, rec):
     R['EA1_skin_up_deg'] = round(up, 1); R['EA1_skin_fwd_deg'] = round(fwd, 1); R['EA1_eye_height'] = round(h, 3)
     R['EA1_target_deg'] = round(float(tgt), 1); R['EA1_target_source'] = 'record skeleton.eye.skin_up' if E.get('skin_up') is not None else 'scan line from eye height'
     R['EA1_dev_deg'] = round(up - float(tgt), 1)
-    # the fault is skin that faces further up than real skin at that eye height: the head falls away round the eye. Skin
-    # under the band is listed, not failed: the line is no lower limit (same-genus scans sit up to 20 deg under it:
-    # Caranx 2.2 at a line value of 14, Diodon 6.9 at 25, Chlorurus 8.7 at 23; a flat-sided head with a high eye is real)
+    # two faults. Over the band: skin that faces further up than real skin at that eye height, the head falls away round
+    # the eye. Under the band: a head fuller than the scans', if the builder made it so (the swelling round the eye, or the
+    # head's turn, took the ring more than EA1_FILL_TOL below the record's own loft: PR #109 did that to 12 of the 28 traced fish).
+    # A head the record's own sections draw under the band is listed (EA1_flat_by_record), not failed: the line is no lower
+    # limit for a record (same-genus scans sit up to 20 deg under it: Caranx 2.2 at a line value of 14, Diodon 6.9 at 25,
+    # Chlorurus 8.7 at 23; a flat-sided head with a high eye is real)
+    bare = form.bare_skin_ring()[0]; R['EA1_bare_skin_up_deg'] = round(bare, 1)
     R['EA1_under_band'] = bool(R['EA1_dev_deg'] < -EA1_TOL)
-    R['EA1_pass'] = bool(R['EA1_dev_deg'] <= EA1_TOL)
+    R['EA1_filled_by_builder'] = bool(R['EA1_under_band'] and up < bare - EA1_FILL_TOL)
+    R['EA1_flat_by_record'] = bool(R['EA1_under_band'] and not R['EA1_filled_by_builder'])
+    R['EA1_pass'] = bool(R['EA1_dev_deg'] <= EA1_TOL and not R['EA1_filled_by_builder'])
     ups, fwds, seat = [], [], []
     for e, rings in zip(C['eyes'], C['openings']['eye_rings']):
         n = np.array(e['n'], float); n /= np.linalg.norm(n); sg = e['side']
@@ -208,8 +217,10 @@ def _loft_normal(form, P, e):
     return g / (np.linalg.norm(g, axis=-1, keepdims=True) + 1e-15)
 
 
-FM1_ORBIT_GATED = False  # the periorbital tissue (PR #109) still leaves a crease where it meets the brow and snout (the boxy roof,
-                         # 28-37 deg on the 28 traced fish): listed as FM1_orbit_crease_deg, gated once the head is held to the scan line
+FM1_ORBIT_GATED = True   # the swelling round the eye is held to FM1 too. (PR #109's tissue left a crease where it met the brow and snout, the
+                         # boxy roof: 28-37 deg on the 28 traced fish; the swelling that replaced it: <= 5.3 on the body's sections and
+                         # on FM1_ORBIT_SECTIONS sections through the swelling itself)
+FM1_ORBIT_SECTIONS = 13  # DEFAULT: sections through the swelling round the eye, evenly from its front end to its rear end
 
 
 def form_fair(form):
@@ -220,27 +231,40 @@ def form_fair(form):
     finally:
         form._orb = orb
     if orb is not None:
-        T = _form_fair(form); R['FM1_orbit_crease_deg'] = T['FM1_crease_deg']; R['FM1_orbit_crease_at_xy'] = T['FM1_crease_at_xy']
-        if FM1_ORBIT_GATED: R['FM1_pass'] = R['FM1_pass'] and T['FM1_crease_deg'] <= FM1_CREASE_MAX
+        T = _form_fair(form); cr, at = max((T['FM1_crease_deg'], T['FM1_crease_at_xy']), _orbit_crease(form, True))
+        R['FM1_orbit_crease_deg'] = cr; R['FM1_orbit_crease_at_xy'] = at
+        if FM1_ORBIT_GATED: R['FM1_pass'] = bool(R['FM1_pass'] and cr <= FM1_CREASE_MAX)
     return R
 
 
-def _form_fair(form):
-    """FM1: the body loft (level 0, before plates) is fair. crease = the most its normal turns, in the section plane, over
-    FM1_STEP of arc round a section (15 sections along the body); ripple = rms of the flank normal's fore-aft angle along
-    the widest line, less its running mean over FM1_WINDOW. Both are zero on a smooth loft and neither needs a bake."""
-    X = form.XEND; th = np.linspace(0, np.pi, 20001); crease = 0.0; at = None
-    for x in np.linspace(0.08, 0.92, 15) * X:
+def _section_crease(form, xs):
+    """the most the loft's normal turns, in the section plane, over FM1_STEP of arc round the sections at xs: (deg, [x, y])."""
+    th = np.linspace(0, np.pi, 20001); crease = 0.0; at = None
+    for x in xs:
         P = form.loft_point(np.full(th.shape, x), th); n = _loft_normal(form, P, 5e-6); n[:, 0] = 0
         n /= np.linalg.norm(n, axis=1, keepdims=True) + 1e-15
         arc = np.r_[0, np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))]
         j = np.clip(np.searchsorted(arc, arc + FM1_STEP), 0, len(th) - 1)
         t = np.degrees(np.arccos(np.clip((n * n[j]).sum(1), -1, 1))); k = int(t.argmax())
         if t[k] > crease: crease = float(t[k]); at = [round(float(x), 3), round(float(P[k, 1]), 3)]
+    return round(crease, 1), at
+
+
+def _orbit_crease(form, where=False):
+    """FM1's crease on sections through the swelling round the eye (the body's 15 sections can all miss a small eye)."""
+    w = form._orb['far'] * form.er; xs = np.clip(form.ex + np.linspace(-0.98, 0.98, FM1_ORBIT_SECTIONS) * w, 0.02 * form.XEND, 0.98 * form.XEND)
+    c = _section_crease(form, np.unique(xs)); return c if where else c[0]
+
+
+def _form_fair(form):
+    """FM1: the body loft (level 0, before plates) is fair. crease = the most its normal turns, in the section plane, over
+    FM1_STEP of arc round a section (15 sections along the body); ripple = rms of the flank normal's fore-aft angle along
+    the widest line, less its running mean over FM1_WINDOW. Both are zero on a smooth loft and neither needs a bake."""
+    X = form.XEND; crease, at = _section_crease(form, np.linspace(0.08, 0.92, 15) * X)
     xs = np.arange(0.05 * X, 0.95 * X, 0.001); k = int(FM1_WINDOW / 0.001) | 1
     ax = np.degrees(np.arcsin(np.clip(_loft_normal(form, form.loft_point(xs, np.full(xs.shape, np.pi / 2)), 1e-4)[:, 0], -1, 1)))
     hp = ax - np.convolve(np.pad(ax, k // 2, mode='edge'), np.ones(k) / k, 'valid'); ripple = float(np.sqrt((hp ** 2).mean()))
-    return dict(FM1_crease_deg=round(crease, 1), FM1_crease_at_xy=at, FM1_ripple_deg=round(ripple, 2),
+    return dict(FM1_crease_deg=crease, FM1_crease_at_xy=at, FM1_ripple_deg=round(ripple, 2),
                 FM1_pass=crease <= FM1_CREASE_MAX and ripple <= FM1_RIPPLE_MAX)
 
 
@@ -622,6 +646,17 @@ def planted(C0, V0, VN0, form, rec):
         def z_on(s_, x, y): return s_.f.z_on(x, y) - math.tan(math.radians(40)) * (y - s_.f.eyy)
         def skin_ring(s_): return type(s_.f).skin_ring(s_)
     PL['EA1 (head leaning in round the eye)'] = not eye_aim_checks(C0, V0, Leaning(form), rec)['EA1_pass']
+    # EA1, the other side: tissue that fills the head round the eye (wider above it, narrower below), the skin's slope less by tan 40 deg
+    class Filled(Leaning):
+        def z_on(s_, x, y): return s_.f.z_on(x, y) + math.tan(math.radians(40)) * (y - s_.f.eyy)
+    r_ = eye_aim_checks(C0, V0, Filled(form), rec); PL['EA1 (head filled out round the eye by the builder)'] = r_['EA1_filled_by_builder'] and not r_['EA1_pass']
+    # FM1 on the swelling round the eye: its run-out cut off square a third of the way (a step round the eye)
+    f3 = copy.copy(form); t3 = form._tissue
+    def cut(x, u, cab=None):
+        x, u = np.broadcast_arrays(np.asarray(x, float), np.clip(np.asarray(u, float), -1, 1)); c_, a_, _ = form.sec(x)
+        return np.where(np.hypot(x - form.ex, c_ + a_ * u - form.eyy) < 1.2 * form.er, t3(x, u), 1.0)
+    f3._tissue = cut
+    PL['FM1 (the swelling round the eye cut off square)'] = _orbit_crease(f3) > FM1_CREASE_MAX
     c = copy.deepcopy(C0); c['uv'] = [(np.array(u) * np.array([1, 1.6])).tolist() if i % 3 == 0 else u for i, u in enumerate(c['uv'])]
     PL['P5 (UV stretched 1.6x on 1/3 of faces)'] = not run(c, V0)['P5_pass']
     c = copy.deepcopy(C0); c['uv'][sk] = c['uv'][sk][::-1]; PL['P5 (one UV face folded)'] = run(c, V0)['P5_uv_folded_faces'] > 0
