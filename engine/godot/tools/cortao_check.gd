@@ -13,6 +13,8 @@
 ## Planted faults: --fault flip renders with flip_y inverted (the AO lands mirrored), which must fail C1 or C3;
 ## --fault coarse makes the last filter pass use CORTAO's 3 px taps again (the lattice comes back), which must fail C6;
 ## --fault edge plants the old edge-normal bug (the clamped neighbour's zero difference wins), which must fail C7.
+## C8 (tests/run_cortao.sh, from the engine log): the run resizes the window 4 times and must log no "Uniforms were never supplied"
+## error (the materials' uniform set lost its AO texture when a resize freed it, Mac 28 Nov); env CORTAO_FAULT_FREE=1 plants it.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- <out dir> [--fault flip]
 extends SceneTree
 
@@ -65,7 +67,15 @@ void fragment() {
 	RenderingServer.global_shader_parameter_set("cortao_on", 1.0)
 	var cam := Camera3D.new(); root.add_child(cam)
 	cam.position = Vector3(2.2, 1.6, 2.6); cam.look_at(Vector3(0, 0.3, 0)); cam.current = true
-	for i in 20: await process_frame
+	for i in 10: await process_frame
+	# resizes, as the game's fullscreen start and FSR scale changes do: the targets are remade while the materials still sample the
+	# old result (C8 counts the engine errors that leaves: none allowed)
+	if OS.get_environment("CORTAO_NO_RESIZE") == "":
+		for k in 3:
+			root.size = Vector2i(960 + 64 * (k + 1), 540 + 36 * (k + 1))
+			for i in 4: await process_frame
+		root.size = Vector2i(960, 540)
+	for i in 10: await process_frame
 	fx.capture_next = true
 	for i in 3: await process_frame
 	await RenderingServer.frame_post_draw
@@ -126,7 +136,7 @@ void fragment() {
 			var e: Vector3 = nrm.call(i, nh - 1) if side == 0 else nrm.call(nw - 1, i)
 			var inn := Vector3.ZERO
 			for k in range(6, 11): inn += nrm.call(i, nh - 1 - k) if side == 0 else nrm.call(nw - 1 - k, i)
-			if e.length() > 1.2 or inn.length() > 5.5: continue   # sky (no shape normal written: -1, -1, -1; five of them sum to 8.7)
+			if absf(e.length() - 1.0) > 0.05 or absf(inn.length() - 5.0) > 0.25: continue   # sky: the prepass writes no shape normal there (whatever the memory holds)
 			inn = inn.normalized()
 			if (ao.get_pixel(i * aw / nw, ah - 8).r if side == 0 else ao.get_pixel(aw - 8, i * ah / nh).r) < 0.9: continue   # not open floor (the box)
 			edge_dev = maxf(edge_dev, rad_to_deg(acos(clampf(e.normalized().dot(inn), -1.0, 1.0))))

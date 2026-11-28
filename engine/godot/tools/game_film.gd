@@ -4,7 +4,8 @@
 ## (tick, mode, girl, per-phase ms, school sees-player).
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --fixed-fps 15 --script res://tools/game_film.gd -- \
 ##        <pieces_dir> <worldtex_dir> <dress_pieces_dir> <out_dir> [seconds] [w h]
-## Env: AO_HOUR (default 10.5), AO_FILM_EVERY (save every n-th frame, default 1).
+## Env: AO_HOUR (default 10.5), AO_FILM_EVERY (save every n-th frame, default 1), AO_AO=cortao|ssao|gtao|vbao|off (screen AO),
+##      AO_UPSCALE=fsr1|fsr2 (half resolution each way; fsr1 brings Godot's TAA, as the game's half_res default), AO_TAA=1.
 extends SceneTree
 
 const Packet := preload("res://core/m01_input/input_packet.gd")
@@ -47,6 +48,14 @@ func _initialize() -> void:
 
 func _on_ready() -> void:
 	g.cam.yaw = heading; g.cam.pitch = -0.12
+	var ao := OS.get_environment("AO_AO")
+	if ao != "": g.world_root.set_ao(ao)
+	var up := OS.get_environment("AO_UPSCALE")
+	if up != "":
+		root.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR2 if up == "fsr2" else Viewport.SCALING_3D_MODE_FSR
+		root.scaling_3d_scale = 0.5
+		if up == "fsr1": root.use_taa = true
+	if OS.get_environment("AO_TAA") == "1": root.use_taa = true
 	await physics_frame; await physics_frame
 	print("DRESS ", g.seat_dress())
 	g.ticked.connect(_tick)
