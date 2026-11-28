@@ -185,7 +185,9 @@ func _joint(i: int, p: Vector3, r: float) -> void:
 var water_mat_done := false
 func _water_material() -> void:
 	water_mat_done = true
-	if not RenderingServer.global_shader_parameter_get_list().has(&"water_y"):
+	# WorldRoot.declare_globals sets this meta once the water_* globals exist (global_shader_parameter_get_list is an
+	# editor-only call that logged a performance warning every frame on the Mac)
+	if not Engine.has_meta("water_globals"):
 		water_mat_done = false
 		return
 	var sm := ShaderMaterial.new(); sm.shader = load("res://look/body_surface.gdshader")
@@ -196,7 +198,7 @@ func _water_material() -> void:
 		stack.append_array(n.get_children())
 
 func apply(pose: Dictionary, show_head := true) -> void:
-	if not water_mat_done and (Engine.get_process_frames() % 30 == 0 or skin_body != null and skin_body.bound): _water_material()
+	if not water_mat_done and (skin_body == null or skin_body.bound): _water_material()     # (the skin mesh takes it too, once built)
 	var skinned: bool = use_skin and show_head and pose.has("skel")
 	if skinned:
 		if skin_body == null:

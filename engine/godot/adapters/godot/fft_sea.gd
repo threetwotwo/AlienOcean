@@ -52,6 +52,7 @@ var _fa: RID; var _fb: RID; var _foam_ubo: RID; var _set_foam: RID
 var _foam_c := Vector2(INF, INF); var _foam_acc := Vector2.ZERO
 var _last_t := -1.0
 var _hb := [PackedByteArray(), PackedByteArray()]   # RGBA16F texels, row major (written on the render thread)
+var _rb_pending := 0                                # downloads asked for and not yet returned (render thread)
 var _hb_t := -1.0                                   # the wave clock the bytes were drawn at
 var _hb_mutex := Mutex.new()
 var _frame := 0
@@ -239,11 +240,18 @@ func _foam_step(cl: int) -> void:
 	rd.compute_list_dispatch(cl, FOAM_N / 8, FOAM_N / 8, 1)
 
 func _readback(t: float) -> void:
+	## FIX (perf runner thread, 28 Nov 2026): one readback in flight at a time. Asking again while earlier downloads were
+	## still pending let them pile up behind a slow frame (a 1.1 s hitch, or ~10 fps full screen) and Godot 4.7 on Metal then
+	## aborted inside texture_get_data_async ("FATAL: Index p_index = 4610 is out of bounds (count = 27)", twice, perf runner
+	## 28 Nov 04:13Z). The CPU heights are a few frames behind by design, so a skipped request costs nothing.
+	if _rb_pending > 0: return
+	_rb_pending = 2
 	for c in 2:
 		rd.texture_get_data_async(_disp, c, _got.bind(c, t))
 
 func _got(data: PackedByteArray, c: int, t: float) -> void:
 	_hb_mutex.lock()
+	_rb_pending = maxi(_rb_pending - 1, 0)
 	_hb[c] = data
 	if c == 1: _hb_t = t
 	_hb_mutex.unlock()

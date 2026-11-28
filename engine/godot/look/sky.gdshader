@@ -34,7 +34,8 @@ uniform float planetshine = 2e-4;
 uniform float moon_edge = 1.5;
 uniform vec3 dome_sun = vec3(0.0, 1.0, 0.0);   // the sun for the dome's shape: lifted to >= 1 deg (twilight stand-in)
 uniform float sky_norm = 1.0;           // set by the driver: dome scale so its ground light = clock sky_lux
-uniform float sea_nits = 0.0;           // below the horizon: the sea, seen from above
+uniform float sea_nits = 0.0;           // below the horizon: the sea, seen from above (flat grey: before sea_deep_nits)
+uniform vec3 sea_deep_nits = vec3(0.0); // the far sea's own light just above it (open ocean Rrs x Ed, nits; WorldRoot), 0 = flat sea_nits
 uniform float sky_oc_beam = 1.0;        // the share of the clear sky's direct beam that cloud cover lets through (WorldRoot)
 // Under water, the sky Godot's lighting reads (the radiance cubemap: SDFGI's escaping rays) is the water's own light field at
 // water_zref, not the air above: two uniform hemispheres whose irradiance on a normal is exactly w_fill(z_ref, up)
@@ -106,7 +107,17 @@ vec4 moon(vec3 v, vec3 c, float deg, float real_deg, float albedo, float kelvin,
 void sky() {
 	vec3 v = EYEDIR;
 	if (AT_CUBEMAP_PASS && under_k > 0.5) { COLOR = v.y >= 0.0 ? under_down : under_up; }
-	else if (v.y < -0.02) { COLOR = vec3(sea_nits); }
+	else if (v.y < -0.02) {
+		// the far sea, past the camera's far plane (seen from height it is a wide band under the horizon: it read flat grey
+		// over the reef, water surface thread 28 Nov): the sky in its mirror by Fresnel (the waves turn facets toward the eye,
+		// RMS slope ~0.09, so the mirror sees a little higher than the flat sea would) + the deep's own blue through it
+		if (dot(sea_deep_nits, vec3(1.0)) > 0.0) {
+			float mu = clamp(-v.y + 0.09, 0.0, 1.0);
+			float F = 0.02 + 0.98 * pow(1.0 - mu, 5.0);
+			vec3 r = normalize(vec3(v.x, mu, v.z));
+			COLOR = F * sky_overcast_air(dome(r, normalize(dome_sun)) * sky_norm, r) + (1.0 - F) * sea_deep_nits;
+		} else { COLOR = vec3(sea_nits); }
+	}
 	else {
 		vec3 s = normalize(sun_dir);
 		vec3 air = sky_overcast_air(dome(v, normalize(dome_sun)) * sky_norm, v);

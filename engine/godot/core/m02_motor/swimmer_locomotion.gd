@@ -369,7 +369,9 @@ func _update_swim(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, i
 	var swell := 0.0
 	if c.has_surface:
 		swell = sin(surface_clock * 1.45 + pos.x * 0.18) * (0.014 if enclosed else 0.032) + cos(surface_clock * 0.92 + pos.z * 0.14) * (0.010 if enclosed else 0.022)
-	var tread_y := surf_y - (0.10 if enclosed else 0.14) + swell
+	# Thalassa treads with the eye 14 cm under the waterline: the head never breaks the surface (Gary's Mac run, 28 Nov:
+	# "girl can't breach the water surface"). The game sets tread_eye so she floats with her head out; the goldens keep -0.14.
+	var tread_y := surf_y - (0.10 if enclosed else -float(c.get("tread_eye", -0.14))) + swell
 	var wants_dive := in_up < -0.1 or (in_fwd > 0.1 and pitch < -0.26)
 	var in_band: bool = c.has_surface and pos.y >= surf_y - 0.56 and pos.y <= surf_y + (0.45 if enclosed else 0.28)
 	var treading := in_band and not wants_dive and (enclosed or not jump_held)

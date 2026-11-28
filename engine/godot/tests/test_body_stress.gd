@@ -232,6 +232,9 @@ func _define_cases() -> void:
 		func(tt): var k = _pk(Vector2(0, 0.3), 0.0, 1.2); k.ascend = true; k.thrust = 1.0 if tt > 5.0 else 0.0; return k)
 	_case("B43 sprint-swim into a wall", "cave", {"s": 1.0, "start": Vector3(6, -10, 2), "mode": Motor.Mode.SWIM}, 8.0,
 		func(_t): var k = _pk(Vector2(0, 1)); k.thrust = 1.0; return k, {"tight": true})
+	# Mac playtest: a foot poked into the sand while she hovered and drifted slowly just above the floor (pool floor y=-20)
+	_case("B44 hover low over the sand", "pool", {"start": Vector3(0, -17.5, 0), "mode": Motor.Mode.SWIM}, 12.0,
+		func(tt): var k = _pk(Vector2(0, 0.35) if fmod(tt, 4.0) < 2.0 else Vector2.ZERO, tt * 0.3); k.descend = true; k.descend_amount = 0.4 if fmod(tt, 3.0) < 1.5 else 1.0; return k)
 	for m in monkey_runs:
 		var seed := 2000 + m
 		_case("BM monkey seed %d (%ds)" % [seed, int(monkey_secs)], "shore", {"start": Vector3(0, 1.05, 4), "waves": 0.5 if m % 2 == 1 else 0.0},
@@ -392,6 +395,7 @@ func _sole_points(fin: Transform3D) -> Array:
 ## What J7 tests: the four corners and the toe and heel ends of the mannequin's sole plate (adapters/godot/mannequin.gd:
 ## box centre (0, 0.058, -0.046), size 0.056 x 0.168), not just the centreline points the rig's toe lift uses (the review's
 ## point: a fix must not be graded only on its own samples). z -0.046 is 6 mm above the plate's underside.
+const SWIM_SOLE_SINK := 0.010   # quality ceiling: sole sink <= 1 cm
 const SOLE_X := 0.028
 const SOLE_HEEL := -0.026
 const SOLE_TOE := 0.142
@@ -573,6 +577,12 @@ func _check(p: Dictionary, dt: float) -> void:
 			if h.is_empty(): continue
 			var gap: float = sp_.y - h.position.y
 			lowest_gap = minf(lowest_gap, gap)
+			if not walking and gap < -SWIM_SOLE_SINK and h.normal.y > 0.5 and not wq.point_solid(sp_ + Vector3(0, 0.6, 0)):   # a floor, not a ceiling the ray started in
+				# swimming (Mac playtest): settling onto the bottom put the feet into the sand. The point itself must be in
+				# rock (a sole just under a thin slab's underside measures the slab's top as its floor)
+				if wq.point_solid(sp_):
+					_w("sole_under", -gap)
+					_fail("J7", "swimming sole%s %.0f mm into the floor" % [side, -gap * 1000.0])
 			if walking and gap < 0.0:
 				# a sole point counts as sunk only if the point SOLE_UNDER above it is still inside rock
 				var pq := PhysicsPointQueryParameters3D.new()

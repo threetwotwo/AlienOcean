@@ -110,7 +110,7 @@ other 4 have record fin roots that disagree with their photo.
 Cage (no Blender): P2 quad share and corners, P3 manifold, P4 skin on the form, P5 skin UV stretch, folds and overlap (no texel
 under two skin faces), IC1 parts
 from the record, EY1 eye size, OP1 openings are topology (genus 2, the lips reach both gill slits through interior faces),
-OP2 interior inside the body, OP3 no fold outside designed creases, GP0 no crossing faces at rest, GP1 gape to the record's real gape
+OP2 interior inside the body, OP3 no fold outside designed creases, FM1 the body loft is fair (no crease round a section: its normal turns at most 8 deg over 0.005 % SL of arc; no ripple along the flank: at most 1.5 deg rms about a 6 % SL running mean; traced half-widths and section rows are faired within named tolerances first, form.py `fair`), GP0 no crossing faces at rest, GP1 gape to the record's real gape
 (`jaw.linkage.gape`, DEFAULT 30; the two lip tips must part by at least 95 % of the gape angle, `GP1_opening_share`: a jaw weight smeared over the snout opens nothing and crosses nothing) and GF1 gill flare 0-20 deg (cover and branchiostegal membrane together, about the hinge-to-apex line when there is a gill V) add no crossings or flipped faces and leave the eye rims in place (`pose.py`), SR1 stylized range:
 gape, flare, body C-bend, S-wave, arch and all of them at once are each swept until the first new crossing, fold
 (neighbours turning past 90 deg) or crush (a skin triangle under 10 % of its rest area). The target is what the species
@@ -124,7 +124,7 @@ joint, and the jaw fades out by angle about the joint. The cover weights are the
 neighbour averaging over the skin, with the body lips, eyes, mouth and the throat midline held, and never more than the jaw leaves of a vertex (jaw + cover <= 1, so the export rig skins exactly the stress pose): a slit opens as a lens (the flap
 takes the weight of the cover skin it ends, the slit's two ends go with the skin round them, and every passage vertex
 follows its own slit vertex, fading to the fixed hole in the cavity wall). Export: P1 triangle budget and LODs, P6 normal map
-carries the form, faces out of the skin everywhere and is the same on both sides (twin texels of the two islands), P7 bones, P8 Khronos glTF validator, EX1/EX2 the exported jaw and gill covers skin into exactly the stress
+carries the form (tilt in every third that has scale relief), does not carry the cage's shape (1st percentile of normal z >= 0.8), has at most 2 specks, faces out of the skin everywhere and is the same on both sides (twin texels of the two islands), P7 bones, P8 Khronos glTF validator, EX1/EX2 the exported jaw and gill covers skin into exactly the stress
 test's gape and flare (within 0.01 % SL), EX3 interior slot on every LOD, EX4 clips and a closed swim loop, EX5 collision
 covers the body, EX6 swim settings in the glTF. Each check has a planted fault in `checks.planted`.
 

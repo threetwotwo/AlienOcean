@@ -69,6 +69,17 @@ V = Z['V']
 tmp_m = bpy.data.materials.new('bake_tmp'); tmp_m.use_nodes = True
 body = mesh_obj('body', V, C['faces'], C['uv'], tmp_m)
 INT_IDX, INT_SKIP = interior.slot(body, C)     # interior faces off the skin's bake target before anything is baked
+# the skin's shading stops where the skin does: the edges between a skin face and an interior face (the lip rolls, the gill
+# slits' lips) are sharp, so a lip vertex takes its normal from the skin faces only. Averaged with the lining, which turns
+# inward there, the lip normals leaned up to 90 deg into the opening and the bake wrote the opposite lean over every skin face
+# that touches a lip: one large face at the corner of the gill slit carried most of the map's steepest texels and all but one
+# of its specks (export r5).
+_ek = {}
+for _p in body.data.polygons:
+    for _k in _p.edge_keys: _ek.setdefault(_k, set()).add(C['ftag'][_p.index] in interior.INNER)
+SHARP = sum(1 for _e in body.data.edges if len(_ek.get(tuple(sorted(_e.vertices)), ())) == 2)
+if os.environ.get('CREATURE_PLANT_BAKE_FAULT', '') != 'lips_shaded_with_lining':   # tests only: the lean back, to show P6 catches it
+    for _e in body.data.edges: _e.use_edge_sharp = len(_ek.get(tuple(sorted(_e.vertices)), ())) == 2
 # orbit linings (the tuck ring of each eye patch) turn into the socket and lie inside the form by design, up to 1.6 % SL deep,
 # further than the bake cage reaches out: their rays start inside the solid and hit the form's far side from behind. They do not
 # sample the form: they wait on the throwaway slot too, and take a flat tangent normal (the cage's own shading) and the rim's AO.
@@ -338,7 +349,8 @@ lods = {}; lod_obs = {}; CREASES = set(v for r in C['rolls'] for v in r)
 # LOD chain = the Unreal-era intake rule (tools/optimise/creature_meter.py K2, proven on the v107 exports): level 0 is needed only
 # inside reach0, the distance where its own triangle count gives 2-pixel edges (1920 px, 90 deg view); each later level has 4 x fewer
 # triangles and starts at twice the distance, down to about 300 triangles. Targets are triangle counts, met by scaling the ratio
-# down until the level is inside its count (5 % margin); the switch distances ride in the extras for the engine's LOD ranges.
+# down until the level is inside its count; the switch distances ride in the extras for the engine's LOD ranges. The simplifier's error
+# bound doubles per level with the distance, so the error stays the same size on screen at each level's first distance.
 T0 = tris_of(LOD0)
 def area_of(objs):
     a = 0.0
@@ -356,7 +368,7 @@ for lod, ratio, budget in [(c['lod'], 0.4 if c['lod'] == 1 else 0.14, c['tris'])
     for attempt in range(6):
         obs = []
         for o in [body] + list(fin_obs.values()):
-            lo, nt = LODS.simplify(o, ratio if o is body else max(ratio * 1.6, 0.3 * min(1.0, ratio / 0.14)), f'{o.name}_LOD{lod}', lock=CREASES if (o is body and lod == 1) else ()); lo.hide_render = True; obs.append(lo)
+            lo, nt = LODS.simplify(o, ratio if o is body else max(ratio * 1.6, 0.3 * min(1.0, ratio / 0.14)), f'{o.name}_LOD{lod}', error=0.02 * 2 ** (lod - 1), lock=CREASES if (o is body and lod == 1) else ()); lo.hide_render = True; obs.append(lo)
         got = tris_of(obs + (eye_obs if lod == 1 else []))
         if got <= budget or attempt == 5: break
         for lo in obs: bpy.data.objects.remove(lo, do_unlink=True)

@@ -5,7 +5,8 @@ preopercle, maxilla; from below the lower-jaw rami and the branchiostegal membra
 cage snaps to. Input: the adapted record (record.adapt). Output: a Form object (and, optionally, a dense mesh for the bake).
 """
 import numpy as np
-from scipy.interpolate import PchipInterpolator
+from scipy.interpolate import PchipInterpolator, CubicSpline
+from scipy.optimize import lsq_linear
 
 
 def pch(tab):
@@ -37,7 +38,42 @@ ROOF_N = 6.0                 # DEFAULT: the boxiest section the tissue may make 
                              # rounder (gapfill orbit_r1 skeleton.skull.roof_exp 1.25-2.4), a wide forehead is Gary's ask (28 Nov)
 TISSUE_K = 0.04              # DEFAULT: the tissue meets the loft over 4 % of the local half-width, no crease
 LOFT_ITERS = 12      # DEFAULT: false-position steps of loft_point through the tissue; against 40 bisections on the 28 traced fish the worst difference is 4e-7 SL
+HW_FAIR_TOL = 0.002   # DEFAULT: a half-width knot is faired by at most this (SL). A top view traced from a photo carries the trace's
+                      # jitter (about 0.3 of 170 record units, 0.18 % SL, at knots 2 % SL apart): through the knots as they stand the
+                      # flank's normal swings a few degrees from knot to knot, and the bake writes that as vertical bands (export r5)
+HW_FAIR_LEN = 0.12    # DEFAULT: width changes shorter than this along the body (SL) are the trace's, longer ones the fish's: six
+                      # knots of a 2 % SL trace. Jitter from knot to knot (wavelength 4 % SL) is cut 80 times. Trevally flank
+                      # ripple (checks FM1): 2.9 deg as traced, 0.96 at 0.08, 0.54 at 0.12, 0.46 at 0.16
+SECT_FAIR_LEN = 1.2   # DEFAULT: the same round a section, in radians of its polar angle: about eight rows of a 21-row trace (a
+                      # section is one closed oval: what is shorter than a third of its half-boundary is the reading)
+SECT_FAIR_TOL = 0.02  # DEFAULT: a traced cross-section row is faired by at most this share of the section's half-size (rows are read
+                      # off a scan every 0.1 of the height to about 2 % of the width: plateaus and steps between rows are the reading)
+COL_HEAD, COL_BLEND = 0.04, 0.20   # DEFAULTS: the columns round the body keep the head's even angles to this far behind the gill
+                      # cover's rear edge (SL), and reach the trunk's spacing over this length (see Form._asp)
 PLATE_CHAMFER = 0.004   # DEFAULT: the edge of a plate drawn from below rises to full thickness over two cells of the dense form (0.2 % SL each)
+
+
+def fair(x, y, tol, length, hold=()):
+    """a traced table without the trace's jitter: the knot values of the smoothing spline that passes wavelengths longer than
+    `length` and takes out shorter ones (least sum of (y - record)^2 dx + (length / 2 pi)^4 y''^2 dx), each knot moved by at
+    most `tol` (knots listed in `hold` stay). Knots further apart than `length` are left as they are, so a table that is
+    already fair moves little (the 28 hand-made half-width tables: 0.06 % SL at the median, at the close knots by the snout
+    and tail root); knots closer than that lose what alternates from knot to knot. Returns the faired values."""
+    x, y = np.asarray(x, float), np.asarray(y, float); n = len(x)
+    if n < 4 or tol <= 0: return y.copy()
+    h = np.diff(x); A = np.zeros((n - 2, n)); lam = (length / (2 * np.pi)) ** 4
+    for i in range(n - 2):                       # second divided difference at knot i + 1, weighted by its share of the length
+        g = np.sqrt(lam * (h[i] + h[i + 1]) / 2) * 2 / (h[i] + h[i + 1])
+        A[i, i:i + 3] = g * np.array([1 / h[i], -1 / h[i] - 1 / h[i + 1], 1 / h[i + 1]])
+    w = np.sqrt(np.r_[h[0], h[:-1] + h[1:], h[-1]] / 2)
+    t = np.full(n, float(tol)); t[list(hold)] = 1e-9
+    r = lsq_linear(np.vstack([A, np.diag(w)]), np.r_[np.zeros(n - 2), w * y], bounds=(y - t, y + t), tol=1e-13)
+    return np.clip(r.x, y - t, y + t)
+
+
+def pch_fair(tab, tol, length):
+    """pch through the faired knots (ends held: where the table closes it stays closed)."""
+    a = np.array(tab, float); return pch(np.c_[a[:, 0], fair(a[:, 0], a[:, 1], tol, length, hold=(0, -1))])
 
 
 def smin(a, b, k):
@@ -81,8 +117,10 @@ class Form:
 
     def __init__(self, rec):
         self.rec = rec; O = self.O = rec['outline']
-        self._TOP0, self._BOT0, self.HW, self.NUP, self.NLO = (pch(O[k]) for k in ('top', 'bot', 'hw', 'nUp', 'nLo'))
-        _hw = self.HW; self.HW = lambda x: np.maximum(_hw(x), HW_MIN)
+        self._TOP0, self._BOT0, self.NUP, self.NLO = (pch(O[k]) for k in ('top', 'bot', 'nUp', 'nLo'))
+        _hw0 = np.array(O['hw'], float); _hw = pch_fair(O['hw'], HW_FAIR_TOL, HW_FAIR_LEN)
+        self.HW_FAIRED = float(np.max(np.abs(_hw(_hw0[:, 0]) - _hw0[:, 1])))       # how far the fairing moved a knot (SL)
+        self.HW = lambda x: np.maximum(_hw(x), HW_MIN)
         self.XEND = O['top'][-1][0]
         self.SECT = self._sections(O.get('sections'))
         self.EY = EY = rec['eye']; self.CV = CV = rec['cover']; self.MO = MO = rec['mouth']
@@ -196,27 +234,41 @@ class Form:
     # ---- the cross-section. Without traced sections it is two half superellipses (record nUp above, nLo below the
     # section centre), widest at mid-height. A traced section (record outline.sections) is the photo's own shape: half-width
     # w (0..1 of the record half-width) at normalised height s (-1 ventral edge, +1 dorsal edge), so a keel, a flat flank or
-    # a widest point above the middle come from the reference. Between stations the shape blends linearly in x; before the
-    # first and after the last it holds. Width stays the record hw; height stays top/bot (front and top silhouette: SIL2).
-    SECT_S, SECT_PHI = 129, 361          # DEFAULTS: samples down a traced section and round its polar boundary
+    # a widest point above the middle come from the reference. Width stays the record hw; height stays top/bot (front and
+    # top silhouette: SIL2).
+    # The boundary is one smooth closed curve: the rows become knots of the polar radius rho(phi) (phi 0 = dorsal edge,
+    # pi = ventral edge), are faired by at most SECT_FAIR_TOL, and a C2 spline runs through them with zero slope at both
+    # edges, so the two sides meet on the midline without a crease. Straight lines from row to row made a crease at every
+    # row (up to 19 deg on the trevally) and a wedge on the midline; the bake wrote them as stripes along the body and dark
+    # rims on the back and belly (export r5). The table is looked up with its slope (cubic Hermite, C1). Between stations
+    # the shape blends with a smooth step in x (C1: no kink at a station); before the first and after the last it holds.
+    SECT_S, SECT_PHI = 513, 361          # DEFAULTS: samples down a traced section (w table) and round its polar boundary
 
     def _sections(self, S):
         if not S: return None
         S = sorted(S, key=lambda q: q['x']); ss = np.linspace(-1, 1, self.SECT_S); phi = np.linspace(0, np.pi, self.SECT_PHI)
-        X, W, RHO = [], [], []
+        pd = np.linspace(0, np.pi, 4001); X, W, RHO, DRHO, moved = [], [], [], [], 0.0
         for q in S:
-            w = np.array(q['w'], float); w = w[np.argsort(w[:, 0])]
-            ws = np.clip(np.interp(ss, w[:, 0], w[:, 1]), 0, None); ws = ws / max(ws.max(), 1e-9)
-            ws[0] = ws[-1] = 0.0                                             # the section closes on the midline at both edges
-            ang = np.arctan2(ws, ss); rad = np.hypot(ws, ss)                 # polar boundary in normalised (u = s, v = w)
-            o = np.argsort(ang); X.append(q['x']); W.append(ws); RHO.append(np.interp(phi, ang[o], rad[o]))
-        return dict(x=np.array(X), s=ss, w=np.array(W), phi=phi, rho=np.array(RHO))
+            w = np.array(q['w'], float); w = w[np.argsort(w[:, 0])]; s_ = np.clip(w[:, 0], -1, 1); w_ = np.clip(w[:, 1], 0, None)
+            w_ = w_ / max(w_.max(), 1e-9); on = (w_ > 1e-6) & (np.abs(s_) < 1)   # the rows at s = -1 and +1 are the edges themselves: the poles below
+            ang, rad = np.arctan2(w_[on], s_[on]), np.hypot(w_[on], s_[on]); o = np.argsort(ang); ang, rad = ang[o], rad[o]
+            keep = np.r_[True, np.diff(ang) > 1e-6] & (ang > 1e-6) & (ang < np.pi - 1e-6); ang, rad = ang[keep], rad[keep]
+            ph = np.r_[0, ang, np.pi]; r0 = np.r_[1, rad, 1]                 # the section closes on the midline at both edges
+            r1 = fair(ph, r0, SECT_FAIR_TOL, SECT_FAIR_LEN, hold=(0, -1)); moved = max(moved, float(np.abs(r1 - r0).max()))
+            r = CubicSpline(ph, r1, bc_type=((1, 0.0), (1, 0.0)))(pd)
+            u, v = r * np.cos(pd), r * np.sin(pd); v = v / v.max()           # widest point = the record half-width
+            a2 = np.arctan2(v, u); a2[0], a2[-1] = 0.0, np.pi; a2 = np.maximum.accumulate(a2); k2 = np.r_[True, np.diff(a2) > 1e-9]
+            c2 = CubicSpline(a2[k2], np.hypot(u, v)[k2], bc_type=((1, 0.0), (1, 0.0)))
+            o = np.argsort(u); X.append(q['x']); W.append(np.interp(ss, u[o], v[o])); RHO.append(c2(phi)); DRHO.append(c2(phi, 1))
+            W[-1][0] = W[-1][-1] = 0.0
+        self.SECT_FAIRED = moved
+        return dict(x=np.array(X), s=ss, w=np.array(W), phi=phi, rho=np.array(RHO), drho=np.array(DRHO))
 
-    def _blend(self, x, T):
-        S = self.SECT; x = np.asarray(x, float); k = np.clip(np.searchsorted(S['x'], x) - 1, 0, len(S['x']) - 1)
-        k1 = np.minimum(k + 1, len(S['x']) - 1); span = np.maximum(S['x'][k1] - S['x'][k], 1e-9)
-        t = np.clip((x - S['x'][k]) / span, 0, 1)[..., None]
-        return (1 - t) * T[k] + t * T[k1]
+    def _station(self, x):
+        """the two stations round x and the smooth-step weight of the second (0 at and before the first, 1 at the second)."""
+        X = self.SECT['x']; k = np.clip(np.searchsorted(X, x) - 1, 0, len(X) - 1); k1 = np.minimum(k + 1, len(X) - 1)
+        t = np.clip((x - X[k]) / np.maximum(X[k1] - X[k], 1e-9), 0, 1)
+        return k, k1, t * t * (3 - 2 * t)
 
     def rnorm(self, x, u, v, n=None):
         """how far (u, v) = (dy / a, dz / b) lies out from the section centre, in units of the boundary (1 = on the skin)."""
@@ -231,9 +283,12 @@ class Form:
         if self.SECT is None:
             n = np.where(u > 0, self.NUP(x), self.NLO(x)) if n is None else n
             return (np.abs(u) ** n + np.abs(v) ** n) ** (1 / n)
-        S = self.SECT; R = self._blend(np.broadcast_to(x, np.broadcast(x, u).shape), S['rho'])
-        ph = np.arctan2(np.abs(v), u) / np.pi * (len(S['phi']) - 1); i = np.clip(ph.astype(int), 0, len(S['phi']) - 2); f = ph - i
-        rb = np.take_along_axis(R, i[..., None], -1)[..., 0] * (1 - f) + np.take_along_axis(R, (i + 1)[..., None], -1)[..., 0] * f
+        S = self.SECT; x, u, v = np.broadcast_arrays(np.asarray(x, float), u, v); N = len(S['phi']); h = np.pi / (N - 1)
+        ph = np.arctan2(np.abs(v), u) / h; i = np.clip(ph.astype(int), 0, N - 2); f = ph - i
+        h00, h10, h01, h11 = (1 + 2 * f) * (1 - f) ** 2, f * (1 - f) ** 2, f * f * (3 - 2 * f), f * f * (f - 1)
+        at = lambda k: h00 * S['rho'][k, i] + h10 * h * S['drho'][k, i] + h01 * S['rho'][k, i + 1] + h11 * h * S['drho'][k, i + 1]
+        if len(S['x']) == 1: rb = at(np.zeros(i.shape, int))
+        else: k, k1, t = self._station(x); rb = (1 - t) * at(k) + t * at(k1)
         return np.hypot(u, v) / np.maximum(rb, 1e-9)
 
     def _wnorm0(self, x, s):
@@ -241,10 +296,10 @@ class Form:
         if self.SECT is None:
             nn = np.where(s > 0, self.NUP(x), self.NLO(x))
             return np.maximum(1 - np.minimum(np.abs(s), 1) ** nn, 1e-6) ** (1 / nn)
-        S = self.SECT; Wx = self._blend(np.broadcast_to(x, np.broadcast(x, s).shape), S['w'])
+        S = self.SECT; x, s = np.broadcast_arrays(np.asarray(x, float), s)
         q = (np.clip(s, -1, 1) + 1) / 2 * (len(S['s']) - 1); i = np.clip(q.astype(int), 0, len(S['s']) - 2); f = q - i
-        w = np.take_along_axis(Wx, i[..., None], -1)[..., 0] * (1 - f) + np.take_along_axis(Wx, (i + 1)[..., None], -1)[..., 0] * f
-        return np.maximum(w, 1e-6)
+        at = lambda k: S['w'][k, i] * (1 - f) + S['w'][k, i + 1] * f
+        k, k1, t = self._station(x); return np.maximum((1 - t) * at(k) + t * at(k1), 1e-6)
 
     def sec(self, x):
         t, b, w = self.TOP(x), self.BOT(x), self.HW(x)
@@ -252,7 +307,7 @@ class Form:
 
     def loft_point(self, x, th):
         """exact point of the record loft at body coords (x, theta)."""
-        c, a, b = self.sec(x); dy, dz = np.cos(th), np.sin(th)
+        c, a, b = self.sec(x); dy, dz = np.cos(th), np.sin(th) / self._asp(x, a, b)
         rho = 1 / self._rnorm0(x, dy / a, dz / b)
         if self._orb is not None:
             # the tissue round the eye widens the section by a factor that changes with height, so the skin along a ray
@@ -287,7 +342,17 @@ class Form:
         return t
 
     def theta_of(self, x, y, z):
-        c, a, b = self.sec(x); return np.arctan2(z, y - c) % (2 * np.pi)
+        c, a, b = self.sec(x); return np.arctan2(z * self._asp(x, a, b), y - c) % (2 * np.pi)
+
+    def _asp(self, x, a, b):
+        """what theta measures. In the head it is the plain angle round the section centre (the eye, mouth, gill and cavity
+        are laid out in it). In the trunk it is the angle in the section scaled to a circle (z x height / width), so even
+        steps of theta are even steps round the section's own shape: on a deep narrow body plain angles put most columns
+        on the flat of the flank and left one cell from the back's midline to 3 % SL down the side; the ridge inside that
+        cell is rounder than the cell can show, and the bake wrote the difference as a dark rim along the back and belly
+        (export r5: normal_z_p1 0.60). The factor goes from 1 to height / width with a smooth step behind the gill cover.
+        A point and its theta still lie on one ray from the section centre, so theta_of and loft_point stay inverses."""
+        t = np.clip((np.asarray(x, float) - self.ring_x - COL_HEAD) / COL_BLEND, 0, 1); return (a / b) ** (t * t * (3 - 2 * t))
 
     def z_on(self, x, y):
         """flank z of the loft at side-view point (x, y)."""
@@ -298,7 +363,7 @@ class Form:
         c = float(self.sec(np.clip(p[0], 0, self.XEND))[0]); v = np.array([0.0, p[1] - c, p[2]]); n = np.linalg.norm(v)
         return v / n if n > 1e-9 else np.array([0.0, 1.0, 0.0])
 
-    SD_CHUNK = 100_000   # points per pass: a traced section blends (points x SECT_PHI) tables, 2 M texels x 361 = 5.5 GB per array
+    SD_CHUNK = 100_000   # points per pass, so memory stays bounded at any map resolution
 
     def sd_body(self, P, *a, **k):
         """pointwise body distance, taken in chunks so memory stays bounded at any map resolution (same values as one pass)."""
@@ -474,7 +539,10 @@ class Form:
                                           f"(bare loft skin ring {self.ORBIT['bare_skin_up_deg']} up, {self.ORBIT['bare_skin_fwd_deg']} forward)"),
             dict(region='periorbital tissue', source=f"eye plane square to the aim, proud by record eye.bulge, brow held to record eye.over, furrow to record eye.groove; skull roof at that width from the snout tip to record cover rear edge; "
                                                      f"up to {self.ORBIT['tissue_max_R']} eye radii at the rim; skin ring now {self.ORBIT['skin_up_deg']} deg up"),
-            dict(region='body mass', source='record outline top/bot/hw/nUp/nLo loft; lifted over the orbit, and carried round the mouth line '
+            dict(region='body mass', source='record outline top/bot/hw/nUp/nLo loft; half-width knots faired over '
+                                            f'{HW_FAIR_LEN * 100:g} % SL, by at most {HW_FAIR_TOL * 100:g} % SL (DEFAULTS; moved {self.HW_FAIRED * 100:.3f} % SL)'
+                                            + (f', traced section rows by at most {SECT_FAIR_TOL * 100:g} % (DEFAULT; moved {self.SECT_FAIRED * 100:.2f} %)' if self.SECT is not None else '')
+                                            + '; lifted over the orbit, and carried round the mouth line '
                                             f'(each jaw at least {JAW_MIN * 100:g} % SL thick at record mouth.seam, DEFAULT; moved the outline {self.JAW_LIFT * 100:.2f} % SL)')]
 
     def dense_mesh(self, hres=0.002):
