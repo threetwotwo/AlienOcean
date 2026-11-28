@@ -342,7 +342,7 @@ func _bake_sand(rect: Rect2) -> void:
 	await b.bake(self, rect)
 	sand_bake = b
 	if _ground is ShaderMaterial: b.apply(_ground)
-	print("SAND BAKE %dx%d texels over %.0fx%.0f m, %.1f MB, %.0f ms" % [b.px.x, b.px.y, b.box.z, b.box.w, b.bytes() / 1048576.0, b.ms])
+	print("SAND BAKE %dx%d texels over %.0fx%.0f m, %.1f MB, %.0f ms%s" % [b.px.x, b.px.y, b.box.z, b.box.w, b.bytes() / 1048576.0, b.ms, " (from the disk cache)" if b.cached else ""])
 
 func set_sand_bake(on: bool) -> void:
 	if sand_bake and _ground is ShaderMaterial: _ground.set_shader_parameter("sand_on", 1.0 if on else 0.0)
