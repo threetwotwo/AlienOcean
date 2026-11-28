@@ -352,8 +352,9 @@ def test_eye_aims_down_its_own_axis_and_the_head_has_volume_round_it(tmp_path):
     up_of = lambda P: (lambda n: float(np.degrees(np.arcsin(abs(n[1])))))(np.linalg.svd(P - P.mean(0))[2][2])
     assert up_of(bare) > O['aim_up_deg'] + 5                               # the fault: the bare rim plane looks further up than the eye
     assert AIM_UP[0] <= O['aim_up_deg'] <= AIM_UP[1] and AIM_FWD[0] <= O['aim_fwd_deg'] <= AIM_FWD[1]
-    n = F.eye_axis(1); off = (rim - rim.mean(0)) @ n
-    assert np.abs(off).max() < rec['eye']['groove'] * F.er                 # the rim lies in the plane square to the aim, to within the furrow
+    from creature_maker.checks import EA2_SEAT_MAX
+    n = F.eye_axis(1); rn = np.linalg.svd(rim - rim.mean(0))[2][2]
+    assert np.degrees(np.arccos(min(abs(float(rn @ n)), 1.0))) < EA2_SEAT_MAX      # the rim's plane is square to the aim: the eye sits true
     assert (rim[:, 2] >= bare[:, 2] - rec['eye']['groove'] * F.er - 1e-9).all()      # tissue is added; the furrow is the only way in
     assert (rim[:, 2] <= F.HW(rim[:, 0]) + rec['eye']['bulge'] * F.er + 1e-9).all()  # and stays inside the top view + the bulge
     assert np.allclose(F.eye_axis(-1), n * [1, 1, -1])
