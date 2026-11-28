@@ -44,6 +44,7 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
                                            # 4 m sand at noon). The key frame (Blender, 28 Nov passes) has 7 %: 0.6 here. Feeds the fill, the GI's
                                            # water light field and the haze alike. Gary picked 0.8, between the two (card, 28 Nov 02:02Z).
 @export var under_white := Vector3.ZERO      # look check: the under-water camera balance (zero = the place's UNDER_WHITE)
+@export var water_type := 0.0              # 0 = the lagoon's water, 1 = the open ocean's (WaterOptics.optics); between = a blend (shelf)
 @export var gi_k := 1.0                    # art lever: GI strength (SDFGI energy). 1 = physical (the water's fill + the sand's real bounce)
 @export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
 @export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
@@ -245,13 +246,14 @@ func apply(cam_y: float) -> Dictionary:
 		var dg: Vector3 = depth_gain(water_y - cam_y, depth_colour_share) if depth_colour else Vector3.ONE
 		var uw: Vector3 = under_white if under_white != Vector3.ZERO else UNDER_WHITE.get(place, Vector3.ONE)
 		agx_fx.depth_gain = dg * Vector3.ONE.lerp(uw, kw)
-	var a := WaterOptics.absorb(cdom); var b := WaterOptics.scatter(scat_k)
+	var op := WaterOptics.optics(cdom, scat_k, water_type)
+	var a: Vector3 = op.a; var b: Vector3 = op.b; var bbv: Vector3 = op.bb
 	# the water's light field at z_ref (sky from above, the sand's bounce from below): the lagoon's GI content is under water
 	# whatever the eye, so the GI's sky (look/sky.gdshader under_*, cubemap passes only) is this field above water too
 	var tr := WaterOptics.refract_sun(up_air)
-	var kd: Vector3 = _art_k((a + WaterOptics.BB * b) / tr.y)
+	var kd: Vector3 = _art_k((a + bbv) / tr.y)
 	var att := Color(exp(-kd.x * z_ref), exp(-kd.y * z_ref), exp(-kd.z * z_ref))
-	var ku: Vector3 = _art_k((a + WaterOptics.BB * b) / 0.75)
+	var ku: Vector3 = _art_k((a + bbv) / 0.75)
 	var ek: Vector3 = Vector3(exp(-ku.x * z_ref), exp(-ku.y * z_ref), exp(-ku.z * z_ref)) * st.skylux * WaterOptics.FRESNEL_SKY * sky_fill_k
 	# + the sand's bounce from below (Lighting's sand bounce: the lower hemisphere lit by the sand), half the sphere each
 	var H := water_y - floor_y
@@ -312,7 +314,7 @@ static func declare_globals() -> void:
 	var defs := {"water_y": [F, LagoonWaterField.SURFACE_Y], "water_floor_y": [F, 0.0],
 		"water_a": [V, Vector3.ZERO], "water_b": [V, Vector3.ZERO], "water_kd": [V, Vector3.ZERO], "water_ku": [V, Vector3.ZERO],
 		"water_sun_w": [V, Vector3.UP], "water_es0": [F, 0.0], "water_ek0": [F, 0.0], "water_exposure": [F, 1.0],
-		"water_glow_k": [F, 1.0], "water_zref": [F, 2.0], "water_sky_nits": [F, 0.0],
+		"water_glow_k": [F, 1.0], "water_zref": [F, 2.0], "water_sky_nits": [F, 0.0], "water_rrs": [V, Vector3.ZERO],
 		"water_sand": [RenderingServer.GLOBAL_VAR_TYPE_COLOR, Color.WHITE],
 		# the light net (look/caustics.gdshaderinc): its map, and x 1 = read the map / 0 = per pixel, y the net's time (-1 = TIME)
 		"water_caus_map": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()],
@@ -325,15 +327,17 @@ static func declare_globals() -> void:
 	Engine.set_meta("water_globals", true)
 
 func _push_water(water_y: float, sun_up_air: Vector3, beam_h_lux: float, sky_lux: float) -> void:
-	var a := WaterOptics.absorb(cdom); var b := WaterOptics.scatter(scat_k)
+	var op := WaterOptics.optics(cdom, scat_k, water_type)
+	var a: Vector3 = op.a; var b: Vector3 = op.b; var bbv: Vector3 = op.bb
 	var tr := WaterOptics.refract_sun(sun_up_air)
 	var rs := RenderingServer
 	rs.global_shader_parameter_set("water_y", water_y)
 	rs.global_shader_parameter_set("water_floor_y", floor_y)
 	rs.global_shader_parameter_set("water_a", a)
 	rs.global_shader_parameter_set("water_b", b)
-	rs.global_shader_parameter_set("water_kd", _art_k((a + WaterOptics.BB * b) / tr.y))
-	rs.global_shader_parameter_set("water_ku", _art_k((a + WaterOptics.BB * b) / 0.75))
+	rs.global_shader_parameter_set("water_kd", _art_k((a + bbv) / tr.y))
+	rs.global_shader_parameter_set("water_ku", _art_k((a + bbv) / 0.75))
+	rs.global_shader_parameter_set("water_rrs", op.rrs)   # the deep water's own colour (look/sea_top: Rrs x Ed where the floor fades)
 	rs.global_shader_parameter_set("water_sun_w", tr)
 	rs.global_shader_parameter_set("water_es0", beam_h_lux * WaterOptics.FRESNEL_SUN)   # horizontal lux of the sun just under
 	rs.global_shader_parameter_set("water_ek0", sky_lux * WaterOptics.FRESNEL_SKY * sky_fill_k)      # horizontal lux of the sky just under

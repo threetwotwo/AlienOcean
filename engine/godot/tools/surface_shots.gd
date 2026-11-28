@@ -42,6 +42,7 @@ func _setup():
 		var pre := float(OS.get_environment("AO_PREROLL")) if OS.get_environment("AO_PREROLL") != "" else 20.0
 		sea.hold = false; sea.preroll(pre); sea.hold = true; sea.step_now()   # the foam's history, then held
 		wr.floor_y = -4000.0                          # open water: no floor under the mirror
+		wr.water_type = float(OS.get_environment("AO_WATER_TYPE")) if OS.get_environment("AO_WATER_TYPE") != "" else 1.0   # the open ocean's water
 		var hs: float = sea.moments.hs
 		var e := y + 2.0 + 1.0 * hs                    # the eye over the crests
 		var dn := y - 4.0 - 0.8 * hs                   # and under the troughs
