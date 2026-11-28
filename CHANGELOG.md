@@ -18,6 +18,9 @@ day the milestone was reached.
   shader, beat from the envelopes' measured rates, and burst-and-coast (2 beats then a glide) below steady.U_min.
   Fix (28 Nov): school fish were drawn upside down since the first build (the drawn up axis pointed down);
   FishSchool.fish_basis now builds the frame, check S15 guards it.
+  Fix (28 Nov): trevally school twitched: the body bend followed the sim's raw 30 Hz turn noise (flipping side most
+  frames) and fish at the beat/glide threshold flipped mode. Thalassa's zero-twitch drawing ported (smoothed, slew-capped
+  heading; eased turn rate, bank, bend and swim speed), beat/glide hysteresis; check S16 measures drawn jitter.
 - Creature maker moves into the repo as stage modules (creatures/maker/, tool version 0.3.0-dev): record, form, chart,
   cage features (template, eye, mouth, gill, finish), UV, maps, fins, Blender export, checks, board. Output is
   byte-identical to the last fish-restart proof script. Real openings: mouth, throat and both gill passages are topology

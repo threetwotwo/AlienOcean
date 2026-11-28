@@ -135,8 +135,9 @@ def apply(D, sil, top_r=None, front_r=None, src=None):
         sil['top'] = top_r['top']
     if front_r:
         u, yt, yb = deepest(O); F = np.array(front_r['front'], float); scale = 1.0
-        if top_r:
-            S, W = np.array(top_r['hw'], float).T; want = float(np.interp(u / SL, S, W))
+        hw_src = np.array(top_r['hw'], float) if top_r else (np.array(O['hw'], float) / [SL, SL] if O.get('hw') and O.get('_origin_hw') else None)
+        if hw_src is not None:     # width from a top view (this call's, or one already written): the section keeps only its shape
+            S, W = hw_src.T; want = float(np.interp(u / SL, S, W))
             scale = want / max(front_r['half_width_max'], 1e-9); F[:, 0] *= scale
             notes.append(f'front widths x{scale:.2f} to the top view half-width {want:.4f} SL at u {u / SL:.3f} SL')
         sil['front'] = [[round(float(z), 4), round(float(y), 4)] for z, y in F]

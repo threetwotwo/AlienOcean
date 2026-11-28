@@ -274,7 +274,11 @@ class Form:
             t = t * np.clip(np.minimum(-poly_sd2(x, az, poly), under(x) - y) / PLATE_CHAMFER, 0, 1)
             plate = np.maximum(d0 - t, -d0 - 0.004)
             nd = smin(d, plate, 0.0006)
-            ids = np.where(nd < d - 1e-5, len(self.PLATES) + k + 1, ids); d = nd
+            # where the chamfer has run t out to 0 the plate IS the body surface, and the smooth union still lowers d there by
+            # its bias: that labelled the whole flank as this plate (maps: no scale relief, metal dimmed; export r5). A point
+            # belongs to the plate only where the plate has thickness. (The 0.15 mm bias itself stays for now: removing it
+            # raised rest crossings 208 -> 333 on the traced board, moorish idol 47 -> 144; round 3 owns that.)
+            ids = np.where((nd < d - 1e-5) & (t > 1e-5), len(self.PLATES) + k + 1, ids); d = nd
         # orbit: circumorbital ring (bone) around the eye opening, a low torus in the side plane
         ex, eyy, er = self.ex, self.eyy, self.er
         ring = np.abs(np.sqrt((x - ex) ** 2 + (y - eyy) ** 2) - max(EY['orbit'], er * 1.08)) - 0.25 * (EY['orbit'] - er * 0.8 + 0.01)

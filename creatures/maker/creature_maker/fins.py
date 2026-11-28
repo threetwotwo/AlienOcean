@@ -8,6 +8,11 @@ from PIL import Image
 
 EDGE_RAYS = 25      # DEFAULT: most columns on a traced median fin card (a falcate lobe needs more than 17 to keep its tip)
 EDGE_ROWS, RELAX_IT = 6, 60     # DEFAULTS: rows on a traced card and relaxation passes between root and outline
+SOFT_FRAY = 0.015   # DEFAULT: a soft-ray fin's edge recedes this share of the ray length between ray tips (a whole edge, faintly frayed)
+SPINE_W = 0.12      # DEFAULT: half-width of a spine's free tip, share of the spacing between spines
+RAY_RELIEF = 0.06   # DEFAULT: ray ridge relief in the fin normal map (tilt of the ray flanks stays under ~20 deg: rays read in the
+                    # texture, not as a pleated card)
+SHEATH = 0.12       # DEFAULT: body skin colour carries onto the base of the median fins and caudal over this share of the ray length
 
 
 def resample(P, n):
@@ -54,7 +59,8 @@ def build_fins(form, rec, out):
         dirs = np.stack([np.sin(lean), sgn * np.cos(lean), 0 * xs], -1)
         hs = np.maximum(hs, 0.004)
         card(base, dirs, hs + 0.006, 5, m['name'], m['rays'])
-    for m in F['median']: median(m)
+    for m in F['median']:
+        median(m); fins[m['name']].update(spines=m.get('spines', 0), notch=m.get('notch', 0.0))
     c = F['caudal']; Mb = EDGE_RAYS if c.get('edge') else 17; cx = c['x']; cc = float(sec(cx)[0]); ch = float(sec(cx)[1])
     ty = np.linspace(-1, 1, Mb); base = np.stack([np.full(Mb, cx - 0.012), cc + ty * ch * 0.92, 0 * ty], -1)
     if c.get('edge'): edge_card(base, c['edge'][::-1], EDGE_ROWS, 'caudal', c['rays'])   # traced outline runs top to bottom; ty runs up
@@ -93,15 +99,25 @@ def build_fins(form, rec, out):
         fname = key if key in fins else key + '_L'; nr = fins[fname]['rays']
         m = (U >= u0) & (U < u1) & (Vv >= v0) & (Vv < v1)
         su = (U - u0) / (u1 - u0); tv = (Vv - v0) / (v1 - v0)
-        ph = su * (nr - 1); fr = ph - np.floor(ph)
+        ph = su * (nr - 1); fr = ph - np.floor(ph); d = np.abs(fr - 0.5) * 2          # d: 0 on a ray, 1 midway between rays
         ray = np.exp(-((fr - 0.5) / 0.13) ** 2)                      # ray ridges (record ray count)
         seg = 0.5 + 0.5 * np.cos(2 * np.pi * tv * 9)                  # ray segments
-        edge = 1 - 0.09 * (1 - ray) - 0.02 * (1 - seg)               # membrane free edge recedes between ray tips
+        # free edge (F1, ceiling study 28 Nov): a soft-ray membrane runs whole to the ray tips; over the spines it dips between
+        # tips by the record notch, rising to each spine, whose own tip stands a little clear of the membrane
+        sp, notch = fins[fname].get('spines', 0), fins[fname].get('notch', 0.0)
+        spine = (np.floor(ph) < sp) & (notch > 0)
+        membrane = 1 - notch * (1 - (1 - d) ** 2)
+        tip = 1 - 0.5 * notch * np.clip(d / SPINE_W, 0, 1) ** 0.7
+        edge = np.where(spine, np.maximum(membrane, tip), 1 - SOFT_FRAY * d ** 2)
         alpha = (tv < edge).astype(float)
         hgt = ray * (1 - 0.25 * seg * tv)
-        col = np.array(rec['paint']['fin']) * (0.7 + 0.3 * ray[..., None]) * (1 - 0.25 * tv[..., None]) + 0.12 * (1 - tv[..., None]) * np.array([0.3, 0.2, 0.2])
+        fin_c = np.array(rec['paint']['fin']); body_c = np.array(rec['paint'].get('flank', rec['paint']['fin']))
+        col = fin_c * (0.85 + 0.15 * ray[..., None]) * (1 - 0.2 * tv[..., None])
+        if key not in ('pectoral', 'pelvic'):                        # F3: scaled skin sheath over the base of median fins and caudal
+            sh = np.clip(1 - tv / SHEATH, 0, 1)[..., None] ** 1.5; col = col * (1 - sh) + body_c * sh
         fb[m, :3] = col[m]; fb[m, 3] = alpha[m]
-        gu = np.gradient(hgt, axis=1) * nr * 0.6; gv = np.gradient(hgt, axis=0) * 3
+        px = FR * (u1 - u0) / max(nr - 1, 1)                          # pixels per ray spacing: relief is per ray, whatever the fin size
+        gu = np.gradient(hgt, axis=1) * px * RAY_RELIEF; gv = np.gradient(hgt, axis=0) * 3
         n3 = np.stack([-gu, -gv, np.ones_like(gu)], -1); n3 /= np.linalg.norm(n3, axis=-1, keepdims=True)
         fn[m] = n3[m]
         for nm in [k for k in fins if k == key or k.startswith(key + '_')]:
