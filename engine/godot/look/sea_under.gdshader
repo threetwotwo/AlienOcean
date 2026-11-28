@@ -56,6 +56,7 @@ void vertex() {
 }
 
 void fragment() {
+	if ((sea_prof & 1) != 0) { ALBEDO = vec3(0.02, 0.08, 0.12) * water_exposure; } else {   // profiling: flat (the whole shading below is the else branch)
 	vec3 cam = sea_isl(CAMERA_POSITION_WORLD);
 	vec3 sj0, sj1; vec2 sjl;
 	vec3 S = sea_slope_j(wi.xy, still, wi, cam, fine3, sj0, sj1, sjl);   // + cascades 0-1's squeeze for the foam (sea speed thread)
@@ -95,7 +96,7 @@ void fragment() {
 	// is added once, below
 	float obj = 0.0;
 	vec3 obj_c = vec3(0.0);
-	if (cov > 0.02) {
+	if (cov > 0.02 && (sea_prof & 8) == 0) {
 		vec2 ou; vec3 oocc;
 		float jit = sea_god.z > 0.5 ? sea_ign(FRAGCOORD.xy + 5.588238 * sea_god.y) : 0.5;
 		float to = sea_march(wi, Tn, min(4.0 / max(Tn.z, 0.1), 30.0), 8, jit, PROJECTION_MATRIX * VIEW_MATRIX, INV_PROJECTION_MATRIX, depth_tex, ou, oocc);
@@ -184,4 +185,5 @@ void fragment() {
 	}
 	ALBEDO = hot_probe_paint(col, vec3(1.0, 0.0, 0.0));   // stress-shot switch (look/hot_probe), off in play
 	if (hot_probe <= 0.0) ALBEDO = min(ALBEDO, vec3(30000.0));
+	}   // profiling: flat
 }

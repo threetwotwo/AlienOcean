@@ -127,7 +127,7 @@ SeaFoam sea_foam_read_j(vec2 Xl, vec3 P, vec3 cam, float nq, float clock, vec3 j
 	float fpa = vl * pa;
 	vec2 along = vu.xy * (fpa / mu);
 	float fp = max(max(fpa, 0.25 * fpa / mu), 1e-5);
-	if (sea_on < 0.5 || sea_foam_k.x < -5.0) return o;          // no whitecaps (the calm lagoon)
+	if (sea_on < 0.5 || sea_foam_k.x < -5.0 || (sea_prof & 16) != 0) return o;          // no whitecaps (the calm lagoon)
 	float U = sea_wind.z;
 	vec2 wd = normalize(sea_wind.xy + vec2(1e-6, 0.0));
 	vec2 wp = vec2(-wd.y, wd.x);

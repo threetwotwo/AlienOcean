@@ -56,6 +56,7 @@ var _rb_pending := 0                                # downloads asked for and no
 var _hb_t := -1.0                                   # the wave clock the bytes were drawn at
 var _hb_mutex := Mutex.new()
 var _frame := 0
+var _prof := int(OS.get_environment("AO_SEA_PROF"))   # profiling switches (sea_prof)
 
 func _init() -> void:
 	name = "FftSea"
@@ -78,6 +79,7 @@ static func declare_globals() -> void:
 	rs.global_shader_parameter_add("sea_mom_y", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
 	rs.global_shader_parameter_add("sea_mom_r", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
 	rs.global_shader_parameter_add("sea_on", rs.GLOBAL_VAR_TYPE_FLOAT, 0.0)
+	rs.global_shader_parameter_add("sea_prof", rs.GLOBAL_VAR_TYPE_INT, int(OS.get_environment("AO_SEA_PROF")))   # profiling switches (look/sea_waves.gdshaderinc; 32 here = the FFT not re-run each frame), 0 in play
 	rs.global_shader_parameter_add("sea_crest_sd", rs.GLOBAL_VAR_TYPE_FLOAT, 0.35)
 	rs.global_shader_parameter_add("sea_sparkle", rs.GLOBAL_VAR_TYPE_FLOAT, float(OS.get_environment("AO_SPARKLE")) if OS.get_environment("AO_SPARKLE") != "" else 1.0)   # look/sea_top 0.5.0
 	rs.global_shader_parameter_add("sea_crest_glow", rs.GLOBAL_VAR_TYPE_FLOAT, float(OS.get_environment("AO_CREST_GLOW")) if OS.get_environment("AO_CREST_GLOW") != "" else 1.0)   # art lever, 1 = the tank
@@ -195,7 +197,8 @@ func _process(dt: float) -> void:
 	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
 	if cam: foam_eye = Vector2(cam.global_position.x, -cam.global_position.z)
 	if ready_ok:
-		RenderingServer.call_on_render_thread(_run.bind(time_s))
+		if _frame < 8 or (_prof & 32) == 0:   # profiling: AO_SEA_PROF 32 = the waves frozen after 8 frames (the FFT's cost)
+			RenderingServer.call_on_render_thread(_run.bind(time_s))
 		if _frame % maxi(readback_frames, 1) == 0 or _hb_t < 0.0:
 			RenderingServer.call_on_render_thread(_readback.bind(time_s))
 

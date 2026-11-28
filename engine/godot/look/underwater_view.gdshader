@@ -13,7 +13,7 @@ render_mode unshaded, cull_disabled, depth_draw_never, depth_test_disabled, fog_
 #include "res://look/sea_bathy.gdshaderinc"
 #include "res://look/sea_waves.gdshaderinc"
 
-uniform sampler2D screen_tex : hint_screen_texture, filter_linear;   // read at mip 0 only: no mip chain (sea speed thread: Godot builds the screen copy's mips only when a shader asks for them)
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 global uniform sampler2D water_floor_height : filter_linear;   // adapters/godot/sea_floor_map.gd: alpha 0 = nothing there
 global uniform vec4 water_floor_org;                           // centre x, centre z, size m, 1 = valid

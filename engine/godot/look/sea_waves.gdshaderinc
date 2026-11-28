@@ -20,6 +20,11 @@ global uniform vec4 sea_mom_x;
 global uniform vec4 sea_mom_y;
 global uniform vec4 sea_mom_r;
 global uniform float sea_on;
+// 0.2.0 profiling switches (sea speed thread; FftSea sets it from AO_SEA_PROF, 0 in play): bits strip the sea's work to
+// find where its cost goes on a GPU without timers. 1 = flat colour (no shading at all: what is left is the mesh, its
+// passes and blending), 2 = no wave displacement in the vertex shader, 4 = no per-pixel slope, 8 = no march / landing
+// (sea_top) and no window march (sea_under), 16 = no foam.
+global uniform int sea_prof;
 const float SEA_D0 = 0.0625;        // v98 GEO: finest ring spacing m
 const float SEA_SNAP = 0.25;        // camera snap m
 const float SEA_CURVE_M = 2.0e5;    // v6: the open water's planet radius
@@ -63,7 +68,7 @@ vec3 sea_vertex_world(vec2 lp, vec3 cam, float surf, float nq, out vec2 still) {
 	vec2 X = C + idx * dl;
 	float de = dl * (1.0 + m);
 	vec3 D = vec3(0.0);
-	if (sea_on > 0.5) {
+	if (sea_on > 0.5 && (sea_prof & 2) == 0) {
 		D = sea_disp_at(X, de);
 		if (m > 0.0 && odd.x + odd.y > 0.5) {
 			vec3 Dc = vec3(0.0);
@@ -104,7 +109,7 @@ float sea_tap_off(int k, int n, float r) {          // tap k's place along the s
 // the very reads sea_foam_read's fold takes, so the foam reuses them (sea_foam_read_j) instead of reading them again.
 vec3 sea_slope_j(vec2 x, vec2 Xl, vec3 P, vec3 cam, float fine3, out vec3 jc0, out vec3 jc1, out vec2 jl) {
 	jc0 = vec3(0.0); jc1 = vec3(0.0); jl = vec2(0.0);
-	if (sea_on < 0.5) return vec3(0.0, 0.0, 0.0047);
+	if (sea_on < 0.5 || (sea_prof & 4) != 0) return vec3(0.0, 0.0, 0.0047);
 	vec3 vr = P - cam;
 	float vl = max(length(vr), 1e-3);
 	vec3 vu = vr / vl;

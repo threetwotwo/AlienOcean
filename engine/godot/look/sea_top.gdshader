@@ -72,6 +72,7 @@ float fresnel_air(float ci) {          // unpolarised, air -> water, n 1.333
 }
 
 void fragment() {
+	if ((sea_prof & 1) != 0) { ALBEDO = vec3(0.004, 0.02, 0.05) * water_sky_nits * water_exposure; } else {   // profiling: flat (the whole shading below is the else branch)
 	vec3 cam = sea_isl(CAMERA_POSITION_WORLD);
 	vec3 sj0, sj1; vec2 sjl;
 	vec3 S = sea_slope_j(wi.xy, still, wi, cam, 0.0, sj0, sj1, sjl);   // + cascades 0-1's squeeze for the foam (sea speed thread)
@@ -181,7 +182,7 @@ void fragment() {
 	vec3 occ = vec3(0.0);
 	float th = 0.0;
 	float tmax = clamp((max(Hg, h) + 1.0) / max(-T.z, 0.05), 1.0, 40.0);
-	if (V.z > 0.03 && depth > 1e-7) {
+	if (V.z > 0.03 && depth > 1e-7 && (sea_prof & 8) == 0) {
 		// steps by the ray's length on the screen (4 px each, 3..12); one that moves under 1.5 px is the straight view
 		vec4 ce = PROJECTION_MATRIX * VIEW_MATRIX * vec4(sea_gdt(wi + T * tmax), 1.0);
 		float span = ce.w > 1e-4 ? length((ce.xy / ce.w * 0.5 + 0.5 - SCREEN_UV) * VIEWPORT_SIZE) : 1e3;
@@ -278,4 +279,5 @@ void fragment() {
 	float melt = sea_horizon_melt * (1.0 - smoothstep(0.0, 0.012, V.z));
 	if (melt > 0.0) ALBEDO = mix(ALBEDO, sky_dome_nits(sea_gdt(normalize(vec3(-V.xy, 0.0015)))) * water_exposure, melt);
 	ALBEDO = hot_probe_paint(ALBEDO, vec3(0.0, 1.0, 0.0));   // stress-shot switch (look/hot_probe), off in play
+	}   // profiling: flat
 }
