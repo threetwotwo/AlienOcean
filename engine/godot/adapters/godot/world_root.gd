@@ -25,7 +25,8 @@ extends Node3D
 @export var noon_yaw := 0.0
 @export var floor_y := 0.0            # the lagoon's sand (floor tiles sit at y -0.3..0.1 under a 4 m surface)
 @export var z_ref := 2.0              # depth the key light is pre-attenuated to (eye / fish depth)
-const UNDER_WHITE := {"calm_lagoon": Vector3(1.0713, 0.9914, 0.8748)}   # v183: under water the white point is daylight (6500 K)
+const UNDER_WHITE := {"calm_lagoon": Vector3(0.969, 0.874, 1.249)}   # the key frame diver's white balance (gain measured from the
+## Blender rig, Gary card 28 Nov 01:52Z; was v183 daylight 1.0713/0.9914/0.8748). Stand-in for an auto white balance on the water's cast.
 const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0.2 m of depth
 ## v168 depth colour (art bible 8.8): the camera gives back a share of the colour the water took at its depth.
 ## Off by default, as in the Unreal lagoon since v176 (Style 16:58Z); depth_colour = true turns it on.
@@ -37,7 +38,7 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 ## (Unreal GlowK, Gary's clarity pick 2.5). Under water only, so the sky above the sea keeps its exposure.
 @export var under_exposure_art := 1.0     # Gary picked "Brighter" 27 Nov 17:06Z
 @export var fill_occluded := true          # the water's fill light goes through Godot's ambient, so SSAO / SSIL occlude it (false = as before, unoccluded)
-@export var cdom := 0.03                   # art lever (a real condition): yellow substance in the water, Unreal LOOK_SET 0.03; less = bluer haze
+@export var cdom := 0.05                   # art lever (a real condition): yellow substance in the water; key frame look 0.05 (Gary card 28 Nov; Unreal LOOK_SET 0.03); less = bluer haze
 @export var scat_k := 0.40                 # art lever (a real condition): particles in the water, Unreal LOOK_SET 0.40; less = clearer
 @export var sky_fill_k := 0.6              # art lever: share of the sky's light that enters the water (1 = physical: 11 % of the light on the
                                            # 4 m sand at noon). The key frame (Blender, 28 Nov passes) has 7 %: 0.6 here. Feeds the fill, the GI's

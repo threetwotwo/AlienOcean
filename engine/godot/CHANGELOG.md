@@ -10,6 +10,10 @@
 - Fix (surface thread report): above water SDFGI drew milky 3-6 m blotches on the sand seen through the surface. The GI's
   sky is now the water light field at any eye height, and above water the sun's light_indirect_energy is the share entering
   the water (Fresnel x refraction x attenuation at z_ref, 0.74 at noon). Test GI5/GI6.
+- Key frame colour (Gary picked on the card, 28 Nov 01:52Z): sand #e3cca2..#f0e1c0 (BIBLE and the seabed sand lock; was
+  #c8c4bb..#cdcac4), under-water camera balance UNDER_WHITE calm_lagoon = the key frame rig's diver gain 0.969/0.874/1.249
+  (stand-in for an auto white balance on the water's cast), cdom 0.05. Key frame camera at sky 0.6: sand chroma 12 -> 5
+  (key frame 6), sand L* 73 -> 75 (79).
 
 ## 0.6.0-dev (28 Nov 2026): lagoon dressing round 9, the layers linked
 - World: Gary kept the arch's form (28 Nov 01:30Z), so the empty sand band under it is closed by composition. The key frame's
