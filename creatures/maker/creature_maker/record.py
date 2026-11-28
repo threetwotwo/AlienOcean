@@ -159,13 +159,15 @@ def adapt(path, style=None):
     P('caudal fin', 'record.skeleton.median.caudal ' + ('(proc.uUp, edge traced: ray tips upper lobe to lower lobe)' if C.get('edge') else '(proc.uUp, len, spread deg, outline; else outline from caudal.round)'))
     PE = R['skeleton']['pectoral']
     fins['pectoral'] = dict(x=PE['base']['u'] * f, y=PE['base']['y'] * f, len=PE['length'], span=[s * f for s in dget(PE, 'span', [3, -3], 'skeleton.pectoral')],
-                            sweep=dget(PE, 'sweep', [20, -30], 'skeleton.pectoral'), out=dget(PE, 'out', 30, 'skeleton.pectoral'), prof=dget(PE, 'prof', [[0, 1], [1, 0.4]], 'skeleton.pectoral'), rays=dget(PE, 'rays', 14, 'skeleton.pectoral'))
-    P('pectoral fin', 'record.skeleton.pectoral (base, length (SL), span, sweep, out, prof)')
+                            sweep=dget(PE, 'sweep', [20, -30], 'skeleton.pectoral'), out=dget(PE, 'out', 30, 'skeleton.pectoral'), prof=dget(PE, 'prof', [[0, 1], [1, 0.4]], 'skeleton.pectoral'), rays=dget(PE, 'rays', 14, 'skeleton.pectoral'),
+                            edge=fin_edge(PE), base_line=sc(PE['base_line']) if PE.get('edge') and PE.get('base_line') else None)
+    P('pectoral fin', 'record.skeleton.pectoral ' + ('(edge + base_line traced: side-view outline root to root; out)' if fins['pectoral']['edge'] else '(base, length (SL), span, sweep, out, prof)'))
     if 'pelvic' in R['skeleton']:            # puffers, porcupinefish, filefish have no pelvic fins (anatomy, not a gap)
         PV = R['skeleton']['pelvic']
         fins['pelvic'] = dict(x=PV['base']['u'] * f, y=PV['base']['y'] * f, len=PV['length'], sweep=dget(PV, 'sweep', [40, -10], 'skeleton.pelvic'), out=dget(PV, 'out', 30, 'skeleton.pelvic'),
-                              prof=dget(PV, 'prof', [[0, 1], [1, 0.6]], 'skeleton.pelvic'), rays=dget(PV, 'rays', 6, 'skeleton.pelvic') + dget(PV, 'spines', 0, 'skeleton.pelvic'))
-        P('pelvic fin', 'record.skeleton.pelvic (base, length (SL), sweep, out, prof)')
+                              prof=dget(PV, 'prof', [[0, 1], [1, 0.6]], 'skeleton.pelvic'), rays=dget(PV, 'rays', 6, 'skeleton.pelvic') + dget(PV, 'spines', 0, 'skeleton.pelvic'),
+                              edge=fin_edge(PV), base_line=sc(PV['base_line']) if PV.get('edge') and PV.get('base_line') else None)
+        P('pelvic fin', 'record.skeleton.pelvic ' + ('(edge + base_line traced: side-view outline root to root; out)' if fins['pelvic']['edge'] else '(base, length (SL), sweep, out, prof)'))
     else: P('pelvic fin', 'absent in record.skeleton (no pelvic fins)')
     out['fins'] = fins
     S = R.get('scales', {})

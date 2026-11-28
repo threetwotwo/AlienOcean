@@ -7,6 +7,19 @@ global uniform vec3 water_dome_sun;
 global uniform float water_sky_norm;
 global uniform float sky_turbidity;   // Preetham turbidity (WorldRoot.turbidity)
 global uniform vec3 sky_rayleigh;     // the air's Rayleigh colour (WorldRoot.rayleigh)
+// The horizon's light scattered more than once (28 Nov, Gary: "the horizon line is still way too grey"): single
+// scattering on the long horizon path saturates to a neutral grey; in real air the light scattered again and again is
+// sky-blue, so a clear horizon is pale blue (photos: about sRGB 190, 215, 235). Stand-in for the multiple-scattering
+// term of Unreal's SkyAtmosphere (Hillaire 2020): near the horizon the dome's colour is pulled to that pale blue at its
+// own luminance, lifted (HZ_LIFT). sky_horizon_k 0 = the single-scatter dome (WorldRoot.horizon_k, AO_HORIZON_K).
+global uniform float sky_horizon_k;
+vec3 sky_horizon_ms(vec3 L, float vy) {
+	const vec3 PALE = vec3(0.785, 1.038, 1.269);        // sRGB (190, 215, 235) linear, luminance 1
+	const float HZ_LIFT = 2.5;                          // the horizon brighter than single scattering gives (photos: ~4x the zenith)
+	float Y = dot(L, vec3(0.2126, 0.7152, 0.0722));
+	float w = sky_horizon_k * exp(-max(vy, 0.0) / 0.12);
+	return mix(L, Y * PALE * HZ_LIFT, clamp(w, 0.0, 1.0));
+}
 vec3 sky_dome_shape(vec3 v, vec3 s) {
 	float zenith_angle = clamp(s.y, -1.0, 1.0);
 	float sun_energy = max(0.0, 1.0 - exp(-((PI * 0.5) - acos(zenith_angle))));
@@ -23,7 +36,7 @@ vec3 sky_dome_shape(vec3 v, vec3 s) {
 	vec3 ratio = (rayleigh_beta * rayleigh_phase + mie_beta * mie_phase) / (rayleigh_beta + mie_beta);
 	vec3 Lin = pow(sun_energy * ratio * (1.0 - extinction), vec3(1.5));
 	Lin *= mix(vec3(1.0), pow(sun_energy * ratio * extinction, vec3(0.5)), clamp(pow(1.0 - zenith_angle, 5.0), 0.0, 1.0));
-	return Lin;
+	return sky_horizon_ms(Lin, v.y);
 }
 // nits along v (Godot y-up); below the horizon the dome's horizon value (the sea itself is drawn by the sea)
 vec3 sky_dome_nits(vec3 v) {

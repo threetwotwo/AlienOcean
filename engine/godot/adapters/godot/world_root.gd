@@ -44,6 +44,10 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 @export var sky_fill_k := 0.8              # art lever: share of the sky's light that enters the water (1 = physical: 11 % of the light on the
                                            # 4 m sand at noon). The key frame (Blender, 28 Nov passes) has 7 %: 0.6 here. Feeds the fill, the GI's
                                            # water light field and the haze alike. Gary picked 0.8, between the two (card, 28 Nov 02:02Z).
+## the sea's RMS slope for the sun's spread under water (calm lagoon ~0.06, as the key frame rig; surface thread may feed the FFT's own)
+@export var sea_rms_slope := 0.06
+const SUN_DISC_DEG := 0.53
+const SDFGI_RESET_STOPS := 3.0
 @export var under_white := Vector3.ZERO      # look check: the under-water camera balance (zero = the place's UNDER_WHITE)
 @export var water_type := 0.0              # 0 = the lagoon's water, 1 = the open ocean's (WaterOptics.optics); between = a blend (shelf)
 @export var gi_k := 1.0                    # art lever: GI strength (SDFGI energy). 1 = physical (the water's fill + the sand's real bounce)
@@ -84,8 +88,10 @@ var cam_attr: CameraAttributesPhysical
 var sky_mat: ShaderMaterial
 var key := ""
 var last := {}
+var _gi_reset := 0   # frames left with SDFGI off to drop its cache after a jump in the light (apply)
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
+var _surface: SeaSurface          # make_surface's: its floor map is captured again when the light changes (apply)
 var under_mat: ShaderMaterial       # the underwater view quad's material (attach_camera)
 var caustics: CausticsMap           # the light net's map, drawn once a frame (adapters/godot/caustics_map.gd)
 var _dome_g := 0.0
@@ -192,9 +198,11 @@ func make_surface(_size_m := 160.0) -> Node3D:
 	## rings, seen from above and below. Its level is water_y (the tide); nothing to place or stream.
 	var s := SeaSurface.new()
 	water.waves = s.fft            # water.water_y(x, z) follows the drawn crests
+	_surface = s
 	return s
 
 func apply(cam_y: float) -> Dictionary:
+	if is_instance_valid(_surface) and _surface.floor_map: _surface.floor_map.refresh()   # its radiance was lit by the old light
 	if tide_on: water.set_clock(hours)   # the sea level follows the two moons (core/world/tide.gd)
 	var water_y := water.level
 	var st := SkyClock.sky_state(hours, noon_yaw)
@@ -237,6 +245,7 @@ func apply(cam_y: float) -> Dictionary:
 	rsw.global_shader_parameter_set("water_sky_norm", sky_mat.get_shader_parameter("sky_norm"))
 	rsw.global_shader_parameter_set("sky_turbidity", turbidity)
 	rsw.global_shader_parameter_set("sky_rayleigh", rayleigh)
+	rsw.global_shader_parameter_set("sky_horizon_k", horizon_k)
 	rsw.global_shader_parameter_set("water_sun_air", up_air)
 	rsw.global_shader_parameter_set("water_sun_lux", beam_h / maxf(up_air.y, 0.02) if up_air.y > 0.0 else 0.0)
 	if agx_fx.enabled:
@@ -267,12 +276,15 @@ func apply(cam_y: float) -> Dictionary:
 	sky_mat.set_shader_parameter("under_k", 1.0)
 	sky_mat.set_shader_parameter("under_down", ek / PI)
 	sky_mat.set_shader_parameter("under_up", eu / PI)
-	RenderingServer.global_shader_parameter_set("water_amb_sky", 1.0 if env.sdfgi_enabled else 0.0)
+	RenderingServer.global_shader_parameter_set("water_amb_sky", 1.0 if env.sdfgi_enabled or _gi_reset > 0 else 0.0)
 	if under:
 		light.look_at_from_position(Vector3.ZERO, -tr, Vector3.FORWARD if absf(tr.y) > 0.99 else Vector3.UP)
 		light.light_intensity_lux = beam_h * WaterOptics.FRESNEL_SUN / tr.y
 		light.light_color = (tint * att)
 		light.light_indirect_energy = 1.0
+		# the sun as seen from under a wavy surface: its disc refracted (0.53 / 1.333 deg) widened by the waves' slope, each
+		# facet bending the beam by (1 - 1/1.333) x its slope: so shadows are crisp at contact and soften with height
+		light.light_angular_distance = SUN_DISC_DEG / WaterOptics.N_WATER + 2.0 * (1.0 - 1.0 / WaterOptics.N_WATER) * sea_rms_slope * 57.2958
 		# Without GI, the ambient stays one colour (the field's mean); Godot's sky-sourced ambient read black in the 28 Nov
 		# check (cubemap ambient path, open question), and SDFGI replaces the ambient anyway.
 		var amb: Vector3 = (ek + eu) * 0.5 / PI * exposure            # ambient is in buffer units (measured 27 Nov)
@@ -291,13 +303,26 @@ func apply(cam_y: float) -> Dictionary:
 		light.look_at_from_position(Vector3.ZERO, -up_air, Vector3.FORWARD if absf(up_air.y) > 0.99 else Vector3.UP)
 		light.light_intensity_lux = beam_h / maxf(up_air.y, 0.02)
 		light.light_color = tint
+		light.light_angular_distance = SUN_DISC_DEG
 		# the GI's sand is under water: its bounce sees the sun as it arrives at z_ref (through the surface, refracted, attenuated),
 		# not the air's full beam (Godot's indirect energy is one scalar: the luminance of that loss)
 		var lum_att := att.r * 0.2126 + att.g * 0.7152 + att.b * 0.0722
 		light.light_indirect_energy = WaterOptics.FRESNEL_SUN * maxf(up_air.y, 0.02) / tr.y * lum_att
+	# SDFGI keeps its probes' light over many frames: after a jump in the light (the hour slider, a teleport across day and night)
+	# that cache is the old light, shown at the new exposure (surface thread, 28 Nov: noon-lit sand blown out at 23:00).
+	# A jump of more than SDFGI_RESET_STOPS in EV100 drops the cache: GI off until two frames have been drawn without it, then
+	# on again, rebuilt from the new light (Godot has no reset call; a toggle inside one frame is never drawn and changes nothing).
+	if env.sdfgi_enabled and last.has("ev100") and absf(ev - float(last.ev100)) > SDFGI_RESET_STOPS:
+		env.sdfgi_enabled = false; _gi_reset = 2
+		if not RenderingServer.frame_post_draw.is_connected(_gi_reset_tick): RenderingServer.frame_post_draw.connect(_gi_reset_tick)
 	last = {"key": key, "elev": body.elev, "total_lux": st.total, "sky_lux": st.skylux, "beam_h": beam_h,
 		"ev100": ev, "bias": bias, "under": under, "night_w": nw}
 	return last
+
+func _gi_reset_tick() -> void:
+	_gi_reset -= 1
+	if _gi_reset <= 0:
+		RenderingServer.frame_post_draw.disconnect(_gi_reset_tick); env.sdfgi_enabled = true
 
 func _art_k(k: Vector3) -> Vector3:
 	## light_neutral: the light's per-band loss pulled toward its luminance-weighted mean (colour only)
@@ -324,7 +349,7 @@ static func declare_globals() -> void:
 		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)],
 		# the sea surface (water surface thread): the sky dome's shape sun and scale, the key body in air and its beam lux
 		"water_amb_ref": [V, Vector3.ONE], "water_fill_ao": [F, 1.0], "water_amb_sky": [F, 0.0],
-		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "sky_turbidity": [F, turbidity], "sky_rayleigh": [V, rayleigh], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
+		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "sky_turbidity": [F, turbidity], "sky_rayleigh": [V, rayleigh], "sky_horizon_k": [F, horizon_k], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)
@@ -362,6 +387,7 @@ static func _airmass(y: float) -> float:
 # lambda^-4 scattering (680/550/440 nm: 0.105, 0.246, 0.6). Clean tropical sea air (aerosol depth 0.05-0.1) is about
 # turbidity 2.5. Pushed as sky_turbidity / sky_rayleigh. AO_TURB, AO_RAY=0 (Godot's colour) for checks.
 static var turbidity := float(OS.get_environment("AO_TURB")) if OS.get_environment("AO_TURB") != "" else 2.5
+static var horizon_k := float(OS.get_environment("AO_HORIZON_K")) if OS.get_environment("AO_HORIZON_K") != "" else 1.0   # look/sky_dome sky_horizon_ms
 static var rayleigh := Vector3(0.3, 0.405, 0.6) if OS.get_environment("AO_RAY") == "0" else Vector3(0.105, 0.246, 0.6)
 
 static func dome(v: Vector3, s: Vector3) -> Vector3:
@@ -384,7 +410,10 @@ static func dome(v: Vector3, s: Vector3) -> Vector3:
 		var lin := pow(sun_energy * ratio * (1.0 - ext), 1.5)
 		lin *= lerpf(1.0, pow(sun_energy * ratio * ext, 0.5), clampf(pow(1.0 - za, 5.0), 0.0, 1.0))
 		out[i] = lin
-	return out
+	# sky_horizon_ms (look/sky_dome.gdshaderinc): the horizon pulled to pale blue at its luminance, lifted x2.5 (HZ_LIFT)
+	var Y := 0.2126 * out.x + 0.7152 * out.y + 0.0722 * out.z
+	var w := clampf(horizon_k * exp(-maxf(v.y, 0.0) / 0.12), 0.0, 1.0)
+	return out.lerp(Y * Vector3(0.785, 1.038, 1.269) * 2.5, w)
 
 static func ground_lux_of_dome(s: Vector3) -> float:
 	## luminance-weighted horizontal illuminance of the unscaled dome (midpoint rule, 24 x 48)
