@@ -334,3 +334,46 @@ def test_front_reference_marked_as_a_section_is_scored_against_a_slice():
     from creature_maker.silhouette import section_u
     assert section_u({}) is None and section_u({'front_kind': 'projection'}) is None
     assert section_u({'front_kind': 'section', 'front_u': 0.57}) == 0.57
+
+
+def test_eye_aims_down_its_own_axis_and_the_head_has_volume_round_it(tmp_path):
+    """planted: a record whose eye sits high on a round head (the proof record with its eye moved up to 0.15 eye radii under
+    the dorsal outline). On the bare loft the rim's own plane leans far up there (the old aim); the eye's aim stays in the
+    scan range, the rim is plane and square to it, the tissue only widens the head and stays inside the top view."""
+    from creature_maker.record import adapt
+    from creature_maker.form import Form, AIM_UP, AIM_FWD
+    from creature_maker.cage.eye import rim3
+    D = json.load(open(REC)); R = D['record']; E = R['skeleton']['eye']; top = np.array(R['outline']['top'])
+    E['y'] = float(np.interp(E['u'], top[:, 0], top[:, 1])) - 1.15 * E['R']
+    p = str(tmp_path / 'high_eye.json'); json.dump(D, open(p, 'w'))
+    rec = adapt(p); F = Form(rec); O = F.ORBIT
+    ph = np.linspace(0, 2 * np.pi, 360, endpoint=False); rim = rim3(F, 1, ph)
+    keep = F._orb; F._orb = None; bare = rim3(F, 1, ph); F._orb = keep
+    up_of = lambda P: (lambda n: float(np.degrees(np.arcsin(abs(n[1])))))(np.linalg.svd(P - P.mean(0))[2][2])
+    assert up_of(bare) > O['aim_up_deg'] + 5                               # the fault: the bare rim plane looks further up than the eye
+    assert AIM_UP[0] <= O['aim_up_deg'] <= AIM_UP[1] and AIM_FWD[0] <= O['aim_fwd_deg'] <= AIM_FWD[1]
+    from creature_maker.checks import EA2_SEAT_MAX
+    n = F.eye_axis(1); rn = np.linalg.svd(rim - rim.mean(0))[2][2]
+    assert np.degrees(np.arccos(min(abs(float(rn @ n)), 1.0))) < EA2_SEAT_MAX      # the rim's plane is square to the aim: the eye sits true
+    assert (rim[:, 2] >= bare[:, 2] - rec['eye']['groove'] * F.er - 1e-9).all()      # tissue is added; the furrow is the only way in
+    assert (rim[:, 2] <= F.HW(rim[:, 0]) + rec['eye']['bulge'] * F.er + 1e-9).all()  # and stays inside the top view + the bulge
+    assert np.allclose(F.eye_axis(-1), n * [1, 1, -1])
+    assert O['skin_up_deg'] < O['bare_skin_up_deg']                        # the skin round the eye faces less up than before
+    out = str(tmp_path / 'b'); build(p, out, res=64, dense_form=False, log=lambda *a: None)
+    Rk = check(out, p, sweep=False)
+    assert Rk['EA2_pass'] and Rk['EY1_pass'] and Rk['EY2_pass'] and Rk['OP1_pass'], {k: Rk[k] for k in Rk if k.startswith(('EA', 'EY'))}
+
+
+def test_a_stated_aim_wins_and_the_eyeball_is_a_flat_window():
+    from creature_maker.record import adapt
+    from creature_maker.form import Form
+    from creature_maker.cage.eye import optics, CORNEA_SAG
+    D = json.load(open(REC)); D['record']['skeleton']['eye']['aim'] = dict(up=8.0, fwd=10.0)
+    import tempfile
+    with tempfile.TemporaryDirectory() as t:
+        p = os.path.join(t, 'r.json'); json.dump(D, open(p, 'w')); rec = adapt(p); F = Form(rec)
+    assert F.ORBIT['aim_source'] == 'record skeleton.eye.aim' and abs(F.ORBIT['aim_up_deg'] - 8) < 1.5
+    assert any(r['input'] == 'eye aim' for r in rec['provenance'])
+    o = optics(rec['eye'], rec['eye']['d'] / 2)
+    assert CORNEA_SAG[0] <= o['cornea_sag_R'] <= CORNEA_SAG[1] and o['lens_under_cornea_R'] > 0
+    assert o['lens_r'] < o['pupil_r'] < rec['eye']['d'] / 2                 # the lens stands in a pupil wider than itself (aphakic gap)
