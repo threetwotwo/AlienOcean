@@ -7,6 +7,9 @@ Cage checks (no Blender):
   P5  skin UV: area with stretch in [0.8, 1.25] >= 95 %, no folded UV faces, no texel under two skin faces
   IC1 every part the record names exists; input faults and defaults listed
   EY1 eye rim radius within 5 % of the record eye
+  EY2 the eyeball is no goggle: the cornea window stands 0.04-0.40 eye radii over its rim and clears the lens
+  EA1 the skin round the eye (best plane of the 1.6-2.4 eye radii ring) faces no further up than the scans' line for the eye's height + 8 deg
+  EA2 the eye's own aim lies in the range real eye discs keep to (up -6..12, forward 4..26 deg), and the eye sits true in its rim
   OP1 openings are topology: genus 2 (mouth -> throat -> two gill exits), 2 border loops (eyes), consistent winding,
       and the lips reach each gill slit through interior faces only
   OP2 every interior-only vertex lies inside the body (signed distance < -0.1 % SL)
@@ -20,6 +23,7 @@ validator, P11 silhouette against the ceiling frame (info), and the export stage
   EX4 clips swim_loop, breathe_loop, gape, flare exist; swim_loop closes (last frame = first within 1e-4 BL)
   EX5 collision: at least 3 hulls (a body that bends), >= 99 % of the form's inside covered, hull volume <= 1.3 x form volume
   EX6 the swim settings ride in the glTF (rig node extras alien_ocean.swim: envelope with phase, envelopes at >= 2 speeds, wavelength, beat law, clips)
+  EX8 the eye shells (iris, lens, cornea, both eyes) stay inside their triangle budget: the eye's look is in its maps
   EX7 LOD chain by the Unreal-era intake rule (creature_meter K2 + export round trip X4): each level 2.5-6 x fewer triangles, switch distances stated
 """
 import json, os, sys, math, copy, hashlib, subprocess
@@ -129,6 +133,63 @@ def uv_overlap(C, res=UV_OVERLAP_RES):
     return int((cnt > 1).sum())
 
 
+# ---- eye aim. Source: the Species thread's 79 CC0 photogrammetry scans, plans/species_system/gapfill/README.md "Eye aim,
+# round 1" and eye_aim_r1/skin_targets.json + gaze_report.json (meta).
+EA1_LINE = (-57.4, 103.8)    # skin ring degrees above horizontal = a + b x eye height in the local body depth (79 species, r 0.84)
+EA1_TOL = 8.0                # leave-one-out error of that line (7.7 over all scans, 8.0 inside the board's eye heights)
+EA2_UP = (-6.0, 12.0)        # eye disc, degrees above horizontal: scan median 2, spread 8-10 (regression error 10.7; "noise 10-17 on dead scans")
+EA2_FWD = (4.0, 26.0)        # eye disc, degrees toward the snout: scan median 14.3, IQR 10.2-19.6, error 7.8 -> median +- 1.5 errors
+EA2_STATED_TOL = 3.0         # DEFAULT: a record that states its own aim (skeleton.eye.aim, or a gaze that is not the stand-in) is held to it within 3 deg
+EA2_SEAT_MAX = 6.0           # DEFAULT: the rim's best plane within 6 deg of the aim. At 6 deg the iris shell's edge (1.12 eye radii) stands
+                             # 0.12 eye radii off the rim, about what the exporter seats it under the rim (0.4 % SL): more shows as a cocked eye
+
+
+def eye_aim_checks(C, V, form, rec):
+    """EA1 the skin round the eye, EA2 the eye's own aim. Angles as the scans give them: up = degrees above horizontal,
+    fwd = degrees toward the snout (x runs snout to tail, y up, z left)."""
+    R = {}; E = rec['eye']
+    up, fwd, _, h = form.skin_ring()
+    tgt = E['skin_up'] if E.get('skin_up') is not None else EA1_LINE[0] + EA1_LINE[1] * h
+    R['EA1_skin_up_deg'] = round(up, 1); R['EA1_skin_fwd_deg'] = round(fwd, 1); R['EA1_eye_height'] = round(h, 3)
+    R['EA1_target_deg'] = round(float(tgt), 1); R['EA1_target_source'] = 'record skeleton.eye.skin_up' if E.get('skin_up') is not None else 'scan line from eye height'
+    R['EA1_dev_deg'] = round(up - float(tgt), 1)
+    # the fault is skin that faces further up than real skin at that eye height: the head falls away round the eye. Skin
+    # under the band is listed, not failed: the line is no lower limit (same-genus scans sit up to 20 deg under it:
+    # Caranx 2.2 at a line value of 14, Diodon 6.9 at 25, Chlorurus 8.7 at 23; a flat-sided head with a high eye is real)
+    R['EA1_under_band'] = bool(R['EA1_dev_deg'] < -EA1_TOL)
+    R['EA1_pass'] = bool(R['EA1_dev_deg'] <= EA1_TOL)
+    ups, fwds, seat = [], [], []
+    for e, rings in zip(C['eyes'], C['openings']['eye_rings']):
+        n = np.array(e['n'], float); n /= np.linalg.norm(n); sg = e['side']
+        ups.append(math.degrees(math.asin(n[1]))); fwds.append(math.degrees(math.atan2(-n[0], sg * n[2])))
+        P = V[rings[-2]]; rn = np.linalg.svd(P - P.mean(0))[2][2]                  # the rim ring: the opening the shells sit in
+        seat.append(math.degrees(math.acos(min(abs(float(rn @ n)), 1.0))))
+    R['EA2_aim_up_deg'] = [round(v, 1) for v in ups]; R['EA2_aim_fwd_deg'] = [round(v, 1) for v in fwds]
+    R['EA2_below_skin_deg'] = round(up - float(np.mean(ups)), 1)                   # scans: the disc aims 7.5 deg below the skin ring (median, n 48)
+    R['EA2_seat_deg'] = [round(v, 1) for v in seat]
+    st = E.get('aim') or {}
+    bu = (st['up'] - EA2_STATED_TOL, st['up'] + EA2_STATED_TOL) if st.get('up') is not None else EA2_UP
+    bf = (st['fwd'] - EA2_STATED_TOL, st['fwd'] + EA2_STATED_TOL) if st.get('fwd') is not None else EA2_FWD
+    R['EA2_band_up'] = list(bu); R['EA2_band_fwd'] = list(bf)
+    ok = lambda v, band: band[0] <= round(v, 1) <= band[1]                        # to 0.1 deg: an aim held at the band's edge is inside
+    R['EA2_pass'] = bool(all(ok(v, bu) for v in ups) and all(ok(v, bf) for v in fwds) and max(seat) <= EA2_SEAT_MAX)
+    return R
+
+
+def eyeball_checks(C):
+    """EY2: the cornea window's height over its rim lies in cage.eye.CORNEA_SAG (flat window .. goggles limit, from the
+    old Eyes work) and the lens stays under it."""
+    from .cage.eye import CORNEA_SAG
+    o = [e.get('optics') for e in C['eyes']]
+    if not all(o): return dict(EY2_pass=False, EY2_note='no eye optics in the cage')
+    sag = [v['cornea_sag_R'] for v in o]; gap = [v['lens_under_cornea_R'] for v in o]
+    return dict(EY2_cornea_sag_R=sag, EY2_lens_under_cornea_R=gap, EY2_pass=bool(all(CORNEA_SAG[0] <= v <= CORNEA_SAG[1] for v in sag) and min(gap) > 0))
+
+
+EYE_SHELL_TRIS_MAX = 300    # DEFAULT: iris + lens + cornea of both eyes. The ceiling fish (the Nestaeric alfonsino) is about 8.8k
+                            # triangles whole with its eyes a separate material; 300 is 3.4 % of that. The shells this replaces took 864
+
+
 def cage_checks(C, V, form, rec):
     R = {}; faces, tags = C['faces'], C['ftag']
     skin = [k for k, t in enumerate(tags) if t in SKIN_TAGS]
@@ -175,6 +236,7 @@ def cage_checks(C, V, form, rec):
     R['IC1_pass'] = not R['IC1_missing'] and not R['IC1_input_faults']
     er = rec['eye']['d'] / 2; built = np.mean([e.get('r_side', e['r']) for e in C['eyes']])
     R['EY1_eye_radius_ratio'] = round(float(built / er), 3); R['EY1_pass'] = abs(built / er - 1) <= 0.05
+    R.update(eye_aim_checks(C, V, form, rec)); R.update(eyeball_checks(C))
     tp = topology(C); ps = passages(C)
     R['OP1_topology'] = tp; R['OP1_lips_reach_each_gill'] = ps
     R['OP1_pass'] = tp['genus'] == 2 and tp['border_loops'] == 2 and tp['nonmanifold'] == 0 and tp['winding_faults'] == 0 and len(ps) == 2 and all(ps)
@@ -285,6 +347,8 @@ def ex_checks(out, st):
         js, _ = read(gp)
         sw = next((n['extras']['alien_ocean']['swim'] for n in js.get('nodes', []) if n.get('name') == 'rig' and 'alien_ocean' in n.get('extras', {})), None)
     elif 'swim_extras' in st: sw = st['swim_extras']
+    R['EX8_eye_shell_tris'] = st.get('eye_shell_tris'); R['EX8_eye_patch_tris'] = st.get('eye_patch_tris')
+    R['EX8_pass'] = st.get('eye_shell_tris') is not None and 0 < st['eye_shell_tris'] <= EYE_SHELL_TRIS_MAX
     need = ('wave', 'beat_law', 'clips')
     R['EX6_pass'] = bool(sw) and all(k in sw for k in need) and bool(sw['wave'].get('amplitude_envelope_BL')) and bool(sw['wave'].get('lam_BL')) \
         and len(sw['wave'].get('envelopes_by_speed') or []) >= 2 and all(len(r) == 3 for r in sw['wave']['amplitude_envelope_BL'])
@@ -310,6 +374,16 @@ def planted(C0, V0, VN0, form, rec):
     for key in ('faces', 'ftag', 'uv'): c[key] = [c[key][i] for i in keep]
     PL['P3 (tail cap deleted)'] = not run(c, V0)['P3_pass']
     c = copy.deepcopy(C0); c['eyes'] = [dict(e, r=e['r'] * 0.8, r_side=e.get('r_side', e['r']) * 0.8) for e in c['eyes']]; PL['EY1 (eye 20 % small)'] = not run(c, V0)['EY1_pass']
+    # EA2: the eye shells aimed 25 deg further up, as when the aim was the rim's own plane on a head that falls away
+    def tip(n, a_=math.radians(25)): n = np.array(n, float); h_ = math.hypot(n[0], n[2]); e_ = math.atan2(n[1], h_) + a_; return [n[0] / h_ * math.cos(e_), math.sin(e_), n[2] / h_ * math.cos(e_)]
+    c = copy.deepcopy(C0); c['eyes'] = [dict(e, n=tip(e['n'])) for e in c['eyes']]; PL['EA2 (eyes aimed 25 deg further up)'] = not eye_aim_checks(c, V0, form, rec)['EA2_pass']
+    # EA1: the head leaning in round the eye (narrower above it, wider below: no volume round the eye), the skin's slope steeper by tan 40 deg
+    class Leaning:
+        def __init__(s_, f): s_.f = f
+        def __getattr__(s_, k): return getattr(s_.f, k)
+        def z_on(s_, x, y): return s_.f.z_on(x, y) - math.tan(math.radians(40)) * (y - s_.f.eyy)
+        def skin_ring(s_): return type(s_.f).skin_ring(s_)
+    PL['EA1 (head leaning in round the eye)'] = not eye_aim_checks(C0, V0, Leaning(form), rec)['EA1_pass']
     c = copy.deepcopy(C0); c['uv'] = [(np.array(u) * np.array([1, 1.6])).tolist() if i % 3 == 0 else u for i, u in enumerate(c['uv'])]
     PL['P5 (UV stretched 1.6x on 1/3 of faces)'] = not run(c, V0)['P5_pass']
     c = copy.deepcopy(C0); c['uv'][sk] = c['uv'][sk][::-1]; PL['P5 (one UV face folded)'] = run(c, V0)['P5_uv_folded_faces'] > 0
@@ -345,11 +419,15 @@ def planted(C0, V0, VN0, form, rec):
     good = dict(EX1_gape_max_err_pctSL=0.001, EX1_gape_moved_pctSL=6.0, EX2_flare_max_err_pctSL=0.001, EX2_flare_moved_pctSL=2.0,
                 interior_faces=10, lods=dict(LOD1=dict(tris=1, interior_tris=5), LOD2=dict(tris=1, interior_tris=2)),
                 clips=dict(swim_loop={}, breathe_loop={}, gape={}, flare={}), swim_loop_closure_BL=0.0,
-                collision=dict(hulls=5, coverage=1.0, hull_over_form_volume=1.2),
+                collision=dict(hulls=5, coverage=1.0, hull_over_form_volume=1.2), eye_shell_tris=252,
                 lod_chain=dict(levels=[dict(lod=0, tris=8000, from_m=0.0), dict(lod=1, tris=2000, from_m=5.0, tris_built=1950), dict(lod=2, tris=500, from_m=10.0, tris_built=490)]),
                 swim_extras=dict(wave=dict(amplitude_envelope_BL=[[0, 0.02, 0.0]], lam_BL=1.0, envelopes_by_speed=[{}, {}]), beat_law={}, clips={}))
     ex = lambda **kw: ex_checks('/nonexistent', {**good, **kw})
-    PL['EX planted baseline passes'] = all(ex()[k] for k in ('EX1_pass', 'EX2_pass', 'EX3_pass', 'EX4_pass', 'EX5_pass', 'EX6_pass', 'EX7_pass'))
+    PL['EX planted baseline passes'] = all(ex()[k] for k in ('EX1_pass', 'EX2_pass', 'EX3_pass', 'EX4_pass', 'EX5_pass', 'EX6_pass', 'EX7_pass', 'EX8_pass'))
+    PL['EX8 (the old eye shells: two 24 x 5 domes an eye, 864 triangles)'] = not ex(eye_shell_tris=864)['EX8_pass']
+    c = copy.deepcopy(C0)
+    for e in c['eyes']: e['optics'] = dict(e['optics'], cornea_sag_R=0.7)          # the old builds' dome: 0.66-0.77 eye radii on every species
+    PL['EY2 (cornea a dome 0.7 eye radii high: goggles)'] = not eyeball_checks(c)['EY2_pass']
     PL['EX1 (jaw skinned off the stress pose by 0.5 % SL)'] = not ex(EX1_gape_max_err_pctSL=0.5)['EX1_pass']
     PL['EX2 (covers never move)'] = not ex(EX2_flare_moved_pctSL=0.0)['EX2_pass']
     PL['EX3 (LOD2 lost the mouth interior)'] = not ex(lods=dict(LOD1=dict(tris=1, interior_tris=5), LOD2=dict(tris=1, interior_tris=0)))['EX3_pass']
