@@ -1,7 +1,7 @@
 ## Player UI 0.1.0 (adapters/godot/ui; "Port player UI and gamepad controls" thread, 28 Nov 2026): the gamepad-first layer
 ## over a GameRoot. Ports Thalassa v20.19's presentation layer (style/hud-overlay.js contextual prompt + button badges,
 ## runtime.js pause modal, toast, playHaptic call sites), upgraded where the port plan says so:
-##   - the prompt sits beside the thing itself in the world (Abzu-minimal; Thalassa's bottom banner kept as prompt_style "banner")
+##   - prompts sit in Thalassa's bottom bar (Gary 28 Nov: clean main view, clearer interaction language); "world" places them beside the target
 ##   - the camera picks the target (core/m33_interact/interact_picker.gd), never a fixed priority list; no flicker (hysteresis)
 ##   - the pause menu is plain Godot controls with focus navigation, so D-pad / left stick / Cross-A / Circle-B work on every pad
 ##   - remapping goes through InputReader -> InputMap (system buttons refused, duplicates refused), saved to user://
@@ -30,7 +30,7 @@ var targets_fn := Callable()              # () -> Array of picker targets
 var test_tools := Callable()              # () -> void: opens the test level's debug panel (pause menu entry when set)
 var report_fn := Callable()               # () -> void: saves an issue report (pause menu entry when set)
 var on_pause := Callable()                # (on: bool) -> void: the level frees / recaptures the mouse
-var prompt_style := "world"               # "world" (beside the target) | "banner" (Thalassa bottom bar) | "glyph" (badge only)
+var prompt_style := "banner"              # Gary 28 Nov 08:04Z: "banner" (bottom bar, clean main view) | "world" (beside the target) | "glyph"
 var picker = Picker.new()
 var paused := false
 var page := ""                            # "", "main", "options", "controls"
