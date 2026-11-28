@@ -333,6 +333,11 @@ func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense
 ## so a planted foot rolling onto its ball keeps its toes on the ground.
 var girdle := {"L": Vector3.ZERO, "R": Vector3.ZERO}
 var girdle_v := {"L": Vector3.ZERO, "R": Vector3.ZERO}
+var ft_r := Vector3.ZERO          # follow-through: the upper body's lag rotation (rotation vector) and its rate
+var ft_w := Vector3.ZERO
+var ft_v := Vector3.ZERO          # smoothed pelvis velocity, its previous value and the pelvis position last tick
+var ft_a := Vector3.ZERO
+var ft_p := Vector3.INF
 var toe_bend := {"L": 0.0, "R": 0.0}
 const TOE_LEN := 0.032       # ball to the toe end of the sole plate
 const BALL_Y := 0.11          # foot local: the ball of the foot (toe joint), along the foot
@@ -348,6 +353,53 @@ static func _rises(gq: float, g_ball: float, q: Vector3, plane_g: float, fn: Vec
 	if not is_finite(plane_g): return gq > g_ball + 0.01
 	var plane_y := plane_g - (fn.x * (q.x - fx) + fn.z * (q.z - fz)) / maxf(0.3, fn.y)
 	return gq > plane_y + 0.01
+
+## Follow-through (skeleton only, the motor's pose and the tests' joints are untouched): the upper body is a damped
+## spring on the pelvis. When the hips speed up, the chest trails them a little; when they stop, it carries on, then
+## settles back with one small overshoot. The head counters most of that tilt so the gaze stays level.
+const FT_GAIN := 0.016        # rad of lean per m/s2 of pelvis acceleration
+const FT_MAX := 0.07          # rad
+const FT_W := 9.0             # spring rate (rad/s): ~0.7 s to settle
+const FT_Z := 0.55            # damping ratio: one soft overshoot
+func _follow_through(skel: Dictionary, dt: float, s) -> void:
+	var pp: Vector3 = skel["pelvis"].origin
+	if not ft_p.is_finite() or pp.distance_to(ft_p) > 0.5 or dt <= 0.0:
+		ft_p = pp; ft_v = Vector3.ZERO; ft_a = Vector3.ZERO; ft_r = Vector3.ZERO; ft_w = Vector3.ZERO
+		return
+	var v := (pp - ft_p) / dt
+	ft_p = pp
+	var kv := 1.0 - exp(-dt / 0.06)
+	var nv := ft_v.lerp(v, kv)
+	var a := (nv - ft_v) / dt
+	ft_v = nv
+	ft_a = ft_a.lerp(a, 1.0 - exp(-dt / 0.06))
+	var up := Vector3.UP
+	var a_h := Vector3(ft_a.x, 0.0, ft_a.z)
+	if s.ground_walk_blend < 0.5: a_h = ft_a - up * ft_a.dot(up) * 0.5     # swimming: vertical surges count half
+	var drive := -up.cross(a_h) * FT_GAIN                                   # the top trails the acceleration
+	if drive.length() > FT_MAX: drive = drive.normalized() * FT_MAX
+	# semi-implicit spring, sub-stepped so 30 Hz behaves like 120 Hz
+	var n := maxi(1, ceili(dt / (1.0 / 120.0)))
+	var h := dt / n
+	for _i in n:
+		ft_w += (-(FT_W * FT_W) * (ft_r - drive) - 2.0 * FT_Z * FT_W * ft_w) * h
+		ft_r += ft_w * h
+	if ft_r.length() > FT_MAX * 1.3: ft_r = ft_r.normalized() * FT_MAX * 1.3
+	var ang := ft_r.length()
+	if ang < 1e-5: return
+	var axis := ft_r / ang
+	var piv: Vector3 = skel["spine_01"].origin
+	var parts := {"spine_02": 0.5, "spine_03": 1.0, "neck": 1.0, "head": 1.0,
+		"clavicle_l": 1.0, "clavicle_r": 1.0, "upperarm_l": 1.0, "upperarm_r": 1.0,
+		"lowerarm_l": 1.0, "lowerarm_r": 1.0, "hand_l": 1.0, "hand_r": 1.0}
+	for b in parts:
+		if not skel.has(b): continue
+		var rb := Basis(axis, ang * parts[b])
+		var x: Transform3D = skel[b]
+		skel[b] = Transform3D(rb * x.basis, piv + rb * (x.origin - piv))
+	# the head keeps most of its own orientation (gaze stays level)
+	var hx: Transform3D = skel["head"]
+	skel["head"] = Transform3D(Basis(axis, -ang * 0.7) * hx.basis, hx.origin)
 
 static func seg_xf(a: Vector3, b: Vector3, ref: Vector3) -> Transform3D:
 	var y := (b - a).normalized()
@@ -463,6 +515,7 @@ func _skeleton(pose: Dictionary, dt: float, s, env: Dictionary) -> Dictionary:
 		skel["calf_" + side.to_lower()] = seg_xf(lg.ik.mid, lg.ik.eff, lg.ik.bendAxis)
 		skel["foot_" + side.to_lower()] = Transform3D(_ortho(fm.basis), fm.origin)
 		skel["ball_" + side.to_lower()] = Transform3D(_ortho(toe.basis), toe.origin)
+	_follow_through(skel, dt, s)
 	pose["skel"] = skel
 	return pose
 
