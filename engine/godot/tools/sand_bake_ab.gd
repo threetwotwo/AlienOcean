@@ -24,12 +24,16 @@ static func _lab(c: Color) -> Vector3:
 	var fx: float = f.call(x); var fy: float = f.call(y); var fz: float = f.call(z)
 	return Vector3(116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz))
 
-func _shot(lvl, pitch: float) -> Image:
-	for i in 40:
-		if lvl.game.cam: lvl.game.cam.pitch = pitch
-		await process_frame
-	await RenderingServer.frame_post_draw
-	return root.get_viewport().get_texture().get_image()
+## the ground surface alone (no water light, caustics or anything that moves): albedo lit by one fixed light through its normal,
+## drawn unshaded in its own world, so A and B differ only by the bake
+func _ab_shader() -> Shader:
+	var g := FileAccess.get_file_as_string("res://look/ground_surface.gdshader")
+	g = g.replace("render_mode blend_mix, cull_back, diffuse_lambert, specular_disabled;", "render_mode unshaded, cull_back;")
+	g = g.substr(0, g.find("void light()"))
+	var end := g.rfind("}")
+	g = g.substr(0, end) + "\tALBEDO = S.alb * (0.3 + 0.7 * max(dot(ng, normalize(vec3(0.4, 1.0, 0.3))), 0.0)); EMISSION = vec3(0.0); AO = 1.0;\n}\n"
+	var sh := Shader.new(); sh.code = g
+	return sh
 
 func _run(lvl) -> void:
 	while not lvl.ready_done: await process_frame
@@ -39,14 +43,39 @@ func _run(lvl) -> void:
 	var g = lvl.game
 	while g.sand_bake == null: await process_frame
 	print("BAKE px ", g.sand_bake.px, " box ", g.sand_bake.box, " ms ", g.sand_bake.ms)
-	lvl.set_toggle("half_res", half)
+	var sh := _ab_shader()
+	var vp := SubViewport.new(); vp.own_world_3d = true; vp.size = Vector2i(960, 540)
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	if half: vp.scaling_3d_mode = lvl.upscaler(); vp.scaling_3d_scale = 0.5
+	root.add_child(vp)
+	var cam := Camera3D.new(); vp.add_child(cam)
+	var mats := []
+	for mi in g.lagoon.find_children("*", "MeshInstance3D", true, false):
+		for s in mi.mesh.get_surface_count():
+			var m = mi.get_surface_override_material(s)
+			if m is ShaderMaterial and m.shader != null and m.shader.resource_path == "res://look/ground_surface.gdshader":
+				var c: ShaderMaterial = m.duplicate(); c.shader = sh; mats.append(c)
+				var d := MeshInstance3D.new(); d.mesh = mi.mesh; vp.add_child(d); d.global_transform = mi.global_transform
+				for k in mi.mesh.get_surface_count(): d.set_surface_override_material(k, c)
+				break
+	print("SANDAB ground meshes ", mats.size(), " upscale ", vp.scaling_3d_mode if half else -1)
 	for t in [1, 0]:
 		for pitch in [-0.25, -1.15]:
+			root.get_viewport().disable_3d = false
 			lvl.teleport(t)
-			g.set_sand_bake(false)
-			var ia: Image = await _shot(lvl, pitch)
-			g.set_sand_bake(true)
-			var ib: Image = await _shot(lvl, pitch)
+			for i in 30:
+				if g.cam: g.cam.pitch = pitch
+				await process_frame
+			var mc := root.get_viewport().get_camera_3d()
+			cam.global_transform = mc.global_transform; cam.fov = mc.fov; cam.near = mc.near; cam.far = mc.far
+			root.get_viewport().disable_3d = true   # only the A/B world draws while it is measured
+			var shots := []
+			for on in [0.0, 1.0]:
+				for m in mats: m.set_shader_parameter("sand_on", on)
+				for i in 12: await process_frame   # the upscaler's history settles on a still picture
+				await RenderingServer.frame_post_draw
+				shots.append(vp.get_texture().get_image())
+			var ia: Image = shots[0]; var ib: Image = shots[1]
 			var name := "tp%d_pitch%.2f%s" % [t, pitch, "_half" if half else ""]
 			ia.save_png(out.path_join(name + "_A_procedural.png")); ib.save_png(out.path_join(name + "_B_baked.png"))
 			var d := Image.create(ia.get_width(), ia.get_height(), false, Image.FORMAT_RGB8)
