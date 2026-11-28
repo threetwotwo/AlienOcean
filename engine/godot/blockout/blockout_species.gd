@@ -43,15 +43,18 @@ const PROFILES := {
 	"whale_shark": {"length": 10.0, "r": 0.10, "mode": "lateral", "speed": 1.85, "w0": 1.12, "w1": 0.22, "k": 7.4,
 		"amp": 0.06, "env": [0.42, 1.0], "path": {"L": 50.0, "R": 18.0, "H": 1.5, "bank": 8.0},
 		"fins": {"dorsal": [0.50, 0.13, 0.08], "tail": [0.97, 0.20], "pecs": [0.26, 0.20]},
-		"slots": {"dorsal": {"hand_l": [0.475, -0.012, 0.185], "hand_r": [0.482, 0.012, 0.165], "body": [0.50, 0.03, 0.12]},
+		# dorsal / tail (Thalassa getCreatureGripWorld): both hands on her ride (+x) flank of the fin, the upper one just
+		# behind the leading edge, the lower one 7 cm further back; at this stand-in's fin boxes (tilted 0.35 / 0.5 rad)
+		"slots": {"dorsal": {"hand_l": [0.4155, 0.006, 0.185, 0.013], "hand_r": [0.427, 0.006, 0.165, 0.013], "body": [0.445, 0.03, 0.12]},
 			"pec_left": {"hand_l": [0.245, -0.17, -0.015], "hand_r": [0.25, -0.14, -0.012], "body": [0.27, -0.16, 0.0]},
 			"pec_right": {"hand_l": [0.25, 0.14, -0.012], "hand_r": [0.245, 0.17, -0.015], "body": [0.27, 0.16, 0.0]},
-			"tail": {"hand_l": [0.955, -0.008, 0.11], "hand_r": [0.96, 0.008, 0.09], "body": [0.93, 0.02, 0.05]}},
+			"tail": {"hand_l": [0.907, 0.006, 0.11, 0.013], "hand_r": [0.922, 0.006, 0.09, 0.013], "body": [0.905, 0.025, 0.05]}},
 		"note": "Thalassa base mesh 13.2 m x 1.44-1.60 = 19-21 m (oversized); real adult 8-12 m, speed ~1.1 m/s"},
 	"manta": {"length": 3.0, "span": 6.0, "r": 0.06, "mode": "flap", "speed": 1.4, "w0": 2.0, "w1": 0.0, "k": 0.58,
 		"amp": 0.17, "env": [0.06, 1.0], "path": {"L": 24.0, "R": 7.0, "H": 2.0, "bank": 30.0},
 		"fins": {"tail": [1.0, 0.0]},
-		"slots": {"dorsal": {"hand_l": [0.36, -0.10, 0.07], "hand_r": [0.36, 0.10, 0.07], "body": [0.52, 0.0, 0.06]}},
+		# the hands on its broad back at most 0.36 m out (Thalassa: 0.30 m, one size): a bigger manta is held as wide
+		"slots": {"dorsal": {"hand_l": [0.36, -0.10, 0.07, 0.0, 0.36], "hand_r": [0.36, 0.10, 0.07, 0.0, 0.36], "body": [0.52, 0.0, 0.06]}},
 		"note": "Thalassa base span 5.4 m x 1.25-1.75; real reef manta 3-5 m span, oceanic to 7 m"},
 	"turtle": {"length": 1.1, "r": 0.17, "mode": "stroke", "speed": 1.65, "w0": 2.5, "w1": 0.0, "k": 0.0,
 		"amp": 0.55, "env": [0.0, 1.0], "path": {"L": 14.0, "R": 4.0, "H": 1.5, "bank": 15.0},

@@ -30,6 +30,11 @@ validator, P11 silhouette against the ceiling frame (info), and the export stage
   EX6 the swim settings ride in the glTF (rig node extras alien_ocean.swim: envelope with phase, envelopes at >= 2 speeds, wavelength, beat law, clips)
   EX8 the eye shells (iris, lens, cornea, both eyes) stay inside their triangle budget: the eye's look is in its maps
   EX9 a lining carries the skin's colour where it meets the skin (lips, gill slits): no pink or black line at a closed opening
+  RG1 the head is rigid in the swim clip: no vertex ahead of the head's end (rig.head_end: the gill cover's rear line) moves against
+      the head bone (linear blend skinning through every key); the bend starts behind the gill covers
+  RG2 every paired fin has a chain of 2+ bones along its blade that carries its edge, and the tip trails its rigid place in the swim clip
+  RG3 the caudal fin has a root bone and two lobe bones that carry its edge, and the lobes trail the peduncle
+      (RG rows are measured here from the cage, numpy, when the record has a gait and node is installed; the exports write the same rows)
   EX7 LOD chain by the Unreal-era intake rule (creature_meter K2 + export round trip X4): each level 2.5-6 x fewer triangles, switch distances stated
 """
 import json, os, sys, math, copy, hashlib, subprocess
@@ -745,6 +750,28 @@ def planted(C0, V0, VN0, form, rec):
     return PL
 
 
+def rig_check(C, V, rec, record_path, planted=False):
+    """RG1-RG3 from the cage: the rig's bones and weights (rig.py) through the swim clip (swim_clip.py). planted: also the faults."""
+    import shutil
+    from . import rig, swim_clip
+    raw = json.load(open(record_path))
+    if shutil.which('node') is None or not raw.get('body', {}).get('motion'):
+        return dict(RG_note='not measured: ' + ('node is not installed' if shutil.which('node') is None else 'the record has no gait (body.motion)'))
+    def run(c=C, fin_fault=None, clip_fault=None):
+        bl = rig.bones(c, V, rec) + rig.fin_bones(c); W, _ = rig.weights(c, V, rec)
+        return swim_clip.rig_checks(C, V, W, bl, swim_clip.clips(c, V, raw, bl, fin_fault=clip_fault), fin_fault=fin_fault)
+    try: R = run()
+    except KeyError as e: return dict(RG_note=f'not measured: the record has no full gait (body.motion lacks {e})')
+    R['RG_bones'] = len(rig.bones(C, V, rec) + rig.fin_bones(C))
+    if planted:
+        R['RG_planted'] = {'RG planted baseline passes': R['RG_pass'],
+                           'RG1 (bones evenly from the snout, weights blended across the skull)': not run(dict(C, rig_fault='even'))['RG1_pass'],
+                           'RG2 (a paired fin all on its root bone)': not run(fin_fault='rigid')['RG2_pass'],
+                           'RG3 (the caudal fin all on its root bone)': not run(fin_fault='rigid')['RG3_pass'],
+                           'RG2, RG3 (fin chains that do not trail: boards)': not (lambda r: r['RG2_pass'] or r['RG3_pass'])(run(clip_fault='board'))}
+    return R
+
+
 def check(out, record_path, with_planted=False, sweep=True):
     from .record import adapt
     from .form import Form
@@ -754,11 +781,13 @@ def check(out, record_path, with_planted=False, sweep=True):
     R.update(pose_checks(C, Z['V'], rec, sweep=sweep))
     stp = os.path.join(out, 'glb_stats.json')
     if os.path.exists(stp): R.update(export_checks(out, json.load(open(stp))))
+    rg = rig_check(C, Z['V'], rec, record_path, with_planted); rg_pl = rg.pop('RG_planted', {}); R.update(rg)
     R['P9_form_cage_s'] = round(C['stats']['build_s'] - C['stats']['bake_s'], 1); R['P9_pass'] = R['P9_form_cage_s'] < 60
     from .silhouette import silhouette_check
     R.update(silhouette_check(C, Z['V'], rec, record_path))      # SIL1: silhouette before detail
     if with_planted:
         R['PLANTED_caught'] = planted(C, Z['V'], Z['VN'], form, rec)
+        R['PLANTED_caught'].update(rg_pl)
         from .silhouette import planted_sil
         R['PLANTED_caught'].update(planted_sil(C, Z['V'], rec))
         from .silhouette import planted_sil2

@@ -241,25 +241,15 @@ for ob in eye_obs:
 REC_PATH = sys.argv[sys.argv.index('--record') + 1] if '--record' in sys.argv else None
 if REC_PATH is None: raise SystemExit('glb needs --record RECORD.json (jaw, cover and swim come from the record)')
 REC = adapt(REC_PATH, C.get('style')); RAW = json.load(open(REC_PATH))
-BL = RIG.bones(C, V, REC); NB, xs = RIG.spine_stations(C)
-spine_at = lambda x: f'spine_{RIG.spine_index(C, x):02d}'
-rig = rigging.build_armature(scn, BL, C['fins'], B, spine_at)
+BL = RIG.bones(C, V, REC) + RIG.fin_bones(C); NB, xs = RIG.spine_stations(C)
+rig = rigging.build_armature(scn, BL, B)
 W_body, RIG_INFO = RIG.weights(C, V, REC)
 rigging.bind_groups(body, rig, W_body)
-def spine_groups(xv, share=1.0):
-    i0, a0, i1, a1 = RIG.spine_weights(C, np.atleast_1d(xv)); g = {}
-    for k in range(len(i0)):
-        for i, a in ((i0[k], a0[k]), (i1[k], a1[k])):
-            n = f'spine_{i:02d}'; g.setdefault(n, np.zeros(len(i0)))[k] += a * share
-    return g
+spine_groups = lambda xv: RIG.spine_groups(C, xv)
 for k, ob in fin_obs.items():
-    # every fin vertex follows the spine at its own x, so median fins bend with the body; paired fins (pectoral, pelvic) hand over to
-    # their own root bone from root (T = 0) to edge (T = 1), where they are articulated; median fins give their bone no weight yet
-    # (fin ray bones are the next step: HARD_PROBLEMS EXP-FIN-1)
-    fv = np.array(C['fins'][k]['V']); T = np.clip(np.array(C['fins'][k]['T'], float), 0, 1)
-    share = T if k.startswith(('pectoral', 'pelvic')) else np.zeros(len(fv))
-    g = {n: w * (1 - share) for n, w in spine_groups(fv[:, 0]).items()}; g['fin_' + k + '_root'] = share
-    rigging.bind_groups(ob, rig, g)
+    # every fin vertex follows the spine at its own x, so median fins bend with the body; paired fins and the caudal fin hand over to
+    # their own bone chains from root (T = 0) to edge (T = 1) (rig.fin_groups); median fins have no bones (they follow the trunk)
+    rigging.bind_groups(ob, rig, RIG.fin_groups(C, k))
 for ob in eye_obs:   # a rigid shell: the skin weights at the eye centre, for every shell vertex (eyes ride with the skin round them)
     e = C['eyes'][0 if ob.name.endswith('L') == (C['eyes'][0]['side'] > 0) else 1]
     g = {n: np.full(len(ob.data.vertices), float(w[0])) for n, w in spine_groups(np.array([e['c'][0]])).items()}
@@ -278,7 +268,7 @@ SW = swim_clip.clips(C, V, RAW, BL, CHK)
 _safe = CHK.get('SR1_safe') or {}
 GAPE_CLIP = min(GAPE_REAL, float(_safe.get('gape', GAPE_REAL))); FLARE_CLIP = min(FLARE_REAL, float(_safe.get('flare', FLARE_REAL)))
 FPS = 120; scn.render.fps = FPS; scn.render.fps_base = 1.0
-chain = swim_clip.chain_names(NB); cmap = {chain[i]: f'spine_{i:02d}' for i in range(NB)}
+cmap = {j: b for b, j in swim_clip.bone_joints(NB).items()}; cmap.update({b['name']: b['name'] for b in BL if b.get('fin')})   # engine joint -> bone
 def timed(clip, fps):
     return [(k / fps, P) for k, P in enumerate(rigging.engine_frames(rig, clip, cmap))]
 cmap_b = dict(opercleL='opercleL', opercleR='opercleR')   # breathe keys the covers only, so it layers over swim
@@ -297,6 +287,7 @@ SW['extras']['clips']['gape']['peak_rule'] = SW['extras']['clips']['flare']['pea
 SW['extras']['head_bones'] = {n: dict(pivot_m=[round(c, 6) for c in (B(bspec[n]['pivot']).x, B(bspec[n]['pivot']).z, -B(bspec[n]['pivot']).y)],
                                       axis_gltf=[round(c, 6) for c in (hinge(n)[2].x, hinge(n)[2].z, -hinge(n)[2].y)],
                                       opens='positive angle about axis_gltf (armature space, right hand)') for n in ('jaw', 'opercleL', 'opercleR')}
+RG = swim_clip.rig_checks(C, V, W_body, BL, SW); SW['extras']['rig']['checks'] = RG; print('RG', {k: v for k, v in RG.items() if k.endswith('_pass') or k.endswith('pctBL')})
 json.dump(dict(SW['extras']), open(os.path.join(OUT, 'swim.json'), 'w'), indent=1, default=float)
 
 # EX1/EX2: Blender's skinning at the real gape / flare equals the stress test's pose (creature_maker.pose), vertex for vertex
@@ -384,7 +375,7 @@ for _p, _l in [(glb, 0)] + [(os.path.join(OUT, f'fish_LOD{c["lod"]}.glb'), c['lo
 json.dump(dict(SW['extras']), open(os.path.join(OUT, 'swim.json'), 'w'), indent=1, default=float)
 stats = dict(glb_kb=round(os.path.getsize(glb) / 1024), objects=len([o for o in LOD0 if o.type == 'MESH' and not o.name.startswith('col_')]))
 stats['tris_total'] = tris_of(LOD0); stats['normal_specks_fixed'] = SPECKS_FIXED; stats['bones'] = len(rig.data.bones); stats['lods'] = lods; stats['lod_chain'] = SW['extras']['lod_chain']; stats['blender_bake_s'] = bake_s
-stats.update(INT_STATS); stats.update(RIG_INFO); stats.update(EXS)
+stats.update(INT_STATS); stats.update(RIG_INFO); stats.update(EXS); stats.update(RG)
 stats['eye_shell_tris'] = tris_of(eye_obs); stats['eye_patch_tris'] = sum(len(f) - 2 for f, t in zip(C['faces'], C['ftag']) if t == 'eye')
 stats['clips'] = {n: dict(loop=v['loop']) for n, v in anim_x.items()}; stats['swim_loop_closure_BL'] = SW['loop_err']
 stats['collision'] = dict(hulls=len(HUL), coverage=round(cov, 4), hull_over_form_volume=round(vol, 3), verts=[len(h[0]) for h in HUL], bones=[f'spine_{h[2]:02d}' for h in HUL])

@@ -14,17 +14,14 @@ A3 = Matrix(((-1, 0, 0), (0, 0, 1), (0, 1, 0)))        # engine frame -> Blender
 A4 = A3.to_4x4(); A4i = A4.inverted()
 
 
-def build_armature(scn, bone_list, fins, B, spine_at):
+def build_armature(scn, bone_list, B):
+    """bone_list: creature_maker.rig bones (spine, jaw, covers) + rig.fin_bones (fin chains), parents before children."""
     arm = bpy.data.armatures.new('rig'); rig = bpy.data.objects.new('rig', arm); scn.collection.objects.link(rig)
     bpy.context.view_layer.objects.active = rig; bpy.ops.object.mode_set(mode='EDIT'); eb = {}
     for b in bone_list:
         e = arm.edit_bones.new(b['name']); e.head = B(b['head']); e.tail = B(b['tail'])
         if b['parent']: e.parent = eb[b['parent']]; e.use_connect = b['connect']
         eb[b['name']] = e
-    for k, f in fins.items():
-        v = np.array(f['V']); root = v[: len(v) // 6].mean(0); tip = v[-len(v) // 6:].mean(0)
-        # bone 'fin_<k>_root', not 'fin_<k>': the fin mesh node has that name and Godot would rename the bone
-        e = arm.edit_bones.new('fin_' + k + '_root'); e.head = B(root); e.tail = B(root + (tip - root) * 0.6); e.parent = eb[spine_at(v[:, 0].mean())]
     bpy.ops.object.mode_set(mode='OBJECT')
     return rig
 

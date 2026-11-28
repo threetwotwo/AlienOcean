@@ -51,6 +51,16 @@
 ##                   "glance": at least BR_GLANCE_SHARE of the free new looks (not the camera's intent, not a sound)
 ##                   start as the breath turns (the brain lets one wait at most half a breath for it), at least one.
 ##                   Planted fault --fault breathjump: the breath phase jumps 0.35 of a cycle once.
+##  J40-J44 head     (every case with the skeleton; head upgrade block at the end of this file) eyes, gaze lead,
+##                   blinks and lids, jaw, neck segments. Planted fault --fault eyelimit: the eyes lose their limits.
+##  Rest and ride (cases B48-B55, lettered, opts "act"; core/m02_motor/body_act.gd, core/m04_body/pose_rest.gd, pose_ride.gd):
+##  J14 grip       riding (latched), each palm centre (hand frame (0, 0.04, 0)) within 2 cm of its grip marker
+##  J15 creature   the J6 spheres (radius less 2 cm) never inside the creature stand-in's body ellipsoids, wings or
+##                 fins (hands and forearms may touch the fin they hold) for 3 ticks running
+##  J16 resting    seated or lying, each ankle stays within 1 cm of where it came to rest (no foot drift)
+##  J17 outcome    the case reaches the phases it expects (sat / lay / rode / stood up and walked off) or is refused
+##                 when it should be (too small, grips too wide, out of reach)
+##  J4 uses Thalassa's seated / lying neck limits (yaw 1.12 / 1.15, pitch -0.62..0.72 / -0.34..0.56) while resting.
 extends SceneTree
 
 const Packet := preload("res://core/m01_input/input_packet.gd")
@@ -141,6 +151,7 @@ var warm := 0
 var prev := {}
 var ref_spans := {}
 var results: Array = []
+var kit := {}
 # --film <dir>: render every case that is not KNOWN (needs a renderer: xvfb-run ... --rendering-driver vulkan
 # --fixed-fps 15), one PNG per frame into <dir>/<case>/, with the case name and live checks written on screen.
 # --shard i/n runs every n-th case starting at i (to film in parallel).
@@ -148,6 +159,7 @@ const Mannequin := preload("res://adapters/godot/mannequin.gd")
 var film := ""
 var film_head := false      # --head: a near three-quarter front camera on her head and chest, gaze ray and things she senses drawn (brain films)
 var film_marks: MeshInstance3D
+var film_fill: DirectionalLight3D     # (head upgrade) face fill light in --head films
 var film_snd := []          # [pos, t] of each sound as it rings, drawn 1 s
 var film_close := false     # --close: a near side-on camera that frames the body (Gary: clearer, bigger shots of the body), 30 fps
 var cam_side := Vector3.ZERO
@@ -187,7 +199,7 @@ func _initialize() -> void:
 			if idx % shard.y == shard.x and not (film != "" and is_known and only == ""): keep.append(c)     # --only films a KNOWN case too
 		cases = keep
 	if film != "":
-		root.size = Vector2i(800, 450)
+		root.size = Vector2i(1280, 720) if film_head else Vector2i(800, 450)     # (head upgrade: the face close-up at 720p)
 		var rock := StandardMaterial3D.new(); rock.albedo_color = Color(0.78, 0.72, 0.6); rock.roughness = 0.95
 		Worlds.visual_material = rock
 		var cl := CanvasLayer.new(); root.add_child(cl)
@@ -309,6 +321,7 @@ func _define_cases() -> void:
 	# Mac breach test: holding ascend and forward from the 2.4 m lagoon floor skimmed 20 m through the air
 	_case("B47 lagoon: breach from the floor, ascend held", "lagoon_pool", {"start": Vector3(0, -1.4, 0), "mode": Motor.Mode.SWIM}, 12.0,
 		func(_t): var k = _pk(Vector2(0, 1)); k.thrust = 1.0; k.ascend = true; return k)
+	_define_act_cases()
 	# breath master clock (J13 windows; see the header)
 	_case("B60 breath: long idle stand, glances on the breath", "wall", {"start": Vector3(-8, 0.05, 0)}, 40.0,
 		func(_t): return _pk(), {"brain": "free", "breath": {"rest": [10.0, 40.0], "glance": true}})
@@ -322,6 +335,7 @@ func _define_cases() -> void:
 			var k = _pk(Vector2(0, 0.6) if tt < 7.0 else (Vector2(0, 1) if tt < 13.0 else Vector2.ZERO))
 			k.thrust = 1.0 if (tt >= 7.0 and tt < 13.0) else 0.0
 			return k, {"breath": {"exert": [14.0, 19.0], "land_lock": [[4.0, 7.0], [10.0, 13.0]]}})
+	_hd_cases()     # (head upgrade)
 	for m in monkey_runs:
 		var seed := 2000 + m
 		_case("BM monkey seed %d (%ds)" % [seed, int(monkey_secs)], "shore", {"start": Vector3(0, 1.05, 4), "waves": 0.5 if m % 2 == 1 else 0.0},
@@ -364,6 +378,8 @@ func _start_next() -> bool:
 	world = Node3D.new()
 	root.add_child(world)
 	env = Worlds.build(world, cur.kind, cur.p)
+	kit = Worlds.last
+	if cur.opts.has("ride"): _ride_place()
 	body = Body.new()
 	world.add_child(body)
 	body.global_position = cur.p.start
@@ -371,6 +387,7 @@ func _start_next() -> bool:
 	rig = Rig.new()
 	if film != "":
 		_film_setup()
+	if fault == "eyelimit": rig.head_fault = "eyelimit"     # (head upgrade) planted: eyes without their limits
 	if fault == "len": rig.shin_len = 0.30          # planted: rig solves with a short shin, the checker knows the real one
 	wq = WorldQuery.new(world.get_world_3d(), 1)
 	wq.exclude.append(body.get_rid())
@@ -429,6 +446,7 @@ func _physics_process(dt: float) -> bool:
 		rec.hitch_acc = 0.0
 	if fault == "breathjump" and rec.ticks == tick * 5 and rig.brain.get("breath_phase") != null:
 		rig.brain.breath_phase = fposmod(rig.brain.breath_phase + 0.35, 1.0)     # planted: the breath skips a third of a cycle
+	if cur.opts.has("look"): rig.brain.engage_objective_focus("look", cur.opts.look.call(t))     # (head upgrade)
 	var pose: Dictionary = rig.update_swim(rdt, s, null, t, renv, _brain_sense(s) if cur.opts.has("brain") else null)
 	if fault == "jitter":
 		_shift_pose(pose, Vector3(0.002 if int(rec.ticks) % 2 == 0 else -0.002, 0, 0))   # planted: the whole body shaking +-2 mm
@@ -595,7 +613,10 @@ func _check(p: Dictionary, dt: float) -> void:
 	# J4 neck
 	var hm: Dictionary = p.headMotion
 	var max_yaw := 1.04
-	var nerr: float = maxf(absf(hm.neckYaw) - max_yaw, maxf(-0.58 - hm.neckPitch, hm.neckPitch - 1.08))
+	var nlim := Vector2(-0.58, 1.08)
+	if mode.begins_with("rest_lie"): max_yaw = 1.15; nlim = Vector2(-0.34, 0.56)
+	elif mode.begins_with("rest"): max_yaw = 1.12; nlim = Vector2(-0.62, 1.08)
+	var nerr: float = maxf(absf(hm.neckYaw) - max_yaw, maxf(nlim.x - hm.neckPitch, hm.neckPitch - nlim.y))
 	_w("neck", maxf(0.0, nerr))
 	if nerr > NECK_TOL: _fail("J4", "neck yaw %.2f pitch %.2f past limits" % [hm.neckYaw, hm.neckPitch])
 	var chest_fwd: Vector3 = -p.chestMat.basis.z.normalized()
@@ -738,6 +759,8 @@ func _check(p: Dictionary, dt: float) -> void:
 		if ov > 0.02: _fail("J8", "legs overlap %.0f mm" % (ov * 1000.0))
 	if cur.opts.has("brain"): _check_brain(p, dt)
 	_check_breath(p, dt)
+	_check_head(p, dt)     # (head upgrade)
+	if cur.opts.has("act"): _check_act(p, dt)
 	for side in ["L", "R"]:
 		var arm3: Dictionary = p["arm" + side]
 		for pt in [arm3.mid.lerp(arm3.eff, 0.5), arm3.eff]:
@@ -772,6 +795,7 @@ func _jitter(st: Dictionary, key: String, x: Vector3, amp: float) -> void:
 		rv.append(t)
 		while rv.size() > 0 and rv[0] < t - JIT_WIN: rv.pop_front()
 		rec.worst.jitter = maxi(rec.worst.get("jitter", 0), rv.size())
+		if OS.has_environment("BS_JITBY"): rec.jit_by = rec.get("jit_by", {}); rec.jit_by[key] = maxi(rec.jit_by.get(key, 0), rv.size())
 		if rv.size() > JIT_MAX: _fail("J11", "%s jitters: %d reversals in %.1f s" % [key, rv.size(), JIT_WIN])
 
 ## planted fault: move every point of the pose by off (bones keep their lengths)
@@ -995,8 +1019,13 @@ func _film_frame(pose: Dictionary) -> void:
 		br.y = 0.0
 		if br.length() < 0.1: br = Vector3.RIGHT
 		br = br.normalized()
+		var act_rest: bool = cur.opts.has("rest") and body.motor.act.kind == "rest" and body.motor.act.holding()
+		if act_rest:     # seated / lying: out in the room in front of the seat, a little to one side (her right may be a wall)
+			var st: Transform3D = body.motor.act.spec.seat
+			var fr: Vector3 = -st.basis.z; fr.y = 0.0
+			br = (fr.normalized() * 0.82 + st.basis.x.normalized() * 0.57).normalized()
 		if cam_side == Vector3.ZERO or frame_i == 0: cam_side = br
-		if cam_side.dot(br) < 0.0: br = -br     # (keep the same side when she reverses)
+		if cam_side.dot(br) < 0.0 and not act_rest: br = -br     # (keep the same side when she reverses)
 		cam_side = cam_side.slerp(br, 0.06).normalized()
 		tgt = pel + Vector3(0, 0.08, 0)
 		var cp := tgt + cam_side * 2.6 + Vector3(0, 0.10, 0)
@@ -1016,7 +1045,8 @@ func _film_frame(pose: Dictionary) -> void:
 	frame_i += 1
 
 func _film_head(pose: Dictionary) -> void:
-	# three-quarter front of her face, 1.6 m out, framing head and chest; follows her heading slowly
+	# (head upgrade: tighter) near front of her face, 0.8 m out, the face filling the frame so the eyes, lids and jaw
+	# read; follows her heading slowly
 	var head: Vector3 = pose.headMat.origin
 	var fw: Vector3 = -pose.chestBasis.z if pose.has("chestBasis") else Vector3.FORWARD
 	if pose.has("bodyRight"):
@@ -1028,11 +1058,14 @@ func _film_head(pose: Dictionary) -> void:
 	if cam_side == Vector3.ZERO or frame_i == 0: cam_side = fw
 	cam_side = cam_side.slerp(fw, 0.04).normalized()
 	var sv := cam_side.cross(Vector3.UP).normalized()
-	var tgt := head + Vector3(0, -0.12, 0)
-	var cp := tgt + (cam_side * 1.25 + sv * 0.9).normalized() * 2.3 + Vector3(0, 0.3, 0)
-	cam.fov = 34.0
+	var tgt := head + (pose.headMat.basis.y as Vector3).normalized() * 0.06 + Vector3(0, -0.03, 0)
+	var cp := tgt + (cam_side * 1.6 + sv * 0.55).normalized() * 0.78 + Vector3(0, 0.06, 0)
+	cam.fov = 30.0
 	cam.global_position = cam.global_position.lerp(cp, 0.3) if frame_i > 0 else cp
 	cam.look_at(tgt)
+	if film_fill == null or not is_instance_valid(film_fill):     # a soft fill from the camera's side: the face is not in shade
+		film_fill = DirectionalLight3D.new(); film_fill.light_energy = 0.7; film_fill.light_intensity_lux = PI * 0.6; world.add_child(film_fill)
+	film_fill.global_transform = Transform3D(cam.global_transform.basis.rotated(Vector3.UP, 0.4), cam.global_position)
 	# marks: gaze ray (yellow), the circling fish (orange), sounds (red, 1 s)
 	if film_marks == null or not is_instance_valid(film_marks):
 		film_marks = MeshInstance3D.new()
@@ -1051,9 +1084,15 @@ func _film_head(pose: Dictionary) -> void:
 		im.surface_set_color(Color(1, 0.9, 0.2))
 		var eye: Vector3 = head + (pose.headMat.basis.y as Vector3).normalized() * 0.1
 		var gd: Vector3 = (o.gazeDirWorld as Vector3).normalized()
-		for q in [Vector3.ZERO, Vector3(0.004, 0, 0), Vector3(0, 0.004, 0), Vector3(0, 0, 0.004)]:
-			im.surface_add_vertex(eye + q)
+		for q in [Vector3.ZERO, Vector3(0.002, 0, 0), Vector3(0, 0.002, 0)]:
+			im.surface_add_vertex(eye + q + gd * 0.25)
 			im.surface_add_vertex(eye + q + gd * 1.6)
+	if pose.has("skel") and pose.skel.has("eye_l"):     # (head upgrade) where each eye looks (cyan): the eyes lead
+		im.surface_set_color(Color(0.3, 0.95, 1.0))
+		for sd in ["eye_l", "eye_r"]:
+			var ex: Transform3D = pose.skel[sd]
+			im.surface_add_vertex(ex.origin - ex.basis.z.normalized() * 0.03)
+			im.surface_add_vertex(ex.origin - ex.basis.z.normalized() * 0.6)
 	var marks := []
 	if rec.has("brain") and rec.brain.swim:
 		marks.append([head + Vector3(3.0 * cos(t * 0.6), 0.6 * sin(t * 0.9), 3.0 * sin(t * 0.6)) - Vector3(0, 0, 0), Color(1, 0.55, 0.1), 0.18])
@@ -1074,7 +1113,12 @@ func _film_head(pose: Dictionary) -> void:
 	var bs: float = o.get("breathSignal", 0.0)
 	var bar := "#".repeat(int(round((bs * 0.5 + 0.5) * 12.0)))
 	var fails0: String = "  ".join(rec.fail.map(func(f): return f.substr(0, f.find(" at t="))))
-	label.text = "%s\nt = %.1f s   looking at: %s   breath %s\n%s" % [cur.name, t, fid if fid != null else "-", bar, "all checks holding" if fails0 == "" else "FAILING: " + fails0]
+	var hdg: Dictionary = rig.head_dbg
+	var eye_txt := ""
+	if not hdg.is_empty():
+		eye_txt = "   eyes %+.0f / %+.0f deg  lids %s  jaw %.0f deg" % [rad_to_deg((hdg.eye_l.x + hdg.eye_r.x) * 0.5), rad_to_deg((hdg.eye_l.y + hdg.eye_r.y) * 0.5),
+			"BLINK" if hdg.closure > 0.05 else "open", rad_to_deg(hdg.jaw)]
+	label.text = "%s\nt = %.1f s   looking at: %s   breath %s%s\n%s" % [cur.name, t, fid if fid != null else "-", bar, eye_txt, "all checks holding" if fails0 == "" else "FAILING: " + fails0]
 	RenderingServer.frame_post_draw.connect(_film_save.bind("%s/f%05d.png" % [film_case_dir, frame_i]), CONNECT_ONE_SHOT)
 	frame_i += 1
 
@@ -1171,6 +1215,8 @@ func _breath_end() -> String:
 func _end_case() -> void:
 	var brain_txt: String = _brain_end() if cur.opts.has("brain") else ""
 	brain_txt += _breath_end()
+	brain_txt += _head_end()     # (head upgrade)
+	if cur.opts.has("act"): brain_txt += _act_end()
 	var ok: bool = rec.fail.is_empty()
 	var w: Dictionary = rec.worst
 	var summary := "bone %.2f mm, span %.0f%%, elbow %.0f, knee %.0f, knee back %.0f mm, neck +%.2f, head/chest %.0f, pop %.1f m/s, pelvis %.2f m, rock %d ticks, sole under %.0f mm, stand gap %.0f mm, slide %.0f mm, legs %.0f mm, torso %.0f mm" % [
@@ -1183,6 +1229,7 @@ func _end_case() -> void:
 	w["jerk_p95"] = jerk_p95
 	w["jerk_p50"] = jerk_p50
 	summary += ", jerk p50 %.0f p95 %.0f m/s3, jitter %d rev/%.1fs" % [jerk_p50, jerk_p95, w.get("jitter", 0), JIT_WIN] + brain_txt
+	if OS.has_environment("BS_JITBY"): summary += "\n        jitter by signal %s" % str(rec.get("jit_by", {}))
 	if OS.has_environment("BS_JERK"):
 		for k in rec.jk_by: summary += "\n        jerk %s rms %.0f" % [k, sqrt(rec.jk_by[k] / maxf(1.0, rec.jerk.size()))]
 	var fails: Array = rec.fail.map(func(f): return "%s  (%d ticks)" % [f, rec.count.get(f.substr(0, f.find(" ")), 1)])
@@ -1212,3 +1259,499 @@ func _finish() -> bool:
 		f.store_string(JSON.stringify({"tick": tick, "fault": fault, "results": results}, "  "))
 	quit(0 if gate_ok else 1)
 	return true
+
+# ---------------------------------------------------------------- head upgrade BEGIN (J40-J44, cases B63-B67)
+## J40 eyes     every eye's yaw / pitch in the head inside +-35 / +-25 deg (+0.6 deg), sitting in its socket (0.5 mm);
+##              each eye's world direction passes J11 (band JIT_AMP_DIR .. 15x: micro-saccades are in it and must stay
+##              rare, intentional saccades over 3 deg are not jitter) while it is free (inside its soft knee; pinned at a
+##              limit it rides the head, whose facing J11 checks)
+## J41 lead     on every saccade over HD_LEAD_MIN the eyes reach 80 % of their move (first HD_SACC_WIN) before the head has made half of its
+##              own (head moving > 0.06 rad in the next 1.2 s); "lead" cases need at least that many such shifts
+## J42 blinks   each blink (lid closure > 0.02) lasts HD_BLINK_DUR; blinks start HD_BLINK_GAP apart (refractory .. the
+##              longest spontaneous interval); the upper lid stays concentric with its eye and between the closed edge
+##              and its open limit, never under HD_LID_OPEN_MIN while the eye is open, at the closed edge when shut;
+##              "blink_rate" cases: blinks come faster in the exertion window than at rest; "shift_blinks": at least
+##              that many blinks with gaze shifts
+## J43 jaw      between 0 and JAW_MAX, turning at most HD_JAW_RATE; closed (< 0.01 rad) after 1 s with the head under
+##              water; "jaw" windows: closed / open (>= HD_JAW_OPEN)
+## J44 neck     28 bones; neck_lower and neck_upper keep NECK_SEG (0.5 mm), neck_upper ends at the skull base 2 cm or
+##              less from the head bone
+const HD_EYE_PAD := 0.01
+const HD_LEAD_MIN := 0.15
+const HD_SACC_WIN := 0.10      # s: the eyes' own move (a saccade is 20-55 ms; pinned at a limit they then ride the head)
+const HD_BLINK_DUR := Vector2(0.08, 0.22)
+const HD_BLINK_GAP := Vector2(0.55, 6.3)
+const HD_LID_OPEN_MIN := -0.40
+const HD_JAW_RATE := 1.2
+const HD_JAW_OPEN := 0.045
+const HD_BONES := 28
+
+## a point at yaw offset / pitch from where she faces, d metres from her eye (the head cases' targets)
+func _hd_around(yaw_off: float, pitch: float, d: float) -> Vector3:
+	var s = body.motor.swimmer
+	return s.pos + BM.fwd(s.yaw + yaw_off, pitch) * d
+
+func _hd_cases() -> void:
+	var hf := {"start": Vector3(-8, 0.05, 0)}
+	var seq := [2.6, -2.6, 0.0, 1.6, -1.6, 0.7, -2.6, 2.6, 0.0]     # rad: +-150 deg and between
+	_case("B63 head: fast look-around, targets at +-150 deg", "wall", hf, 16.0, func(_t): return _pk(),
+		{"look": func(tt):
+			var i := int(tt / 1.6) % seq.size()
+			return _hd_around(seq[i], 0.25 * sin(float(i) * 1.7), 2.2),
+		"head": {"lead": 4, "shift_blinks": 1}})
+	_case("B64 head: near object, the eyes converge", "wall", hf, 14.0, func(_t): return _pk(),
+		{"look": func(tt):
+			if tt >= 4.0 and tt < 10.0: return _hd_around(0.12 * sin(tt * 0.9), -0.12, 0.32)
+			return _hd_around(0.0, -0.05, 4.0),
+		"head": {"verge": [[5.5, 9.5]], "far": [[2.0, 4.0], [12.0, 14.0]]}})
+	_case("B65 head: rest, sprint, rest: blink rate and mouth breathing", "wall", {"start": Vector3(-8, 0.05, 18)}, 34.0,
+		func(tt):
+			var k = _pk(Vector2(0, 1) if (tt >= 12.0 and tt < 18.0) else Vector2.ZERO)
+			k.thrust = 1.0 if (tt >= 12.0 and tt < 18.0) else 0.0
+			return k, {"head": {"blink_rate": {"rest": [0.0, 12.0], "exert": [18.0, 30.0]}, "jaw": {"closed": [2.0, 12.0], "open": [16.0, 26.0]}}})
+	_case("B66 head: swim prone, looking up and forward", "pool", {"start": Vector3(0, -8, 0), "mode": Motor.Mode.SWIM}, 14.0,
+		func(tt): return _pk(Vector2(0, 0.6), 0.0, 0.9 if tt < 5.0 else (0.0 if tt < 10.0 else -0.6)), {"head": {"jaw": {"closed": [1.5, 14.0]}}})
+	_case("B67 head: idle long stare", "wall", hf, 30.0, func(_t): return _pk(),
+		{"look": func(_tt): return _hd_around(0.15, -0.10, 1.6), "head": {"stare": [3.0, 30.0]}})
+
+func _check_head(p: Dictionary, dt: float) -> void:
+	if not p.has("skel"): return
+	var sk: Dictionary = p.skel
+	if not rec.has("hd"):
+		rec.hd = {"blinks": [], "b_on": -1.0, "closed": false, "leads": 0, "lead_ok": 0, "pending": [], "sacc_n": -1,
+			"jaw_prev": NAN, "under_t": 0.0, "jaw_max": 0.0, "eye_max": 0.0, "verge": {}, "stare_dev": 0.0, "stare_sacc": 0,
+			"micro0": -1, "micro1": 0, "jaw_win": {}, "shift_blinks": 0, "lid_min_open": 9.0}
+	var h: Dictionary = rec.hd
+	if OS.has_environment("HD_DEBUG") and int(rec.ticks) % int(OS.get_environment("HD_DEBUG")) == 0:
+		var d: Dictionary = rig.head_dbg
+		var hb0: Basis = (sk.head as Transform3D).basis.orthonormalized()
+		var g: Vector3 = d.goal
+		print("  t=%.2f eyeL %s eyeR %s goal-in-head %s fix-goal %.3f dist %.2f clo %.2f lid %.2f sacc %d micro %d" % [t, (d.eye_l * 57.3).snappedf(0.1), (d.eye_r * 57.3).snappedf(0.1),
+			Vector3(g.dot(hb0.x), g.dot(hb0.y), g.dot(-hb0.z)).snappedf(0.01), (d.fix as Vector3).angle_to(g), d.dist, d.closure, d.lid_l, d.sacc_n, d.micro_n])
+	# J44
+	var n := 0
+	for k in sk:
+		if sk[k] is Transform3D: n += 1
+	if n != HD_BONES: _fail("J44 neck", "%d bones, not %d" % [n, HD_BONES]); return
+	var hd: Transform3D = sk.head
+	var hb := hd.basis.orthonormalized()
+	var nl: Transform3D = sk.neck_lower
+	var nu: Transform3D = sk.neck_upper
+	var l1 := nl.origin.distance_to(nu.origin)
+	var top: Vector3 = nu.origin + nu.basis.y.normalized() * rig.NECK_SEG
+	if absf(l1 - rig.NECK_SEG) > 0.0005: _fail("J44 neck", "neck_lower %.1f mm (%.0f)" % [l1 * 1000.0, rig.NECK_SEG * 1000.0])
+	if top.distance_to(hd.origin) > 0.02: _fail("J44 neck", "neck_upper ends %.0f mm from the head" % (top.distance_to(hd.origin) * 1000.0))
+	# J40
+	var hx := hb.x; var hy := hb.y; var hf := -hb.z
+	var eyes := {}
+	for sd in ["l", "r"]:
+		var e: Transform3D = sk["eye_" + sd]
+		var f: Vector3 = -e.basis.z.normalized()
+		var yaw := atan2(f.dot(hx), f.dot(hf))
+		var pitch := asin(clampf(f.dot(hy), -1.0, 1.0))
+		eyes[sd] = Vector2(yaw, pitch)
+		h.eye_max = maxf(h.eye_max, maxf(absf(yaw) / rig.EYE_YAW_MAX, absf(pitch) / rig.EYE_PITCH_MAX))
+		if absf(yaw) > rig.EYE_YAW_MAX + HD_EYE_PAD or absf(pitch) > rig.EYE_PITCH_MAX + HD_EYE_PAD:
+			_fail("J40 eyes", "eye_%s at yaw %.0f / pitch %.0f deg in the head" % [sd, rad_to_deg(yaw), rad_to_deg(pitch)])
+		var sock: Vector3 = hd * (rig.EYE_L if sd == "l" else rig.EYE_R)
+		if e.origin.distance_to(sock) > 0.0005: _fail("J40 eyes", "eye_%s %.1f mm out of its socket" % [sd, e.origin.distance_to(sock) * 1000.0])
+		# pinned at its soft limit the eye is carried by the head (J11 checks the head's facing): it counts while it is free
+		if Vector2(yaw / rig.EYE_YAW_MAX, pitch / rig.EYE_PITCH_MAX).length() < rig.EYE_SOFT_KNEE:
+			_jitter(prev.jit, "eye_" + sd + " direction", f, JIT_AMP_DIR)
+		elif prev.jit.has("eye_" + sd + " direction"):
+			var js: Dictionary = prev.jit["eye_" + sd + " direction"]
+			js.x = f; js.d = Vector3.ZERO; js.len = 0.0; js.last = 0.0
+		# J42 lid: concentric, between its stops
+		var lid: Transform3D = sk["lid_" + sd]
+		if lid.origin.distance_to(e.origin) > 0.0001: _fail("J42 lid", "lid_%s off its eye's centre" % sd)
+		var lf: Vector3 = -lid.basis.z.normalized()
+		var la := atan2(lf.dot(hy), lf.dot(hf))
+		if la < rig.LID_CLOSED - 0.01 or la > rig.LID_UP_MAX + 0.01: _fail("J42 lid", "lid_%s edge at %.2f rad (%.2f..%.2f)" % [sd, la, rig.LID_CLOSED, rig.LID_UP_MAX])
+		var clo: float = rig.head_dbg.get("closure", 0.0)
+		if clo <= 0.0:
+			h.lid_min_open = minf(h.lid_min_open, la)
+			if la < HD_LID_OPEN_MIN: _fail("J42 lid", "lid_%s down to %.2f rad with the eye open" % [sd, la])
+		if clo >= 0.999 and la > rig.LID_CLOSED + 0.01: _fail("J42 lid", "lid_%s shut but its edge at %.2f" % [sd, la])
+	var ew: Vector3 = (-(sk.eye_l as Transform3D).basis.z - (sk.eye_r as Transform3D).basis.z).normalized()
+	# J41: the eyes lead the head
+	var sn: int = rig.head_dbg.get("sacc_n", 0)
+	if h.sacc_n >= 0 and sn > h.sacc_n and float(rig.head_dbg.get("sacc_amp", 0.0)) > HD_LEAD_MIN:
+		h.pending.append({"t0": t, "e0": ew, "h0": hf, "emax": 0.0, "hmax": 0.0, "et": [], "ht": []})
+	h.sacc_n = sn
+	var keep := []
+	for q in h.pending:
+		var ea: float = (q.e0 as Vector3).angle_to(ew)
+		var ha: float = (q.h0 as Vector3).angle_to(hf)
+		if t - q.t0 <= HD_SACC_WIN: q.et.append([t, ea]); q.emax = maxf(q.emax, ea)
+		q.ht.append([t, ha]); q.hmax = maxf(q.hmax, ha)
+		if t - q.t0 < 1.2: keep.append(q); continue
+		if q.hmax < 0.06: continue
+		var te := INF; var th := INF
+		for r in q.et:
+			if r[1] >= 0.8 * q.emax: te = r[0]; break
+		for r in q.ht:
+			if r[1] >= 0.5 * q.hmax: th = r[0]; break
+		h.leads += 1
+		if te <= th: h.lead_ok += 1
+		else: _fail("J41 lead", "the head made half its turn (%.2f s) before the eyes arrived (%.2f s)" % [th - q.t0, te - q.t0])
+	h.pending = keep
+	# J42 blinks
+	var clo2: float = rig.head_dbg.get("closure", 0.0)
+	if clo2 > 0.02 and h.b_on < 0.0:
+		h.b_on = t; h.b_dt = dt
+		var bl: Array = h.blinks
+		if bl.size() > 0 and t - float(bl[bl.size() - 1][0]) < HD_BLINK_GAP.x: _fail("J42 blink", "blink %.2f s after the last" % (t - float(bl[bl.size() - 1][0])))
+		if rig.head_dbg.get("blink_kind", "") == "shift": h.shift_blinks += 1
+		bl.append([t, 0.0])
+	elif h.b_on >= 0.0 and clo2 > 0.02: h.b_dt = maxf(h.b_dt, dt)
+	elif clo2 <= 0.02 and h.b_on >= 0.0:
+		var dur: float = t - h.b_on
+		h.blinks[h.blinks.size() - 1][1] = dur
+		var slack := maxf(0.0, maxf(h.b_dt, dt) - 1.0 / 30.0)     # measured to the rig's own steps (B40's hitches are long ones)
+		if dur < HD_BLINK_DUR.x - slack or dur > HD_BLINK_DUR.y + slack: _fail("J42 blink", "blink lasted %.0f ms" % (dur * 1000.0))
+		h.b_on = -1.0
+	var last_b: float = float(h.blinks[h.blinks.size() - 1][0]) if h.blinks.size() > 0 else 0.0
+	if t - last_b > HD_BLINK_GAP.y + 2.5 * (1.0 if h.blinks.size() == 0 else 0.0) + 0.1: _fail("J42 blink", "no blink for %.1f s" % (t - last_b))
+	# J43 jaw
+	var jw: Transform3D = sk.jaw
+	var jf: Vector3 = -jw.basis.z.normalized()
+	var jang := -atan2(jf.dot(hy), jf.dot(hf))
+	h.jaw_max = maxf(h.jaw_max, jang)
+	if jang < -0.005 or jang > rig.JAW_MAX + 0.005: _fail("J43 jaw", "jaw at %.3f rad (0..%.2f)" % [jang, rig.JAW_MAX])
+	if is_finite(h.jaw_prev) and absf(jang - h.jaw_prev) / maxf(dt, 1e-4) > HD_JAW_RATE: _fail("J43 jaw", "jaw turned %.2f rad/s" % (absf(jang - h.jaw_prev) / dt))
+	h.jaw_prev = jang
+	h.under_t = h.under_t + dt if rig.head_dbg.get("under", false) else 0.0
+	if h.under_t > 1.0 and jang > 0.01: _fail("J43 jaw", "mouth open %.3f rad under water" % jang)
+	# windows
+	var spec: Dictionary = cur.opts.get("head", {})
+	var jw_spec: Dictionary = spec.get("jaw", {})
+	for kk in jw_spec:
+		if _in_win(jw_spec[kk]): h.jaw_win[kk] = maxf(h.jaw_win.get(kk, 0.0), jang) if kk == "closed" else maxf(h.jaw_win.get(kk, 0.0), jang)
+	var verge: float = eyes.r.x - eyes.l.x     # eyes turned toward each other (right eye left, left eye right) is negative
+	for kk in ["verge", "far"]:
+		for w in spec.get(kk, []):
+			if _in_win(w):
+				var vv: Dictionary = h.verge
+				if kk == "verge": vv.near_min = minf(vv.get("near_min", 9.0), -verge)
+				else: vv.far_max = maxf(vv.get("far_max", 0.0), absf(verge))
+	if _in_win(spec.get("stare")):
+		var g = rig.brain_out.get("gazeGoalPos")
+		if g is Vector3:
+			var cyc: Vector3 = hd * ((rig.EYE_L + rig.EYE_R) * 0.5)
+			h.stare_dev = maxf(h.stare_dev, ew.angle_to(((g as Vector3) - cyc).normalized()))
+		if h.micro0 < 0: h.micro0 = rig.head_dbg.get("micro_n", 0); h.sacc0 = sn
+		h.micro1 = rig.head_dbg.get("micro_n", 0); h.stare_sacc = sn - int(h.get("sacc0", sn))
+
+func _head_end() -> String:
+	if not rec.has("hd"): return ""
+	var h: Dictionary = rec.hd
+	var spec: Dictionary = cur.opts.get("head", {})
+	var durs := []
+	for b in h.blinks:
+		if b[1] > 0.0: durs.append(b[1])
+	durs.sort()
+	var txt := "; head: %d blinks (%s ms), %d gaze shifts led by the eyes of %d, eyes up to %.0f %% of range, lid open min %.2f, jaw max %.3f rad" % [
+		h.blinks.size(), "%.0f..%.0f" % [durs[0] * 1000.0, durs[durs.size() - 1] * 1000.0] if durs.size() > 0 else "-", h.lead_ok, h.leads, h.eye_max * 100.0,
+		h.lid_min_open, h.jaw_max]
+	if spec.has("lead") and h.lead_ok < int(spec.lead): _fail("J41 lead", "only %d gaze shifts led by the eyes (want %d)" % [h.lead_ok, spec.lead])
+	if spec.has("shift_blinks"):
+		txt += ", %d blinks with gaze shifts" % h.shift_blinks
+		if h.shift_blinks < int(spec.shift_blinks): _fail("J42 blink", "%d blinks with gaze shifts (want %d)" % [h.shift_blinks, spec.shift_blinks])
+	if spec.has("blink_rate"):
+		var br_: Dictionary = spec.blink_rate
+		var rate := func(w: Array) -> float:
+			var nb := 0
+			for b in h.blinks:
+				if b[0] >= w[0] and b[0] < w[1]: nb += 1
+			return nb / (w[1] - w[0]) * 60.0
+		var rr: float = rate.call(br_.rest); var re: float = rate.call(br_.exert)
+		txt += ", blinks/min rest %.1f exertion %.1f" % [rr, re]
+		if re <= rr: _fail("J42 blink", "no faster blinking after effort (%.1f vs %.1f /min)" % [re, rr])
+	var jws: Dictionary = spec.get("jaw", {})
+	if jws.has("closed"):
+		txt += ", jaw closed-window max %.3f" % h.jaw_win.get("closed", 0.0)
+		if h.jaw_win.get("closed", 0.0) > 0.01: _fail("J43 jaw", "mouth open %.3f rad where it should be closed" % h.jaw_win.closed)
+	if jws.has("open"):
+		txt += ", jaw open-window max %.3f" % h.jaw_win.get("open", 0.0)
+		if h.jaw_win.get("open", 0.0) < HD_JAW_OPEN: _fail("J43 jaw", "mouth only %.3f rad open after effort (>= %.3f)" % [h.jaw_win.get("open", 0.0), HD_JAW_OPEN])
+	if spec.has("verge"):
+		var nm: float = h.verge.get("near_min", 0.0); var fm: float = h.verge.get("far_max", 0.0)
+		txt += ", vergence near min %.3f far max %.3f rad" % [nm, fm]
+		if nm < 0.10 or fm > 0.03: _fail("J40 eyes", "vergence near %.3f (>= 0.10) far %.3f (<= 0.03) rad" % [nm, fm])
+	if spec.has("stare"):
+		var mn: int = h.micro1 - h.micro0
+		txt += ", stare: %d micro-saccades, %d saccades, off the target max %.3f rad" % [mn, h.stare_sacc, h.stare_dev]
+		if mn < 12 or h.stare_dev > 0.015 or h.stare_sacc > 3: _fail("J40 eyes", "stare: %d micro-saccades (>= 12), %d saccades (<= 3), %.3f rad off (<= 0.015)" % [mn, h.stare_sacc, h.stare_dev])
+	return txt
+# ---------------------------------------------------------------- head upgrade END
+# ---------------------------------------------------------------- rest and ride (B48-B55: stool, bench, bunk, dolphin, manta, turtle, whale shark, humpback)
+## Each case is a sequence of steps [phase, delay, action]: wait until the act is in 'phase' ("" = any, "free" = no
+## activity) for 'delay' seconds, then do 'action' (sit: request the rest, stand / rise / release, ride: latch onto the
+## creature, walk: walk off ahead, look: turn the camera while held). The camera follows her (no snaps when she is let go).
+func _act_case(name: String, kind: String, p: Dictionary, dur: float, steps: Array, opts := {}) -> void:
+	var o := opts.duplicate()
+	o.act = true
+	o.steps = steps
+	_case(name, kind, p, dur, _act_input(steps, o), o)
+
+func _act_input(steps: Array, o: Dictionary) -> Callable:
+	var st := {"i": 0, "since": -1.0, "walk": false, "look": 0.0, "look_t": -1.0}
+	return func(tt):
+		var a = body.motor.act
+		var sw = body.motor.swimmer
+		while st.i < steps.size():
+			var stp: Array = steps[st.i]
+			var ph: String = stp[0]
+			var ok: bool = ph == "" or (ph == "free" and not a.active()) or (a.active() and a.phase == ph)
+			if not ok:
+				st.since = -1.0
+				break
+			if st.since < 0.0: st.since = tt
+			if tt - st.since < float(stp[1]): break
+			var act: String = stp[2]
+			var done := true
+			match act:
+				"sit": done = body.motor.request_rest(_rest_spec(o.rest)) or tt - st.since > float(stp[1]) + 1.0
+				"stand": a.request_stand()
+				"rise": a.request_rise()
+				"release": a.release()
+				"walk": st.walk = true
+				"stop": st.walk = false
+				"look": st.look_t = tt
+				"ride":
+					done = body.motor.request_ride(kit.rider)
+					if not done and (o.get("refuse", false) or tt - st.since > float(stp[1]) + 1.2): done = true     # one try when it must refuse; else gave up (J17 judges)
+					if done and not a.active(): rec.refused = a.refused
+			if not done: break
+			if act == "sit" and not a.active(): rec.refused = a.refused
+			st.i += 1
+			st.since = -1.0
+		var yaw: float = sw.target_yaw
+		var pitch: float = sw.target_pitch
+		if a.active() and a.holding() and a.kind == "rest" and st.look_t >= 0.0:
+			var lt: float = tt - st.look_t
+			yaw = a.seat_yaw + 1.3 * sin(lt * 0.9)
+			pitch = 0.35 * sin(lt * 0.6)
+		var k = _pk(Vector2(0, 0.8) if st.walk else Vector2.ZERO, yaw, pitch)
+		return k
+
+func _rest_spec(which: String) -> Dictionary:
+	var m: Dictionary = kit.markers
+	match which:
+		"stool": return {"kind": "stool", "seat": m.seat, "extent": Vector2(0.2, 0.2)}
+		"bunk": return {"kind": "bunk", "seat": m.sit, "lie": m.lie, "pillow": m.pillow, "extent": Vector2(1.15, 1.15)}
+	# bench seats: the bench runs x -0.8..0.8; her right (marker +X) is world -X
+	var x: float = (m[which] as Transform3D).origin.x
+	return {"kind": "bench", "seat": m[which], "extent": Vector2(0.8 - x, 0.8 + x)}
+
+## Where she waits to latch, in the creature's frame where it will be at the request time: 0.75 of the reach from
+## the grab station she comes at (front: the foremost station, from ahead and above; behind: the rearmost, from
+## behind and above; side: the middle one, from its right flank), raised until her hanging body clears the creature.
+## "far": straight ahead, out of reach. The request comes early (0.15 s) so the creature does not swim through her.
+func _ride_place() -> void:
+	var r: Dictionary = cur.opts.ride
+	var rd = kit.rider
+	var f: Dictionary = rd.frame_at(float(r.get("t_req", 0.15)) + 2.0 / tick)
+	var xf: Transform3D = f.xform
+	var L: float = rd.LENGTH
+	var fr: String = r.get("from", "side")
+	var off := Vector3(0, 0.5, -0.5 * L - 7.0)
+	if fr != "far":
+		var sl: Dictionary = rd.prof.slots
+		var pick := ""
+		for k in sl:
+			var u: float = sl[k].body[0]
+			if pick == "": pick = k
+			var up: float = sl[pick].body[0]
+			match fr:
+				"front": if u < up: pick = k
+				"behind": if u > up: pick = k
+				"side": if absf(u - 0.5) < absf(up - 0.5): pick = k
+		var bd: Array = sl[pick].body
+		var bp := Vector3(bd[1] * L, bd[2] * L, (bd[0] - 0.5) * L)
+		var dir: Vector3 = {"front": Vector3(0, 0.55, -0.83), "behind": Vector3(0, 0.55, 0.83), "side": Vector3(0.94, 0.35, 0)}[fr]
+		if fr == "side" and bp.x < -0.01: dir.x = -dir.x
+		var reach: float = {"manta": 3.6, "turtle": 2.65, "dolphin": 3.25}.get(String(rd.species), 4.0)
+		off = bp + dir * (0.75 * reach)
+		# clear of the body (sections and wings at rest): the eye 1.3 m above anything under it
+		var half: float = 0.5 * L
+		var top := 0.0
+		for i in 9:
+			var zz: float = off.z + (i - 4) * 0.15
+			if absf(zz) < half + 0.3:
+				top = maxf(top, rd.RADIUS * (0.45 if String(rd.prof.mode) == "flap" else 1.0) * 1.2)
+		if String(rd.prof.mode) == "flap" and absf(off.x) < float(rd.prof.span) * 0.5 * rd.scale_k + 0.3: top = maxf(top, 0.25 * L)
+		var over_wing: bool = String(rd.prof.mode) == "flap" and absf(off.x) < float(rd.prof.span) * 0.5 * rd.scale_k + 0.3
+		if fr != "side" or absf(off.x) < rd.RADIUS * 1.6 + 0.4 or over_wing: off.y = maxf(off.y, top + 1.3)
+	cur.p.start = xf * off - Vector3(0, 0.42, 0)     # the body origin (eye - 0.42 swimming)
+
+func _define_act_cases() -> void:
+	var stool := {"start": Vector3(0, 0.05, 2)}
+	var sit_stand := [["", 0.3, "sit"], ["seated", 2.0, "look"], ["seated", 3.0, "stand"], ["free", 0.3, "walk"]]
+	_act_case("B48a stool: walk up, turn, sit, stand, walk off", "stool", stool, 16.0, sit_stand, {"rest": "stool", "expect": ["sit", "seated", "stand", "handoff", "free"]})
+	_act_case("B48b stool: sit and stand three times", "stool", stool, 30.0, [["", 0.3, "sit"], ["seated", 1.0, "stand"], ["free", 0.6, "sit"],
+		["seated", 1.0, "stand"], ["free", 0.6, "sit"], ["seated", 1.0, "stand"]], {"rest": "stool", "expect": ["seated", "handoff", "free"], "count": {"sit": 3}})
+	_act_case("B48c stool: bumped while seated", "stool", stool, 16.0, [["", 0.3, "sit"], ["seated", 6.0, "stand"]], {"rest": "stool", "hits": 0.6, "expect": ["seated", "free"]})
+	_act_case("B48d stool: sit, then walk off at once", "stool", stool, 12.0, [["", 0.3, "sit"], ["seated", 0.0, "stand"], ["free", 0.0, "walk"]], {"rest": "stool", "expect": ["seated", "free"]})
+	_act_case("B48e stool: from behind", "stool", {"start": Vector3(0.3, 0.05, -3.5)}, 18.0, sit_stand, {"rest": "stool", "expect": ["seated", "free"]})
+	_act_case("B48f stool: from the side", "stool", {"start": Vector3(2.5, 0.05, -1.5)}, 18.0, sit_stand, {"rest": "stool", "expect": ["seated", "free"]})
+	var bench := {"start": Vector3(0, 0.05, 2)}
+	var i := 0
+	for sn in ["seat_l", "seat_c", "seat_r"]:
+		_act_case("B49%s bench %s: sit, look round, stand, walk off" % ["abc"[i], sn.substr(5)], "bench", bench, 16.0, sit_stand, {"rest": sn, "expect": ["seated", "free"]})
+		i += 1
+	_act_case("B49d bench from behind, right seat", "bench", {"start": Vector3(0.4, 0.05, -4.0)}, 20.0, sit_stand, {"rest": "seat_r", "expect": ["seated", "free"]})
+	var bunk_seq := [["", 0.3, "sit"], ["lying", 1.5, "look"], ["lying", 5.0, "stand"], ["free", 0.3, "walk"]]
+	_act_case("B50a bunk: sit on the edge, lie down, roll the head, get up, walk off", "bunk", {"start": Vector3(0, 0.05, 1)}, 22.0, bunk_seq,
+		{"rest": "bunk", "expect": ["sit", "seated", "lie", "lying", "rise", "stand", "free"]})
+	_act_case("B50b bunk under a low upper bunk (0.68 m clear)", "bunk", {"start": Vector3(0, 0.05, 1), "clear": 0.68}, 22.0, bunk_seq,
+		{"rest": "bunk", "expect": ["seated", "lying", "free"]})
+	_act_case("B50c bunk: bumped while lying", "bunk", {"start": Vector3(0, 0.05, 1)}, 18.0, [["", 0.3, "sit"], ["lying", 5.0, "stand"]],
+		{"rest": "bunk", "hits": 0.7, "expect": ["lying", "free"]})
+	# riding: the creature stand-ins on their loops (blockout/blockout_rider.gd)
+	var sp_num := {"dolphin": 51, "manta": 52, "turtle": 53, "whale_shark": 54, "humpback": 55}
+	for sp in ["dolphin", "manta", "turtle", "whale_shark", "humpback"]:
+		var n := 0
+		for fr in ["front", "side", "behind"]:
+			_act_case("B%d%s ride %s: latch from the %s, ride, let go" % [sp_num[sp], "abc"[n], sp, fr], "ride", {"species": sp, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 12.0,
+				[["", 0.15, "ride"], ["ride", 6.0, "release"]], {"ride": {"from": fr}, "expect": ["latch", "ride", "release", "free"]})
+			n += 1
+	_act_case("B51d ride dolphin round the whole loop (dive, turn, climb, turn)", "ride", {"species": "dolphin", "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 32.0,
+		[["", 0.15, "ride"], ["ride", 27.0, "release"]], {"ride": {"from": "side"}, "expect": ["ride", "release", "free"]})
+	_act_case("B51e ride dolphin: let go at full speed in the dive", "ride", {"species": "dolphin", "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 9.0,
+		[["", 0.15, "ride"], ["ride", 1.8, "release"]], {"ride": {"from": "behind"}, "expect": ["ride", "release", "free"]})
+	_act_case("B51f ride dolphin: latch in the middle of a turn", "ride", {"species": "dolphin", "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 13.5,
+		[["", 8.0, "ride"], ["ride", 2.5, "release"]], {"ride": {"from": "side", "t_req": 8.0}, "expect": ["ride", "free"]})
+	_act_case("B52d ride manta: latch in a banked turn", "ride", {"species": "manta", "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 26.0,
+		[["", 19.0, "ride"], ["ride", 3.5, "release"]], {"ride": {"from": "side", "t_req": 19.0}, "expect": ["ride", "free"]})
+	_act_case("B51g dolphin at 0.35 scale (0.9 m): refused, swims on", "ride", {"species": "dolphin", "scale": 0.35, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 5.0,
+		[["", 0.15, "ride"]], {"ride": {"from": "side"}, "refuse": true})
+	_act_case("B53d turtle at 0.5 scale (0.55 m): refused", "ride", {"species": "turtle", "scale": 0.5, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 5.0,
+		[["", 0.15, "ride"]], {"ride": {"from": "side"}, "refuse": true})
+	_act_case("B53e turtle at 2.5 scale: grips too wide, refused", "ride", {"species": "turtle", "scale": 2.5, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 5.0,
+		[["", 0.15, "ride"]], {"ride": {"from": "side"}, "refuse": true})
+	_act_case("B53f turtle at 2.0 scale: rides", "ride", {"species": "turtle", "scale": 2.0, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 11.0,
+		[["", 0.15, "ride"], ["ride", 5.0, "release"]], {"ride": {"from": "side"}, "expect": ["ride", "free"]})
+	_act_case("B54d whale shark at 2.0 scale (20 m): rides", "ride", {"species": "whale_shark", "scale": 2.0, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 11.0,
+		[["", 0.15, "ride"], ["ride", 5.0, "release"]], {"ride": {"from": "side"}, "expect": ["ride", "free"]})
+	_act_case("B52e manta at 2.0 scale: held on its broad back, rides", "ride", {"species": "manta", "scale": 2.0, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 11.0,
+		[["", 0.15, "ride"], ["ride", 5.0, "release"]], {"ride": {"from": "side"}, "expect": ["ride", "free"]})
+	_act_case("B51h dolphin at 1.6 scale: rides", "ride", {"species": "dolphin", "scale": 1.6, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 11.0,
+		[["", 0.15, "ride"], ["ride", 5.0, "release"]], {"ride": {"from": "side"}, "expect": ["ride", "free"]})
+	_act_case("B51i dolphin out of reach: refused, swims on", "ride", {"species": "dolphin", "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 4.0,
+		[["", 0.15, "ride"]], {"ride": {"from": "far"}, "refuse": true})
+
+const HAND_GRIP := 0.02        # m: the project's hand-contact ceiling
+const REST_FOOT_DRIFT := 0.01
+
+func _check_act(p: Dictionary, _dt: float) -> void:
+	var a = body.motor.act
+	if not rec.has("act"): rec.act = {"phases": [], "grip": 0.0, "cre_pen": {}, "foot": {}, "cre_worst": 0.0, "drift": 0.0, "sits": 0}
+	var ra: Dictionary = rec.act
+	var ph: String = a.phase if a.active() else "free"
+	if ra.phases.is_empty() or ra.phases[-1] != ph:
+		ra.phases.append(ph)
+		if ph == "sit": ra.sits += 1
+	# J14 grip
+	if a.active() and a.kind == "ride" and a.phase == "ride":
+		for side in ["L", "R"]:
+			var nm: String = a._mk(a.slot, "hand_l" if side == "L" else "hand_r")
+			var g: Vector3 = a.rider.marker(nm).origin
+			var palm: Vector3 = (p["hand" + side + "Mat"] as Transform3D) * Vector3(0, 0.040, 0)
+			var e := palm.distance_to(g)
+			ra.grip = maxf(ra.grip, e)
+			if e > HAND_GRIP: _fail("J14", "palm%s %.0f mm off its grip" % [side, e * 1000.0])
+	# J15 creature: spheres against the stand-in's real meshes
+	if kit.get("rider") != null:
+		var samples := [["head", p.headMat * Vector3(0, 0.10, 0), 0.095], ["chest", p.chestPos, 0.08], ["pelvis", p.pelvisPos, 0.08]]
+		for side in ["L", "R"]:
+			var arm2: Dictionary = p["arm" + side]
+			var lg2: Dictionary = p["leg" + side].ik
+			samples.append(["uparm" + side, arm2.root.lerp(arm2.mid, 0.6), 0.032])
+			samples.append(["forearm" + side, arm2.mid.lerp(arm2.eff, 0.5), 0.025])
+			samples.append(["hand" + side, (p["hand" + side + "Mat"] as Transform3D) * Vector3(0, 0.05, 0), 0.03])
+			samples.append(["thigh" + side, lg2.root.lerp(lg2.mid, 0.5), 0.048])
+			samples.append(["knee" + side, lg2.mid, 0.038])
+			samples.append(["shin" + side, lg2.mid.lerp(lg2.eff, 0.5), 0.034])
+			samples.append(["foot" + side, (p["leg" + side].finMat as Transform3D) * Vector3(0, 0.08, -0.02), 0.03])
+		var shapes := _creature_shapes(kit.rider)
+		for smp in samples:
+			var key: String = smp[0]
+			var grip_part: bool = key.begins_with("hand") or key.begins_with("forearm")
+			var depth := _creature_depth(shapes, smp[1], smp[2] - PEN_MARGIN, grip_part)
+			ra.cre_worst = maxf(ra.cre_worst, depth)
+			if depth > 0.0:
+				ra.cre_pen[key] = ra.cre_pen.get(key, 0) + 1
+				if ra.cre_pen[key] == PEN_RUN: _fail("J15", "%s inside the creature (%.0f mm)" % [key, depth * 1000.0])
+			else:
+				ra.cre_pen[key] = 0
+	# J16 resting feet
+	if a.active() and a.phase in ["seated", "lying"]:
+		for side in ["L", "R"]:
+			var ank: Vector3 = p["leg" + side].ik.eff
+			var k2: String = a.phase + side
+			if not ra.foot.has(k2): ra.foot[k2] = ank
+			var d: float = ank.distance_to(ra.foot[k2])
+			ra.drift = maxf(ra.drift, d)
+			if d > REST_FOOT_DRIFT: _fail("J16", "%s foot%s drifted %.0f mm" % [a.phase, side, d * 1000.0])
+	else:
+		ra.foot = {}
+
+## The creature stand-in's visible solids: [kind, inverse transform, transform, size] for its ellipsoids and boxes
+func _creature_shapes(rd) -> Array:
+	var out := []
+	var stack: Array = [rd]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		for c in n.get_children(): stack.append(c)
+		if n is MeshInstance3D and n.visible:
+			var gt: Transform3D = (n as MeshInstance3D).global_transform
+			if n.mesh is SphereMesh: out.append(["ell", gt.affine_inverse(), gt, (n.mesh as SphereMesh).radius])
+			elif n.mesh is BoxMesh: out.append(["box", gt.affine_inverse(), gt, (n.mesh as BoxMesh).size])
+			elif n.mesh is CapsuleMesh: out.append(["cap", gt.affine_inverse(), gt, Vector2((n.mesh as CapsuleMesh).radius, (n.mesh as CapsuleMesh).height)])
+	return out
+
+## How deep a sphere (c, r) reaches into the stand-in (> 0 overlaps). Boxes are fins / wings / pads: skipped for
+## the parts that hold them.
+func _creature_depth(shapes: Array, c: Vector3, r: float, grip_part: bool) -> float:
+	var best := -INF
+	for sh in shapes:
+		var q: Vector3 = (sh[1] as Transform3D) * c
+		var gt: Transform3D = sh[2]
+		match sh[0]:
+			"ell":
+				var rad: float = sh[3]
+				var L := q.length()
+				var dir := q / L if L > 1e-6 else Vector3.UP
+				var R: float = (gt.basis * (dir * rad)).length()       # the ellipsoid's radius toward the point (world)
+				var dw: float = (gt.basis * q).length()                # the point's distance from the centre (world)
+				best = maxf(best, R + r - dw)
+			"box":
+				if grip_part: continue
+				var hs: Vector3 = sh[3] * 0.5
+				var dq := q.abs() - hs
+				var outside := Vector3(maxf(dq.x, 0), maxf(dq.y, 0), maxf(dq.z, 0)).length()
+				var inside := minf(maxf(dq.x, maxf(dq.y, dq.z)), 0.0)
+				best = maxf(best, r - (outside + inside))
+			"cap":
+				var rr: float = sh[3].x
+				var hh: float = maxf(0.0, sh[3].y * 0.5 - rr)
+				var cc := Vector3(0, clampf(q.y, -hh, hh), 0)
+				best = maxf(best, rr + r - (q - cc).length())
+	return best
+
+func _act_end() -> String:
+	var ra: Dictionary = rec.get("act", {"phases": [], "grip": 0.0, "cre_worst": 0.0, "drift": 0.0, "sits": 0})
+	if cur.opts.get("refuse", false):
+		if ra.phases.has("latch") or ra.phases.has("sit"): _fail("J17", "should have been refused, went %s" % ",".join(ra.phases))
+		elif rec.get("refused", "") == "": _fail("J17", "no refusal recorded")
+	else:
+		var want: Array = cur.opts.get("expect", [])
+		var at := 0
+		for ph in ra.phases:
+			if at < want.size() and ph == want[at]: at += 1
+		if at < want.size(): _fail("J17", "never reached '%s' (went %s)" % [want[at], ",".join(ra.phases)])
+		var cnt: Dictionary = cur.opts.get("count", {})
+		if cnt.has("sit") and ra.sits < cnt.sit: _fail("J17", "sat %d times, wanted %d" % [ra.sits, cnt.sit])
+	return ", grip %.0f mm, creature %.0f mm, rest foot drift %.0f mm%s, phases %s" % [maxf(0.0, ra.grip) * 1000.0, maxf(0.0, ra.cre_worst) * 1000.0,
+		ra.drift * 1000.0, (", refused: " + rec.refused) if rec.get("refused", "") != "" else "", ",".join(ra.phases)]

@@ -23,6 +23,8 @@ echo "== Bathymetry (the reef drop-off's stress-test world)"
 "$G" --headless --path . --script res://tests/test_bathymetry.gd 2>&1 | grep -E "FAIL|BATHYMETRY"; "$G" --headless --path . --script res://tests/test_bathymetry.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_bathymetry.gd -- --fault >/dev/null 2>&1 && { echo "BATHYMETRY PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Bathymetry planted fault caught"
 echo "== Overcast (look)"
+"$G" --headless --path . --script res://tests/test_sky_derivatives.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_sky_derivatives.gd >/dev/null 2>&1 || rc=1
+for f in branch early; do "$G" --headless --path . --script res://tests/test_sky_derivatives.gd -- --fault $f >/dev/null 2>&1 && { echo "SKY DERIVATIVES PLANTED FAULT $f NOT CAUGHT"; rc=1; } || echo "Sky derivatives planted fault $f caught"; done
 "$G" --headless --path . --script res://tests/test_overcast.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_overcast.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_overcast.gd -- --fault >/dev/null 2>&1 && { echo "OVERCAST PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Overcast planted fault caught"
 echo "== Image quality (look: soft shadows, temporal upscaler)"
@@ -60,6 +62,8 @@ done
 if "$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --fault jitter --only B24 >/dev/null 2>&1; then echo "M04 PLANTED FAULT jitter NOT CAUGHT"; rc=1; else echo "M04 planted fault jitter caught"; fi
 # J13 breath fault: the breath phase skips a third of a cycle once (B60, long idle stand)
 if "$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --fault breathjump --only B60 >/dev/null 2>&1; then echo "M04 PLANTED FAULT breathjump NOT CAUGHT"; rc=1; else echo "M04 planted fault breathjump caught"; fi
+# J40 head fault: the eyes lose their limits (B63, fast look-around)
+if "$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --fault eyelimit --only B63 >/dev/null 2>&1; then echo "M04 PLANTED FAULT eyelimit NOT CAUGHT"; rc=1; else echo "M04 planted fault eyelimit caught"; fi
 # other tick rates and random monkey runs: reported, not yet gating (M04_STRICT=1 gates them)
 for r in 30 120; do
   "$G" --headless --fixed-fps $r --path . --script res://tests/test_body_stress.gd -- --tick $r > "$OUT/m04_$r.txt" 2>&1 || { [ "${M04_STRICT:-0}" = 1 ] && rc=1; }

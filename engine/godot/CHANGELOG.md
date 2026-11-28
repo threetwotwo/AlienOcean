@@ -1,5 +1,76 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, M04 head 0.1): eyes that lead, blinks, a jaw and a two-bone neck
+- Gary 28 Nov: "Head also needs an upgrade." Skeleton 22 -> 28 bones (body_rig.gd _head_upgrade, skeleton only, built
+  after the breath, follow-through and soft arms from the final chest, skull base and head): the neck is neck_lower
+  (carries the tilt: 50 % of the head's swing, 20 % of its turn) and neck_upper (nod and turn: 85 % / 75 %), two 40 mm
+  segments from 45 mm above spine_03 to the skull base, which stays where it was (head position, feet and contacts
+  unchanged); eye_l / eye_r, lid_l / lid_r (upper lids) and jaw. Thalassa has no eye, blink or jaw code to port; this is
+  new. All of it is off when thalassa_exact is set: tests/test_golden_body.gd MATCH unchanged (worst 0.000051 m),
+  tests/test_golden_brain.gd MATCH (worst 3.89e-6).
+- Gaze chain (eyes, then head, then chest): the brain now reports the eyes' goal (character_brain.gd gazeGoalWorld /
+  gazeGoalPos: where she means to look, before its gaze spring and glance blend, held in the neck's reach + 0.55 rad, and
+  on one side for a thing right behind her). The eyes take it at once with a saccade (min-jerk, 20-55 ms by amplitude,
+  18 ms + 1.1 ms/deg, at least 160 ms apart, triggered 2 deg off), pursue a goal that moves smoothly (its low-passed turn
+  rate up to 2.2 rad/s carried, the rest closed with a 60 ms spring) and hold the fixation in the world against every
+  head bob; soft limits +-35 deg yaw / +-25 deg pitch (linear to 80 %, then saturating); near goals converge the eyes
+  (vergence eased in dioptres, 0.10 s). The head follows the brain's gaze spring (neck half-life 0.1-0.24 s), the chest
+  last (curiosity torso yaw, 0.68 s). Micro-saccades while fixating: every 0.8-2.0 s, 0.26-0.46 deg, 22 ms, each back
+  toward the centre of the last.
+- Blinks: every 2-6 s at rest (x0.5 at full exertion), early on the start of an exhale when one is due within 0.9 s, and
+  with 70 % of the gaze shifts over 17 deg; 50 ms close (eases in), 10 ms shut, 90 ms open (eases out), at least 0.6 s
+  apart. The upper lid's edge rides 85 % of its eye's pitch (follows the eye down) with a 22 ms lag.
+- Jaw: closed under water; above it opens with exertion (mouth breathing from ~30 %, smoothstep to 85 %), wider on the
+  inhale, up to 0.13 rad, through a critically damped spring (0.16 s), never popping.
+- Soft neck limits (solve_head, off exact): the head's yaw / pitch goal saturates smoothly past 75 % of its range
+  (tanh knee) instead of the clamp and the elliptical cut, so the head slows into its limits.
+- FIX (found writing the gaze checks): on land the swim pose is solved every tick before the walk pose and both stepped
+  the same neck springs (as the JS does), so the swim solve's prone look-ahead pulled the walk's: standing still she
+  looked 23 deg up (neck pitch 0.40 with a level gaze). Off exact the walk solve has its own springs; standing she now
+  looks where her gaze is. J9 head rate max: B45 2.58 -> 1.89 rad/s, B46 3.30 -> 2.08.
+- Stand-in (body_skin.gd): two neck bones in the neck loft; eye spheres with the pole at the pupil (sclera, blue-grey
+  iris, dark pupil as clean circles), upper lids as shells round each eye with a lash line, fixed lower lids, the brow band
+  moved above the eyes, a mouth whose lower half rides the jaw and a chin on the jaw. Body stress --head films: the
+  camera is 0.8 m from her face at 720p (was 2.3 m), a fill light from the camera's side, cyan rays where each eye looks
+  beside the yellow brain gaze, eye angles / blink / jaw on the label.
+- Body stress J40 eyes (limits +0.6 deg, socket 0.5 mm, each eye's world direction through J11 while it is free of its
+  limit; pinned it rides the head, whose facing J11 checks), J41 lead (on every saccade over 8.6 deg the eyes make 80 % of
+  their move before the head makes half of its own), J42 blinks and lids (duration 80-220 ms, starts 0.55-6.3 s apart,
+  lid concentric and between its stops, never under -0.40 rad open, at the closed edge when shut), J43 jaw (0..0.13 rad,
+  <= 1.2 rad/s, closed after 1 s under water), J44 neck (28 bones, both segments 40 mm +-0.5, neck_upper ending <= 2 cm
+  from the head). New cases B63 fast look-around with targets at +-150 deg (8/8 shifts led by the eyes, 6 blinks with
+  them), B64 near object (vergence 0.34 rad at 0.32 m, 0.018 far), B65 rest > sprint > rest (blinks 15 -> 20 /min, jaw
+  0.094 rad after the sprint, 0 at rest), B66 swim prone looking up and down (jaw shut under water), B67 30 s stare
+  (20 micro-saccades, no saccade, eyes within 0.007 rad of the target). Planted fault --fault eyelimit (eyes without
+  limits) caught by J40; in run_all.sh. Results (merged with rest and ride): 97/97 at 30, 60 and 120 Hz; J11 worst 5.
+- Open (found, not changed here): _skeleton runs once per update_swim with the last sub-step's dt, so at 30 Hz (two 1/60
+  sub-steps) the follow-through, girdle and soft-arm springs see half the frame's time (and the follow-through twice the
+  pelvis speed); the head's clocks take the whole frame. No lower-lid motion, brows or speech; the eyes are pinned at
+  their limit (riding the head) for targets behind her until the head turns, by design.
+
+## 0.6.0-dev (28 Nov 2026, water surface: the waterline per pixel at the lens, from the Unreal tank)
+- Gary 28 Nov: "under water to over water transitions ... not great/responsive", "cant you check ue5 open water code?".
+  The tank's eye test matched ours (the live wave at the camera); its per-pixel waterline (M_PP_OO_Waterline,
+  WATERLINE_HLSL) was missing. look/underwater_view 0.5.0: each pixel's point on the lens is under or over the wave there
+  (FFT height, sideways push undone), so the water's haze splits along the real wave line (main drew the floor dry under
+  a crest while the eye counted as over). NEW look/waterline_post.glsl + adapters/godot/waterline_effect.gd (compositor,
+  after the transparent pass, before AgX): the film along the line (drag, blur across, wobble, dark foot, pale rim), only
+  within 2 Hs + 1 m of the still level. Stress shots: surface_shots AO_SEA=Bn o6/o7 (the lens half in the waves).
+
+## 0.6.0-dev (28 Nov 2026, water surface: refraction as one bent-ray march; bodies above the water seen from below)
+- Gary 28 Nov: "water surface refraction wobble. it should be a root fix, physically correct for all object underwater.
+  not just a patch fix for player model." look/sea_top 0.9.0: the refracted ray is marched through the screen's depth
+  (NEW look/sea_march.gdshaderinc: affine clip-space ray, jittered steps scaled by screen span, crossing halved, a hit
+  only where the gap closes) to whatever it meets, every object alike. Replaces 0.7.0's straight-depth shift, 0.8.1's
+  nearer-sample refusal and 0.8.2's movers-only wiggle. Misses: the floor map marched as a heightfield (the damped fixed
+  point collapsed at walls), or the hidden side of a static rock. sea_body_veil default 1 (the true path).
+- Gary 28 Nov playtest 3: "from underwater, body turns invisible when breached." look/sea_under 0.4.0 reads the scene
+  behind it: inside Snell's window the same march finds what stands above the water. Now in the transparent pass after
+  the underwater view (render_priority 1), adding the eye's water path + god rays itself (globals sea_eye_wave, sea_god
+  from WorldRoot; keep in step with underwater_view's ray-on-geometry branch). sea_under_ghost art lever, 0 = physical.
+- Stress shots: tools/surface_shots.gd AO_BREACH (b1-b4, bodies breaking the surface from below), AO_SHADE (k1-k5,
+  fish and hull shadows on swimmers under water: they cast).
+
 ## 0.6.0-dev (28 Nov 2026, M34 bubbles 0.1): air bubbles under water, Thalassa's sources with the Unreal bubbles v4 look
 - Gary 28 Nov: "bubbles: port thalassa's bubbles code, improve as you see fit. for the look, use pre-godot ue5 existing
   work." Sources PORTED from Thalassa v20.19 (style/particles.js, style/runtime.js spawnBubble sites) as a GameRoot plug

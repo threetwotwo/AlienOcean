@@ -7,8 +7,8 @@ are tested on it. Muscle, skin and face detail come only after the blockout move
           Each ellipsoid rides ONE spine bone rigidly, so a bend shows as the segments turning, as a jointed toy does.
   fins    flat plates at their true sizes: the same fin cards the full build makes (fins.build_fins, from the record's traced fin
           outlines and base lines), drawn untextured.
-  rig     the export's own bones (rig.py: spine chain, jaw, gill covers) and fin root bones, so the engine's clips and extras are the
-          same for a blockout and a finished fish.
+  rig     the export's own bones (rig.py: rigid head bone, trunk chain, jaw, gill covers, fin chains), so the engine's clips and
+          extras are the same for a blockout and a finished fish. The blocks follow the bones' stations: the head bone has its own.
   head    tier 3 cutters (blockout_cut): a mouth cavity behind a lower-jaw block on the jaw bone, gill slits under cover plates on
           the opercle bones, eye sockets with eyeballs. gape and flare open them. Off: CUTTERS = False.
   tiers   1 masses (spine segments), 2 forms (joints, roots, fin plates, jaw, covers, eyeballs), 3 surgical (cutters); exported as
@@ -21,7 +21,7 @@ Checks (in blockout.json, all from the record, no picture):
   BK3  fins: each fin plate seen from the side covers the record's traced fin outline (true size); for a traced paired fin the plate is compared
        in its own plane (fins.paired_sheet's flat sheet, before the fold to rest and the turn out), so this catches a plate that is rescaled
        or set off its base line
-  BK4-BK6 fin roots inside, bend gap, sections (below); CT1-CT3 jaw in its cut, slits under the covers, eyes in sockets (blockout_cut)
+  BK4-BK6 fin roots inside, bend gap, sections (below); CT1-CT3 jaw in its cut, slits under the covers, eyes in sockets (blockout_cut); PL1-PL2 clean plates keep the traced shape, paired plates clear of the body
 """
 import json, os, time
 import numpy as np
@@ -67,26 +67,39 @@ def _ellipsoid(c, r, seg=SEG, rings=RINGS, R=None, n=None, ry_lo=None):
     for i in range(1, rings - 1):
         for j in range(seg): F.append([ring(i, j), ring(i, j + 1), ring(i + 1, j + 1), ring(i + 1, j)])
     for j in range(seg): F.append([1, ring(rings - 1, j), ring(rings - 1, j + 1)])
+    # faces wind outward (counter-clockwise seen from outside) under a proper rotation. The rings above wind inward: every block faced
+    # into itself (signed volume < 0), which an exact boolean reads as a hole, and an engine culling back faces draws from inside
+    if np.linalg.det(R) > 0: F = [f[::-1] for f in F]
     return np.array(V), F
 
 
+def _C(form, rec):
+    """what rig.spine_stations reads."""
+    return dict(bones=int(rec['bones']), xend=form.XEND, head_end=RIG.head_end(rec))
+
+
 def segments(form, rec):
-    """the ellipsoid chain: list of dict(c, r, bone). Centres are spaced so the first ellipsoid's front reaches the snout tip and the
-    last one's back reaches the caudal base."""
-    NB = int(rec['bones']); n = NB * PER_BONE
+    """the ellipsoid chain: list of dict(c, r, bone). Every block lies inside ONE spine bone's span (rig.spine_stations: the rigid
+    head bone gets its own blocks, the seams between bones fall on the joints): a bone takes PER_BONE blocks, or as many as keep the
+    even chain's spacing (body length / (bones x PER_BONE)) when it is longer, as the head is. The first block's front reaches the
+    snout tip and the last one's back the caudal base."""
+    C = _C(form, rec); NB, xs = RIG.spine_stations(C)
     x_end = float(min(form.XEND, rec['fins']['caudal']['x']))
-    dx = x_end / (n - 1 + 2 * OVERLAP); ax = OVERLAP * dx
-    xc = ax + dx * np.arange(n)
-    C = dict(bones=NB, xend=form.XEND)
+    b = np.clip(xs, 0.0, x_end); b[0] = 0.0; b[-1] = x_end; pitch = x_end / (NB * PER_BONE)
     out = []
-    for x in xc:
-        t, b, w = float(form.TOP(x)), float(form.BOT(x)), float(form.HW(x))
-        q = dict(kind='segment', c=[float(x), (t + b) / 2, 0.0], r=[float(ax), max((t - b) / 2, 1e-3), max(w, 1e-3)], bone=RIG.spine_index(C, x))
-        if SUPER:
-            s0 = widest(form, x); h = (t - b) / 2; cy = (t + b) / 2 + s0 * h
-            q['c'][1] = cy; q['r'][1] = max(t - cy, 1e-3); q['ry_lo'] = max(cy - b, 1e-3); q['s0'] = s0
-            q['n'] = section_exponents(form, x, s0)
-        out.append(q)
+    for i in range(NB):
+        span = float(b[i + 1] - b[i])
+        if span < 1e-6: continue
+        n = max(PER_BONE, int(round(span / pitch))); dx = span / n
+        for j in range(n):
+            x = float(b[i] + (j + 0.5) * dx); x0, x1 = max(x - OVERLAP * dx, 0.0), min(x + OVERLAP * dx, x_end); x, ax = (x0 + x1) / 2, (x1 - x0) / 2
+            t, bt, w = float(form.TOP(x)), float(form.BOT(x)), float(form.HW(x))
+            q = dict(kind='segment', c=[x, (t + bt) / 2, 0.0], r=[ax, max((t - bt) / 2, 1e-3), max(w, 1e-3)], bone=i)
+            if SUPER:
+                s0 = widest(form, x); h = (t - bt) / 2; cy = (t + bt) / 2 + s0 * h
+                q['c'][1] = cy; q['r'][1] = max(t - cy, 1e-3); q['ry_lo'] = max(cy - bt, 1e-3); q['s0'] = s0
+                q['n'] = section_exponents(form, x, s0)
+            out.append(q)
     return out, x_end
 
 
@@ -136,14 +149,10 @@ def section_check(form, segs, k=81):
     return dict(BK6_section_iou_worst=round(worst, 4), BK6_worst_x=at, BK6_pass=bool(worst >= BK6_MIN))
 
 
-def body_mesh(segs, carved=None):
-    """one mesh of every block, each vertex labelled with its spine bone. carved {bone: (V, F)}: bones meshed from their field with
-    the tier 3 cutters taken out (blockout_cut), in place of their block meshes."""
-    V, F, B = [], [], []; carved = carved or {}
-    for b, (v, f) in sorted(carved.items()):
-        o = sum(len(q) for q in V); V.append(np.asarray(v)); F += [[o + i for i in q] for q in f]; B += [b] * len(v)
+def body_mesh(segs):
+    """one mesh of every block, each vertex labelled with its spine bone (the plain blocks: the clean LOD0 is cut in Blender)."""
+    V, F, B = [], [], []
     for s in segs:
-        if s['bone'] in carved: continue
         sg, rg = (SEG, RINGS) if s.get('kind', 'segment') == 'segment' else PRIM_RES
         v, f = _ellipsoid(s['c'], s['r'], sg, rg, s.get('R'), s.get('n'), s.get('ry_lo')); o = len(V) if not V else sum(len(q) for q in V)
         V.append(v); F += [[o + i for i in q] for q in f]; B += [s['bone']] * len(v)
@@ -212,6 +221,175 @@ def _fin_outline(rec, k, form=None):
     xr = np.linspace(xb, xa, 60); return np.vstack([E, np.c_[xr, edge_y(xr)]])
 
 
+# ---------------------------------------------------------------- clean fin plates (Gary 28 Nov: "not clean enough")
+# The full build's fin cards (fins.build_fins) are ray grids made for texturing: their rows fold where a lobe sweeps back and their
+# root rows, sunk into the blocks point by point, stepped. A blockout plate is the fin's own outline, flat, evenly triangulated:
+#   median fins, caudal  the record's traced side outline (_fin_outline), in the midplane; untraced: the card's border
+#   paired fins          the card's border in the card's best-fitting plane (a flat blade at its rest angles)
+# and the outline's stretch along the body is pushed in until it lies PLATE_SINK inside the blocks, so the plate leaves the body at
+# its root with no gap and no step.
+PLATE_STEP = 0.008       # DEFAULT: plate triangle size, SL
+PLATE_SINK = 0.85        # DEFAULT: block measure the plate's root stretch is pushed in to
+PLATE_CLOSE = 0.004      # DEFAULT (SL): notches narrower than twice this are filled (a trace's saw-teeth, the gap between frayed rays)
+PLATE_ROOT = 0.02        # DEFAULT (SL): a median plate's root runs at least this far under the record's back or belly line
+PLATE_REACH = 0.08       # DEFAULT (SL): the furthest a paired plate's root edge runs on into the body
+PLATE_FREE_T = 0.3       # DEFAULT: a paired plate stays clear of the body beyond this share of the way from its root
+PLATE_TURN_MAX = 45      # DEFAULT (deg): the most a paired plate turns about its root line to clear the body
+PL1_MIN_PX = 400         # DEFAULT: PL1 compares a fin only when its outline shows this many pixels clear of the body (of 400 x 400)
+PLATE_KEEP = 0.7         # DEFAULT: a cleaned outline that kept less than this share of the area falls back to the trace
+PLATE_SMOOTH = 0.003     # DEFAULT (SL): the cleaned outline is smoothed along its length over this much
+PLATE_OPEN = 0.0025      # DEFAULT (SL): burrs and slivers thinner than twice this are cut (a lobe tip loses ~2x this of length)
+
+
+def _inside(P, Q):
+    """points P (N,2) inside polygon Q (M,2) (even-odd rule)."""
+    x, y = P[:, 0][:, None], P[:, 1][:, None]; a, b = Q, np.roll(Q, -1, 0)
+    c = ((a[:, 1] > y) != (b[:, 1] > y)) & (x < (b[:, 0] - a[:, 0]) * (y - a[:, 1]) / (b[:, 1] - a[:, 1] + 1e-15) + a[:, 0])
+    return c.sum(1) % 2 == 1
+
+
+def _plate2d(Q, h=PLATE_STEP, border=False):
+    """even triangles filling polygon Q (M,2): its border every h, a grid inside, Delaunay, the triangles whose middle is inside."""
+    from scipy.spatial import Delaunay
+    Q = np.asarray(Q, float); B = []
+    for a, b in zip(Q, np.roll(Q, -1, 0)):
+        n = max(int(np.ceil(np.linalg.norm(b - a) / h)), 1); B += [a + (b - a) * t for t in np.arange(n) / n]
+    B = np.array(B); lo, hi = Q.min(0), Q.max(0)
+    gx, gy = np.meshgrid(np.arange(lo[0] + h / 2, hi[0], h), np.arange(lo[1] + h / 2, hi[1], h * 0.866))
+    gx = gx + (np.arange(gx.shape[0])[:, None] % 2) * h / 2                     # a triangular lattice
+    G = np.c_[gx.ravel(), gy.ravel()]; G = G[_inside(G, Q)]
+    if len(G):                                                                  # keep lattice points off the border
+        d = np.min(np.linalg.norm(G[:, None] - B[None], axis=2), 1); G = G[d > 0.45 * h]
+    P = np.vstack([B, G]); T = Delaunay(P).simplices
+    T = T[_inside(P[T].mean(1), Q)]
+    return (P, T, len(B)) if border else (P, T)
+
+
+def _sink2d(Q, segs, z=0.0):
+    """median plate outline points standing off the blocks move down toward the body's centre line until PLATE_SINK inside."""
+    Q = np.asarray(Q, float).copy()
+    for j, p in enumerate(Q):
+        P3 = np.array([[p[0], p[1], z]]); f = _f(P3, segs).min()
+        if f <= PLATE_SINK: continue                                   # inside already
+        cy = float(np.mean([q['c'][1] for q in segs if abs(q['c'][0] - p[0]) <= q['r'][0]] or [0.0]))
+        ys = np.linspace(p[1], cy, 60); h = np.where(_f(np.c_[np.full(60, p[0]), ys, np.full(60, z)], segs).min(1) <= PLATE_SINK)[0]
+        if len(h): Q[j, 1] = ys[h[0]]
+    return Q
+
+
+def _clean2d(Q, r_open=PLATE_OPEN, r_close=PLATE_CLOSE):
+    """polygon Q (M,2) with its notches filled (closing, r_close) and its slivers and burrs cut (opening, r_open), as a smooth simple
+    outline: rasterised, morphology, the 0.5 contour of the lightly blurred mask, simplified. A traced fin edge carries the trace's
+    saw-teeth and frayed ray tips; a blockout plate is the fin's clean shape (Gary 28 Nov: "spotless")."""
+    from PIL import Image, ImageDraw
+    from scipy import ndimage as ndi
+    from skimage.measure import find_contours, approximate_polygon
+    Q = np.asarray(Q, float); px = min(r_open, r_close) / 4; pad = 3 * max(r_open, r_close)
+    lo = Q.min(0) - pad; W, H = (np.ceil((Q.max(0) + pad - lo) / px)).astype(int) + 1
+    im = Image.new('L', (int(W), int(H)), 0); ImageDraw.Draw(im).polygon([tuple(v) for v in (Q - lo) / px], fill=1)
+    M = np.asarray(im, bool)
+    disk = lambda r: (lambda k: (np.add.outer(np.arange(-k, k + 1) ** 2, np.arange(-k, k + 1) ** 2) <= k * k))(max(int(round(r / px)), 1))
+    M = ndi.binary_closing(M, disk(r_close)); M = ndi.binary_opening(M, disk(r_open))
+    M, n = ndi.label(M)
+    if n == 0: return Q
+    M = M == (np.argmax(np.bincount(M.ravel())[1:]) + 1)                              # the largest piece
+    M = ndi.binary_fill_holes(M)
+    C = max(find_contours(ndi.gaussian_filter(np.pad(M, 2).astype(float), 1.0), 0.5), key=len)
+    k = max(PLATE_SMOOTH / px, 1.0)                                                     # a light smoothing along the outline:
+    C = np.c_[ndi.gaussian_filter1d(C[:, 0], k, mode='wrap'), ndi.gaussian_filter1d(C[:, 1], k, mode='wrap')]   # the raster's wobble
+    C = approximate_polygon(C, 0.35)[:-1]
+    return C[:, ::-1] * px + lo - 2 * px                                                # (row, col) -> (x, y)
+
+
+def _area(Q):
+    Q = np.asarray(Q, float); return 0.5 * abs(float((Q[:, 0] * np.roll(Q[:, 1], -1) - np.roll(Q[:, 0], -1) * Q[:, 1]).sum()))
+
+
+def _card_border(V, Mb):
+    V = np.asarray(V, float); rows = len(V) // Mb; G = V.reshape(rows, Mb, 3)
+    return np.vstack([G[0], G[1:, -1], G[-1, ::-1][1:], G[::-1, 0][1:-1]])
+
+
+def plates(form, rec, fins, segs):
+    """{fin: dict(V, F, T)}: flat clean plates. T: share of the way from the root (paired fins hand over to their root bone by it)."""
+    out = {}
+    for k, f in fins.items():
+        Mb = len(f['lens']); paired = k.startswith(('pectoral', 'pelvic'))
+        if not paired:
+            Q = _fin_outline(rec, k, form); n_edge = 0
+            if Q is not None and len(Q) >= 3:
+                Q = np.asarray(Q, float); n_edge = len(Q) - 60 if k != 'caudal' else len(Q)   # _fin_outline closes a median fin with 60 body points
+            else: Q = _card_border(f['V'], Mb)[:, :2]
+            # only the stretch along the body sinks: a long low fin (a soft dorsal a hair over the back) stands within reach of the
+            # blocks along its whole edge, and sinking every near point took it into the body (clean pass, round 1)
+            root = np.zeros(len(Q), bool); root[n_edge:] = True
+            if k == 'caudal' or n_edge == 0: root = _f(np.c_[Q, np.zeros(len(Q))], segs).min(1) <= 1.15
+            Q[root] = _sink2d(Q[root], segs)
+            if k != 'caudal' and n_edge and root.any():   # and at least PLATE_ROOT under the record's back (belly) line: where the blocks stand
+                up = Q[:n_edge, 1].mean() > Q[root, 1].mean()   # over that line the root did not sink, the strip of a low fin over it was
+                line = form.TOP if up else form.BOT             # thinner than the cleaning's opening and was cut away (clean pass round 2)
+                yl = line(Q[root, 0]) - (PLATE_ROOT if up else -PLATE_ROOT)
+                Q[root, 1] = np.minimum(Q[root, 1], yl) if up else np.maximum(Q[root, 1], yl)
+            Q0 = Q.copy(); C = _clean2d(Q); Q = C if _area(C) >= PLATE_KEEP * _area(Q) else Q   # a row of fine spines cleans away: keep its trace
+            P, T = _plate2d(Q); V = np.c_[P, np.zeros(len(P))]; Tm = np.zeros(len(V))
+            if k == 'caudal':     # the caudal hands over to its lobe bones from its root row (the card's) to its edge
+                xb = float(np.asarray(f['V'], float)[:Mb, 0].mean()); Tm = np.clip((V[:, 0] - xb) / max(float(V[:, 0].max()) - xb, 1e-9), 0, 1)
+            out[k] = dict(V=V, F=T.tolist(), T=Tm.tolist(), raw=Q0); continue
+        Bd = _card_border(f['V'], Mb); c = Bd.mean(0); _, _, W = np.linalg.svd(Bd - c); e1, e2 = W[0], W[1]
+        Q = np.c_[(Bd - c) @ e1, (Bd - c) @ e2]; to3 = lambda q: c + q[:, :1] * e1 + q[:, 1:2] * e2
+        # the root edge runs on in the plate's own plane until it is PLATE_SINK inside the blocks: the plate enters the body itself
+        # (a lozenge knob at the root read as a lump, clean pass round 2)
+        d2 = Q[:Mb].mean(0) - Q[Mb:].mean(0); d2 /= max(np.linalg.norm(d2), 1e-9); ts = np.linspace(0, PLATE_REACH, 80); Qr0 = Q[:Mb].copy()
+        for j in range(Mb):
+            h = np.where(_f(to3(Q[j] + ts[:, None] * d2), segs).min(1) <= PLATE_SINK)[0]
+            Q[j] = Q[j] + ts[h[0] if len(h) else -1] * d2
+        C = _clean2d(Q); Q = C if _area(C) >= PLATE_KEEP * _area(Q) else Q; P, T = _plate2d(Q); V = to3(P)
+        # T: the way out from the card's root row, along the plate (the stretch run on into the body counts 0)
+        j = np.argmin(np.linalg.norm(P[:, None] - Qr0[None], axis=2), 1); sd = ((P - Qr0[j]) * -d2).sum(1)
+        Tn = np.clip(sd / max(sd.max(), 1e-9), 0, 1); root = np.asarray(f['V'], float)[:Mb]
+        # a flat blade at the card's rest angles can run its far part into the flank (a long sickle pectoral laid back): turned about
+        # its root line, away from the body, by the least angle that frees every point beyond PLATE_FREE_T of the way out
+        a0 = root.mean(0); ax = root[-1] - root[0]; ax /= max(np.linalg.norm(ax), 1e-9)
+        def turned(deg):
+            th = np.radians(deg); K = np.array([[0, -ax[2], ax[1]], [ax[2], 0, -ax[0]], [-ax[1], ax[0], 0]])
+            Rm = np.eye(3) + np.sin(th) * K + (1 - np.cos(th)) * K @ K; return (V - a0) @ Rm.T + a0
+        far = Tn > PLATE_FREE_T; hits = lambda U: int((_f(U[far], segs).min(1) < 1.0).sum()) if far.any() else 0
+        if hits(V):
+            for deg in np.arange(1, PLATE_TURN_MAX + 1e-9, 1.0):
+                U = min((turned(deg), turned(-deg)), key=hits)
+                if hits(U) == 0: V = U; break
+        out[k] = dict(V=V, F=T.tolist(), T=Tn.tolist())
+    return out
+
+
+def plate_checks(form, rec, PL, segs):
+    """PL1 each median plate's side view, clear of the body, against its outline before cleaning (the cleaning keeps the fin's shape:
+    >= BK3_MIN; the outline against the record is BK3); PL2 no paired plate runs into the body beyond PLATE_FREE_T of the way from its root."""
+    R = {}; iou = {}; xb = np.linspace(0, form.XEND, 400)
+    body = np.vstack([np.c_[xb, form.TOP(xb)], np.c_[xb, form.BOT(xb)][::-1]])
+    for k, p in PL.items():
+        if k.startswith(('pectoral', 'pelvic')): continue
+        edge = p.get('raw')
+        if edge is None: continue
+        edge = np.asarray(edge, float); V = np.asarray(p['V'])[:, :2]; lo = np.minimum(V.min(0), edge.min(0)); sc = 400 / max(float((np.maximum(V.max(0), edge.max(0)) - lo).max()), 1e-9)
+        px = lambda P: [tuple(q) for q in ((np.asarray(P) - lo) * sc).tolist()]
+        a = Image.new('1', (402, 402)); d = ImageDraw.Draw(a)
+        for t in p['F']: d.polygon(px(V[t]), fill=1)
+        b = Image.new('1', (402, 402)); ImageDraw.Draw(b).polygon(px(edge), fill=1)
+        m = Image.new('1', (402, 402)); ImageDraw.Draw(m).polygon(px(body), fill=1); clear = ~np.array(m)
+        if (np.array(b) & clear).sum() < PL1_MIN_PX: continue            # a fin a hair over the back (trumpetfish spines): nothing to compare
+        iou[k] = round(_iou(np.array(a) & clear, np.array(b) & clear), 4)
+    R['PL1_plate_iou'] = iou; R['PL1_pass'] = (not iou) or min(iou.values()) >= BK3_MIN
+    pierce = {}
+    for k, p in PL.items():
+        if not k.startswith(('pectoral', 'pelvic')): continue
+        V = np.asarray(p['V']); far = np.asarray(p['T']) > PLATE_FREE_T
+        pierce[k] = int((_f(V[far], segs).min(1) < 1.0).sum()) if far.any() else 0
+    R['PL2_paired_inside'] = pierce; R['PL2_pass'] = not any(pierce.values())
+    R['PL_pass'] = R['PL1_pass'] and R['PL2_pass']
+    return R
+
+
 # ---------------------------------------------------------------- the primitive kit: building blocks that close the chain's gaps
 # Gary 28 Nov: "if there are gaps, could you create primitive shapes/building blocks to close them?" Each kind closes one gap that
 # BK4 / BK5 measure:
@@ -224,6 +402,8 @@ JOINTS = True         # DEFAULT: joint spheroids on. Measured (BK5, the swim cli
                       # overlapping ellipsoids per bone already close a narrow body's bend); pufferfish 0.544 -> 0.252 % SL with them
                       # (a wide body's blocks swing their flanks apart). ~100 triangles a joint
 PRIM_RES = (10, 6)    # DEFAULT: a primitive's mesh (longitude x latitude): small shapes, 100 triangles each
+JOINT_IN = 0.985         # DEFAULT: a joint spheroid's surface stays at this block measure inside the chain at rest (~0.75 % in: under
+                         # the 48 x 24 block facets' ~0.2 % sag, yet as full as the dip allows so a bend's open wedge shows it, not a crack)
 JOINT_FILL = 0.97     # DEFAULT: a joint spheroid stays this far inside the section (it must not swell the side or top view)
 ROOT_PAD = 0.15       # DEFAULT: a root lozenge reaches this share of its length further into the body than the gap (so the edge sinks)
 ROOT_T = 0.25         # DEFAULT: a root lozenge's thickness, x the local body half-width (a fleshy fin base, thinner than the body)
@@ -249,13 +429,22 @@ def _f(P, prims):
 
 
 def joints(form, rec, segs):
-    C = dict(bones=rec['bones'], xend=form.XEND); NB, xs = RIG.spine_stations(C); out = []
+    C = _C(form, rec); NB, xs = RIG.spine_stations(C); out = []
     x_last = max(s['c'][0] + s['r'][0] for s in segs)
     for i in range(1, NB):
         x = float(xs[i])
         if x >= x_last: break
         t, b, w = float(form.TOP(x)), float(form.BOT(x)), float(form.HW(x))
-        out.append(dict(kind='joint', c=[x, (t + b) / 2, 0.0], r=[JOINT_FILL * w, JOINT_FILL * (t - b) / 2, JOINT_FILL * w], bone=i))
+        q = dict(kind='joint', c=[x, (t + b) / 2, 0.0], r=[JOINT_FILL * w, JOINT_FILL * (t - b) / 2, JOINT_FILL * w], bone=i)
+        # inside the chain at rest: the chain's union dips between its blocks under the record's section, and a spheroid at
+        # JOINT_FILL of the record stood through the dip as a pale patch (clean pass, Gary 28 Nov "not clean enough")
+        v, _ = _ellipsoid(q['c'], q['r'], 48, 24); c = np.asarray(q['c']); lo, hi = 0.3, 1.0      # the clean mesher's own facets (a coarser
+        # sample missed the vertex that stood through, a light stripe at one joint, clean pass round 2)
+        for _ in range(20):
+            k = (lo + hi) / 2
+            if _f(c + k * (v - c), segs).min(1).max() <= JOINT_IN: lo = k
+            else: hi = k
+        q['r'] = [lo * a for a in q['r']]; out.append(q)
     return out
 
 
@@ -281,7 +470,7 @@ def sink_roots(form, prims, fins):
 
 def roots(form, rec, prims, fins):
     """lozenges under every fin root row that stands outside the body's blocks."""
-    C = dict(bones=rec['bones'], xend=form.XEND); out = []
+    C = _C(form, rec); out = []
     for k, f in fins.items():
         Vf = np.asarray(f['V'], float); Mb = len(f['lens']); root = Vf[:Mb]
         arc = np.r_[0, np.cumsum(np.linalg.norm(np.diff(root, axis=0), axis=1))]
@@ -310,7 +499,7 @@ def roots(form, rec, prims, fins):
     return out
 
 
-def gap_checks(prims, fins, C, V, F, rec, raw, bend=1.0):
+def gap_checks(prims, fins, C, V, F, rec, raw, bend=1.0, SW=None):
     """BK4 fin roots inside the body at rest; BK5 the smoothly bent skin (linear blend of neighbouring spine bones, as the full
     fish is skinned) inside the rigid blocks at every frame of the swim clip."""
     R = {}; worst = {}
@@ -319,7 +508,10 @@ def gap_checks(prims, fins, C, V, F, rec, raw, bend=1.0):
     R['BK4_root_worst'] = worst; R['BK4_pass'] = max(worst.values()) <= BK4_MAX
     try:
         from . import swim_clip
-        BL = RIG.bones(C, V, dict(mouth=rec['mouth'], cover=rec['cover'])); names, rest, W, Q = swim_clip.clips(C, V, raw, BL, None)['swim']
+        if SW is None: SW = swim_clip.clips(C, V, raw, RIG.bones(C, V, dict(mouth=rec['mouth'], cover=rec['cover'])) + RIG.fin_bones(C), None)
+        names, rest, W, Q = SW['swim']
+        ji = [names.index(j) for _, j in sorted(swim_clip.bone_joints(int(C['bones'])).items())]       # spine bone i -> its engine joint
+        rest, W, Q = np.asarray(rest)[ji], np.asarray(W)[:, ji], np.asarray(Q)[:, ji]
     except Exception as e:
         R['BK5_note'] = f'no swim clip: {type(e).__name__}: {e}'[:160]; R['BK5_pass'] = None; return R
     segs = [q for q in prims if q['kind'] == 'segment']; cen = np.array([q['c'] for q in segs]); rad = np.array([q['r'] for q in segs])
@@ -367,36 +559,42 @@ def blockout(record_path, out, style=None, log=print, kit=True, gaps=True):
         sink_roots(form, prims, fins); prims += roots(form, rec, prims, [k for k in fins if k.startswith(('pectoral', 'pelvic'))] and
                                                       {k: v for k, v in fins.items() if k.startswith(('pectoral', 'pelvic'))})
     for q in prims: q.setdefault('tier', 1 if q['kind'] == 'segment' else 2)
-    kit3, carved, pieces = None, {}, []
-    if kit and CUTTERS:      # tier 3: mouth, gill and eye cutters, and the moving head blocks they uncover
-        from . import blockout_cut as CUT
-        kit3 = CUT.head_kit(rec, segs); carved, pieces = CUT.build(prims, kit3)
-        Cb = dict(bones=rec['bones'], xend=form.XEND)
-        for p in pieces:
-            if p['bone'] == 'head': p['bone'] = f"spine_{RIG.spine_index(Cb, float(np.mean(np.asarray(p['V'])[:, 0]))):02d}"
-    V, F, VB = body_mesh(prims, carved)
+    kit3 = None
+    if kit and CUTTERS:      # tier 3: mouth, gill and eye cutters and the moving head blocks they uncover; Blender cuts the meshes
+        from . import blockout_cut as CUT                                                    # (blender/clean_mesh.py) from these specs
+        kit3 = CUT.head_kit(rec, prims)
+    V, F, VB = body_mesh(prims)     # the plain blocks: the gap checks' rigid body and the numpy LODs
     R = checks(form, segs, x_end, fins, rec); R.update(section_check(form, segs))
     R['BK_pass'] = R['BK_pass'] and R['BK6_pass']
-    C = dict(bones=rec['bones'], xend=form.XEND, SL_mm=rec['SL_mm'], species=rec['species'], fins={k: dict(V=np.asarray(v['V']).tolist()) for k, v in fins.items()},
+    C = dict(_C(form, rec), SL_mm=rec['SL_mm'], species=rec['species'], fins={k: dict(V=np.asarray(v['V']).tolist(), T=list(v['T'])) for k, v in fins.items()},
              openings=dict(jaw_joint=rec['jaw_joint'], opercle_hinge=rec['opercle_hinge']), faces=F, ftag=['body'] * len(F))
     if gaps:
-        raw = json.load(open(record_path)); R.update(gap_checks(prims, fins, C, V, F, rec, raw))
-        if R.get('BK5_pass') is not None: R['BK5_turn_x3_gap_pctSL'] = gap_checks(prims, fins, C, V, F, rec, raw, bend=3.0)['BK5_bend_gap_worst_pctSL']
+        raw = json.load(open(record_path)); SW = None
+        try:              # the swim clip once: the bend gap (BK5) and the rig rows (RG1-RG3: rigid head, fin chains that trail)
+            from . import swim_clip
+            BL = RIG.bones(C, V, dict(mouth=rec['mouth'], cover=rec['cover'])) + RIG.fin_bones(C); SW = swim_clip.clips(C, V, raw, BL, None)
+            R.update(swim_clip.rig_checks(C, V, {f'spine_{i:02d}': (VB == i).astype(float) for i in range(int(C['bones']))}, BL, SW, head=VB == 0))
+            R['RG_bones'] = len(BL)
+        except Exception as e: R['RG_note'] = f'no swim clip: {type(e).__name__}: {e}'[:160]
+        R.update(gap_checks(prims, fins, C, V, F, rec, raw, SW=SW))
+        if R.get('BK5_pass') is not None: R['BK5_turn_x3_gap_pctSL'] = gap_checks(prims, fins, C, V, F, rec, raw, bend=3.0, SW=SW)['BK5_bend_gap_worst_pctSL']
     R['BK_pass'] = R['BK_pass'] and R.get('BK4_pass', True) is not False and R.get('BK5_pass', True) is not False
     R['kit'] = dict(joints=sum(q['kind'] == 'joint' for q in prims), roots=sum(q['kind'] == 'root' for q in prims)) if kit else None
     if kit3 is not None:
-        R.update(CUT.cut_checks(kit3, pieces))
+        R.update(CUT.cut_checks(kit3, prims))
         R['BK_pass'] = R['BK_pass'] and R['CT_pass'] is not False
         R['cut'] = dict(cutters={k: sum(q['kind'] == k for q in kit3['cutters']) for k in ('cut_jaw', 'cut_mouth', 'cut_gill', 'cut_eye')},
-                        carved_bones=sorted(int(b) for b in carved), pieces=[p['name'] for p in pieces], notes=kit3['notes'])
-    tris = sum(len(q) - 2 for q in F) + sum(2 * len(v['F']) for v in fins.values()) + sum(len(p['F']) for p in pieces)
-    D = dict(kind='blockout', species=rec['species'], SL_mm=rec['SL_mm'], xend=form.XEND, x_end_body=x_end, bones=rec['bones'],
+                        notes=kit3['notes'])
+    PL = plates(form, rec, fins, segs); R.update(plate_checks(form, rec, PL, segs))
+    R['BK_pass'] = R['BK_pass'] and R['PL_pass'] is not False
+    tris = sum(len(q) - 2 for q in F) + sum(2 * len(v['F']) for v in fins.values())     # the plain blocks; the clean LOD0's count is in blockout_glb.json
+    D = dict(kind='blockout', species=rec['species'], SL_mm=rec['SL_mm'], xend=form.XEND, x_end_body=x_end, bones=rec['bones'], head_end=RIG.head_end(rec),
              jaw_joint=rec['jaw_joint'], opercle_hinge=rec['opercle_hinge'], mouth_line=np.asarray(rec['mouth']['line']).tolist(),
              cover_rear=np.asarray(rec['cover']['rear']).tolist(), gape_deg=float(rec.get('gape_deg', 30.0)),
              segments=segs, prims=[{k: v for k, v in q.items()} for q in prims if q['kind'] != 'segment'], V=V.tolist(), F=F, vbone=VB.tolist(),
              fins={k: dict(V=np.asarray(v['V']).tolist(), F=v['F'], T=v['T']) for k, v in fins.items()},
-             pieces=[dict(name=p['name'], bone=p['bone'], mat=p['mat'], V=np.asarray(p['V']).tolist(), F=[list(map(int, f)) for f in p['F']]) for p in pieces],
-             kit3=None if kit3 is None else dict(blocks=kit3['blocks'], cutters=kit3['cutters']),
+             plates={k: dict(V=np.asarray(v['V']).tolist(), F=v['F'], T=v['T']) for k, v in PL.items()},
+             kit3=None if kit3 is None else dict(blocks=kit3['blocks'], cutters=kit3['cutters'], cover_poly=kit3.get('cover_poly')),
              tiers={1: 'masses: spine segments', 2: 'forms: joints, roots, fin plates, jaw, covers, eyeballs', 3: 'surgical: cutters'},
              lods={n: dict(zip(('V', 'F', 'vbone'), (m[0].tolist(), m[1], m[2].tolist()))) for n, m in
                    ((1, body_mesh(prims)), (2, body_mesh([q for q in prims if q['tier'] == 1])))} if kit3 is not None else {},
@@ -439,6 +637,6 @@ def board(out, sources, glb=True, log=print):
     ok = [r for r in rows.values() if 'error' not in r]
     summary = dict(records=len(rows), built=len(ok), BK_pass=sum(r['BK_pass'] for r in ok),
                    glb_ok=sum(1 for r in ok if 'glb' in r and 'error' not in r['glb']),
-                   failing={n: [k for k in ('BK1_pass', 'BK2_pass', 'BK3_pass', 'BK4_pass', 'BK5_pass', 'BK6_pass', 'CT1_pass', 'CT2_pass', 'CT3_pass') if r.get(k) is False] for n, r in rows.items() if 'error' not in r and not r['BK_pass']})
+                   failing={n: [k for k in ('BK1_pass', 'BK2_pass', 'BK3_pass', 'BK4_pass', 'BK5_pass', 'BK6_pass', 'CT1_pass', 'CT2_pass', 'CT3_pass', 'PL1_pass', 'PL2_pass') if r.get(k) is False] for n, r in rows.items() if 'error' not in r and not r['BK_pass']})
     json.dump(dict(summary=summary, rows=rows), open(os.path.join(out, 'board_blockout.json'), 'w'), indent=1, default=float)
     log(json.dumps(summary)); return summary

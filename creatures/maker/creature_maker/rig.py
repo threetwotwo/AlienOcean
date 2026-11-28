@@ -1,7 +1,14 @@
 """Stage 8a, RIG (numpy, no Blender): the bones and skin weights the export binds, in record units (SL, x snout -> tail, y up, z left).
 
 Bones
-  spine_00 .. spine_NN   the body chain (record body.motion.bones, at most 10), as the export always had
+  spine_00               the HEAD: one rigid bone from the snout to the head's end (head_end: the gill cover's rear line, record
+                         cover.rear, no further back than the pectoral fin's base). Every vertex ahead of the head's end rides it
+                         alone, so the cranium does not bend in a swim or a turn (check RG1)
+  spine_01 .. spine_NN   the trunk and tail chain, evenly from the head's end to the caudal base (record body.motion.bones counts the
+                         head, at most 10). The first sideways bend starts at the head's end; weights blend linearly between bone centres
+  fin_<fin>_root, _tip   paired fins (pectoral, pelvic): a chain along the fin's long axis, weights by the fin's own T (0 root, 1 edge)
+  fin_caudal_root, fin_caudal_upper, fin_caudal_lower   the tail fin past the peduncle and its two lobes
+                         The fin chains trail the body in the swim clip (swim_clip.fin_lag: secondary motion; checks RG2, RG3)
   jaw                    lower jaw: pivot = openings.jaw_joint, turns about +z (gape opens the mouth downward), parent = spine bone at the joint
   opercleL / opercleR    gill covers: pivot = openings.opercle_hinge on each side's skin, turn about the vertical axis (flare swings the
                          cover outward), parent = spine bone at the hinge. Named as the swim engine (motion/swim.js) names them, so its
@@ -17,9 +24,34 @@ import numpy as np
 from .pose import jaw_weights, cover_weights, gape, flare
 
 
+HEAD_FRONT = 0.02    # DEFAULT (SL): the head bone starts this far behind the snout tip (the chain's first station since v0.2)
+TAIL_BACK = 0.03     # DEFAULT (SL): the chain ends this far ahead of the body's end (as since v0.2: the last joint inside the peduncle)
+FIN_CHAIN = 2        # DEFAULT: bones along a paired fin (root, tip). Observed on the reference rigs: pectorals pivot at the base AND
+                     # flex along the blade, so at least 2. A third (mid) bone works here (names root, mid, tip) but 10 spine + jaw + 2
+                     # covers + 4 fins x 3 + 3 caudal = 28 bones, over the export's P7 budget of 24; 2 a fin lands on 24
+PAIRED = ('pectoral', 'pelvic')
+LOBE_BLEND = 0.25    # DEFAULT: the two caudal lobes share the fork's middle over this share of the fin's half height (no tear at the fork)
+
+
+def head_end(rec):
+    """x (SL) where the rigid head ends: the rearmost point of the gill cover's rear line (record cover.rear), and no further back
+    than the pectoral fin's base (record fins.pectoral.x: the girdle the cover closes on; a rear line traced past it sweeps down the
+    belly). Observed on the reference rigs: the first bend starts right behind the gill covers and the pectoral girdle."""
+    x = float(np.asarray(rec['cover']['rear'], float)[:, 0].max())
+    pec = (rec.get('fins') or {}).get('pectoral')
+    if pec and pec.get('x') is not None: x = min(x, float(pec['x']))
+    return x
+
+
 def spine_stations(C):
-    NB = int(C['bones']); xs = np.linspace(0.02, C['xend'] - 0.03, NB + 1)
-    return NB, xs
+    """joints of the chain, x in SL: the head bone from HEAD_FRONT to the head's end, the other bones evenly from there to the tail.
+    C['rig_fault'] == 'even' is the old rule (every bone the same length from the snout: the skull bends), kept for the planted test."""
+    NB = int(C['bones']); x1 = C['xend'] - TAIL_BACK
+    if C.get('rig_fault') == 'even': return NB, np.linspace(HEAD_FRONT, x1, NB + 1)
+    if 'head_end' not in C: raise KeyError('head_end: the cage carries no head end (rig.head_end(record)); rebuild it')
+    he = float(C['head_end'])
+    if not HEAD_FRONT < he < x1 or NB < 2: raise ValueError(f'head_end {he} outside the chain ({HEAD_FRONT} .. {x1}) or fewer than 2 bones')
+    return NB, np.r_[HEAD_FRONT, np.linspace(he, x1, NB)]
 
 
 def spine_index(C, x):
@@ -27,10 +59,68 @@ def spine_index(C, x):
 
 
 def spine_weights(C, x):
-    """per vertex x: (bone index, weight) pairs, linear between the two nearest bone centres (the export's rule since v0.2)."""
+    """per vertex x: (bone index, weight) pairs. Ahead of the head's end the head bone alone; behind it linear from the head's end to
+    the first trunk bone's centre, then between bone centres."""
     NB, xs = spine_stations(C); ctrs = (xs[:-1] + xs[1:]) / 2
+    if C.get('rig_fault') != 'even': ctrs[0] = xs[1]
     f = np.interp(x, ctrs, np.arange(NB)); i0 = np.floor(f).astype(int); a = f - i0
     i1 = np.minimum(i0 + 1, NB - 1); return i0, 1 - a, i1, np.where(i0 + 1 < NB, a, 0.0)
+
+
+def spine_groups(C, x, share=1.0):
+    """{spine bone name: weight per x} of spine_weights, times share."""
+    x = np.atleast_1d(np.asarray(x, float)); i0, a0, i1, a1 = spine_weights(C, x); g = {}; sh = np.broadcast_to(share, x.shape)
+    for i, a in ((i0, a0), (i1, a1)):
+        for b in np.unique(i): g.setdefault(f'spine_{b:02d}', np.zeros(len(x)))[i == b] += (a * sh)[i == b]
+    return g
+
+
+def _chain_levels(n): return ['root', 'tip'] if n == 2 else ['root'] + [f'mid{j}' if n > 3 else 'mid' for j in range(1, n - 1)] + ['tip']
+
+
+def fin_bones(C):
+    """bones of the fins that move on their own: per paired fin a chain of FIN_CHAIN bones from the root row's middle to the free
+    edge's middle; for the caudal fin a root bone over the inner half and one bone per lobe. Each: name, head, tail (record units),
+    parent, connect, fin, level (0 at the root), levels. Bone names end in _root/_mid/_tip/_upper/_lower: the fin's mesh node is
+    fin_<fin> (or <fin> on a blockout) and Godot renames a bone that shares a node's name."""
+    out = []
+    for k, f in C['fins'].items():
+        V = np.asarray(f['V'], float); T = np.asarray(f['T'], float); root = V[T <= T.min() + 1e-6].mean(0); edge = V[T >= T.max() - 1e-6]
+        par = f'spine_{spine_index(C, root[0]):02d}'
+        if k.startswith(PAIRED):
+            n = FIN_CHAIN; tip = edge.mean(0); P = [root + (tip - root) * j / n for j in range(n + 1)]
+            for j, lv in enumerate(_chain_levels(n)):
+                out.append(dict(name=f'fin_{k}_{lv}', head=P[j].tolist(), tail=P[j + 1].tolist(), parent=par if j == 0 else out[-1]['name'],
+                                connect=False, fin=k, level=j, levels=n))
+        elif k == 'caudal':
+            up, lo = edge[edge[:, 1] >= root[1]], edge[edge[:, 1] < root[1]]
+            if not len(up) or not len(lo): up = lo = edge
+            mid = root + 0.5 * (edge.mean(0) - root)
+            out.append(dict(name='fin_caudal_root', head=root.tolist(), tail=mid.tolist(), parent=par, connect=False, fin=k, level=0, levels=2))
+            for nm, e in (('upper', up), ('lower', lo)):
+                t = e.mean(0); out.append(dict(name=f'fin_caudal_{nm}', head=(root + 0.5 * (t - root)).tolist(), tail=t.tolist(), parent='fin_caudal_root',
+                                               connect=False, fin=k, level=1, levels=2))
+    return out
+
+
+def fin_groups(C, k, fault=None):
+    """skin weights of fin k's vertices: {bone name: array}. Every fin vertex follows the spine at its own x (median fins wholly: they
+    bend with the trunk); a fin with bones hands over to them from root (T = 0) to edge (T = 1), and along the chain by T, linear
+    between the bones' middles. The caudal fin's outer half is split between its lobes by height, shared over LOBE_BLEND at the fork.
+    fault 'rigid': all of the fin's share on its root bone (the old one-bone fin)."""
+    f = C['fins'][k]; V = np.asarray(f['V'], float); T = np.clip(np.asarray(f['T'], float), 0, 1)
+    paired = k.startswith(PAIRED); n = FIN_CHAIN if paired else 2 if k == 'caudal' else 0
+    if not n: return spine_groups(C, V[:, 0])
+    g = spine_groups(C, V[:, 0], 1 - T)
+    u = np.interp(T, (np.arange(n) + 0.5) / n, np.arange(n))          # place along the chain, in bones
+    if fault == 'rigid': u = np.zeros(len(T))
+    if paired:
+        for j, lv in enumerate(_chain_levels(n)): g[f'fin_{k}_{lv}'] = T * np.clip(1 - np.abs(u - j), 0, 1)
+    else:
+        y0 = float(V[T <= T.min() + 1e-6][:, 1].mean()); h = max(float(np.abs(V[:, 1] - y0).max()), 1e-9)
+        a = np.clip(0.5 + (V[:, 1] - y0) / (2 * LOBE_BLEND * h), 0, 1)
+        g['fin_caudal_root'] = T * (1 - u); g['fin_caudal_upper'] = T * u * a; g['fin_caudal_lower'] = T * u * (1 - a)
+    return g
 
 
 def hinge_z(C, V):

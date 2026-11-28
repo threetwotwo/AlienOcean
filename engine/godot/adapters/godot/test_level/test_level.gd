@@ -191,7 +191,7 @@ func set_toggle(n: String, on: bool) -> void:
 		"ssil": wr.env.ssil_enabled = on
 		"shadows": wr.light.shadow_enabled = on
 		"half_res":
-			# half the pixels each way, upscaled (upscaler(): AMD FSR 1 + Godot TAA by default; AO_UPSCALER picks another).
+			# half the pixels each way, upscaled (upscaler(): MetalFX temporal / FSR 2 by default; AO_UPSCALER picks another).
 			# A spatial upscaler brings TAA with it, so thin edges (grass) stay anti-aliased.
 			var m := upscaler()
 			get_viewport().scaling_3d_mode = m if on else Viewport.SCALING_3D_MODE_BILINEAR
@@ -212,7 +212,7 @@ func set_toggle(n: String, on: bool) -> void:
 	_relight()
 
 ## The upscaler behind half_res. AO_UPSCALER = fsr | fsr2 | metalfx | metalfx_temporal picks one; by default AMD FSR 2, a temporal
-## upscaler that does its own anti-aliasing (TAA stays off); now FSR 1 + Godot TAA, the best look per ms on the Mac (below). FSR 1 was the default (8.8 ms vs MetalFX temporal 11.5 ms on the M1 Pro),
+## upscaler that does its own anti-aliasing (TAA stays off): MetalFX temporal on Apple silicon, FSR 2 elsewhere (below). FSR 1 was the default (8.8 ms vs MetalFX temporal 11.5 ms on the M1 Pro),
 ## but it is spatial, with no anti-aliasing: Gary's fullscreen playtest (28 Nov) showed stair-stepped grass, pixelation and shimmer.
 ## At 2704x1756 FSR 2 draws the grass clean where FSR 1 aliases (look thread, plans/godot_look/iq_28nov.jpg); Gary approved the cost.
 static func upscaler() -> int:
@@ -224,10 +224,12 @@ static func upscaler() -> int:
 		"fsr2": return Viewport.SCALING_3D_MODE_FSR2
 		"metalfx": return Viewport.SCALING_3D_MODE_METALFX_SPATIAL if mfx_s else Viewport.SCALING_3D_MODE_FSR
 		"metalfx_temporal": return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR
-	# default FSR 1 + Godot TAA (needs_taa). Mac matrix 28 Nov, 2704x1696 all on, key-frame / floor ms: FSR 1 + TAA 31.7 / 31.1 (soft,
-	# no stair-steps), MetalFX temporal 37.6 / 37.6 (as soft), FSR 2 42.6 / 37.2 (crispest, grainy grass), FSR 1 alone 28.5 / 35.1
-	# (jagged). Best look per ms.
-	return Viewport.SCALING_3D_MODE_FSR
+	# default: a temporal upscaler. Mac matrix 28 Nov, 2704x1696 all on, key-frame / floor ms: FSR 1 + TAA 31.7 / 31.1, MetalFX temporal
+	# 37.6 / 37.6 (both soft, no stair-steps), FSR 2 42.6 / 37.2 (crispest, grainy grass), FSR 1 alone 28.5 / 35.1 (jagged). But in
+	# motion Godot's TAA at half resolution shimmers on smooth shading (tools/ao_motion_check.gd, sliding camera, AO off: flicker RMS
+	# 4.4 levels with FSR 1 + TAA, 0.48 FSR 2, 0.37 FSR 1 alone, 0.13 native), against Gary's no-jitter rule. So MetalFX temporal
+	# (Apple's own, native on the M1) where the GPU has it, FSR 2 elsewhere.
+	return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR2
 
 static func needs_taa(mode: int) -> bool:
 	## a spatial upscaler does no anti-aliasing of its own: TAA goes with it
@@ -417,6 +419,15 @@ func _bench_invalid(rows: Array) -> String:
 		var fm: float = r.r.frame_ms
 		lo = minf(lo, fm); hi = maxf(hi, fm)
 	if rows.size() > 3 and hi - lo <= 0.4: return "flat frame times (%.2f-%.2f ms across all rows)" % [lo, hi]
+	# a GPU that stops drawing mid-run (Metal, 28 Nov: 3 of 8 Mac runs) leaves SOME rows at one fixed short time (7.2-7.3 ms: the
+	# CPU loop alone) while the rest are real; the log often has no fence line. Two or more rows within 0.12 ms of the shortest,
+	# with the median row over twice as long, can't be real costs.
+	var fms := []
+	for r in rows: fms.append(float(r.r.frame_ms))
+	fms.sort()
+	var stuck := fms.filter(func(v): return v <= lo + 0.12)
+	if rows.size() > 3 and stuck.size() >= 2 and fms[fms.size() / 2] > 2.0 * lo:
+		return "frozen GPU rows: %d rows at %.2f ms (the CPU loop alone) against a median of %.2f ms" % [stuck.size(), lo, fms[fms.size() / 2]]
 	var logp := "user://logs/godot.log"
 	if FileAccess.file_exists(logp):
 		var t := FileAccess.get_file_as_string(logp)
