@@ -31,7 +31,7 @@ var pelv_yaw_off := 0.0     # pelvis held back by a planted foot's hip rotation 
 var support_dg := 0.0     # pelvis ground from the feet's support minus the floor under her centre (stairs)
 var pelvis_yield := 0.0     # how far the pelvis is lowered so a planted foot stays reachable
 var pivot_carry := {"L": Vector3.ZERO, "R": Vector3.ZERO}     # the planted foot's last pivot offset, faded through lift-off
-var land_drop := {"L": 0.0, "R": 0.0}     # a foot that touched down above where it stands settles, not snaps
+var land_drop := {"L": -INF, "R": -INF}     # a foot that touched down above where it stands settles, not snaps
 var last_ank := {"L": NAN, "R": NAN}
 var last_stepping := {"L": false, "R": false}
 var land_age := {"L": 0.0, "R": 0.0}     # seconds each foot has been planted
@@ -1013,7 +1013,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		"getFloorHeight": get_floor, "crouchBlend": s.shore_crouch_blend,
 		"colliders": sense.get("colliders") if sense != null else null, "pois": sense.get("pois") if sense != null else null})
 	var pelv_yaw: float = yaw + loco.pelvisYaw
-	if not thalassa_exact and not OS.has_environment("NO_YAWLAG"):
+	if not thalassa_exact:
 		# ROOT (stress monkey slips): a planted foot can't turn, and the hip rotates only int 0.20 / ext 0.48 rad over
 		# it (plus a little ankle). Turning faster than the steps come, the leg solver twisted the planted foot on the
 		# ground (ball moving 5-12 cm, ankle still). A body keeps the pelvis with the stance foot and lets the spine take
@@ -1167,7 +1167,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 						var pp := Vector3(fx, 0, fz) + tdir * minf(left, k * 0.05)
 						for off in [-0.03, 0.07, 0.17]:
 							var g_h: float = get_floor.call(pp.x + ffw.x * off, pp.z + ffw.z * off)
-							if is_finite(g_h) and g_h - f0 < 0.36 and g_h <= maxf(f0, f1) + 0.02: tgt_floor = maxf(tgt_floor, g_h)     # stepping down, the tread being left counts too (toe over its edge)
+							if is_finite(g_h) and g_h - f0 < 0.36: tgt_floor = maxf(tgt_floor, minf(g_h, maxf(f0, f1) + 0.02 * (1.0 - smoothstep(0.5, 1.0, fst.t))))     # stepping down, the tread being left counts too (toe over its edge); capped, not dropped, at the landing height (dropping a sample as it crossed the cap made the swing floor chatter on a ramp)
 			var prev_f: float = swing_floor[key]
 			if not fst.stepping or is_nan(prev_f) or not is_finite(tgt_floor):
 				swing_floor[key] = tgt_floor
@@ -1177,7 +1177,10 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 				# falls at 1.8 m/s, or faster if that is what reaches the landing ground by touch-down (a swing cut short
 				# by the stance leg's reach landed with the floor still a riser up: 13 cm in one tick, stress B37 at 120 Hz)
 				var rem_s: float = maxf(dt, (1.0 - fst.t) * fst.get("dur", 0.36))
-				swing_floor[key] = maxf(tgt_floor, prev_f - maxf(1.8, (prev_f - tgt_floor) / rem_s) * dt)
+				# (smoothness) the gap closes as the square of the time left: it reaches the landing ground at touch-down
+				# with no speed left, where a fixed rate met the ground at up to 3 m/s
+				var kq := clampf((rem_s - dt) / rem_s, 0.0, 1.0)
+				swing_floor[key] = maxf(tgt_floor, minf(prev_f - 0.3 * dt, tgt_floor + (prev_f - tgt_floor) * kq * kq))
 			fgy = swing_floor[key]
 		var swing_lift := maxf(0.0, fst.pos.y - floor_here)
 		var wade_extra: float = sin(PI * fst.t) * wade_b * 0.036 if fst.stepping else 0.0
@@ -1195,7 +1198,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		# ROOT (stress J7 slide): a planted foot is a world constant until it lifts; out of the hip's reach box it asks
 		# for a step (below, ahead of time) instead of being dragged into the box
 		if thalassa_exact or fst.stepping or s.shore_is_airborne: ft = clamped
-		if not thalassa_exact and not OS.has_environment("NO_CLIFT") and fst.stepping and not s.shore_is_airborne and get_floor != null \
+		if not thalassa_exact and fst.stepping and not s.shore_is_airborne and get_floor != null \
 				and Vector2(clamped.x - ft_raw.x, clamped.z - ft_raw.z).length() > 0.001:
 			# ROOT (stress B12 step down at 30/120 Hz): a long swing held back inside the reach box sat over the tread
 			# it was leaving while its height came down to the landing below: the sole went 11 cm into the step. Held
@@ -1253,10 +1256,12 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			# ROOT (stress B35 knee pop at 120 Hz): a swing cut short by the stance budget touched down with its ankle still
 			# 10 cm up (the swing floor over the slope's uphill side); planted, the ankle dropped in one tick. The landed
 			# foot settles onto its ground at 4 m/s instead (two to three ticks)
+			# (land_drop holds the height the ankle may not go below while it settles; applied after the sole lift, as a
+			# floor, so it does not add to the lift that already holds the foot up)
 			if last_stepping[foot_k] and not fst.stepping and not s.shore_is_airborne and is_finite(last_ank[foot_k]):
-				land_drop[foot_k] = clampf(last_ank[foot_k] - ft.y, 0.0, 0.15)
-			land_drop[foot_k] = maxf(0.0, land_drop[foot_k] - 4.0 * dt) if not fst.stepping else 0.0
-			ft.y += land_drop[foot_k]
+				land_drop[foot_k] = last_ank[foot_k]
+			elif fst.stepping or s.shore_is_airborne:
+				land_drop[foot_k] = -INF
 		var solved := BM.leg(hip, ft, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
 		if not thalassa_exact:
 			var fk5 := "L" if side < 0 else "R"
@@ -1277,7 +1282,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 					var bf := clampf(rq.dot(pelv_fwd), lerpf(-0.34, -0.45, mra), lerpf(0.36, 0.45, mra))
 					var bc := hp + pelv_right_base * bl + pelv_fwd * bf
 					var box_ex := Vector2(bc.x - ft.x, bc.z - ft.z).length()
-					return maxf(pr2.ik.eff.distance_to(ft), box_ex - 0.013 if not OS.has_environment("NO_BOX") else 0.0)
+					return maxf(pr2.ik.eff.distance_to(ft), box_ex - 0.013)
 				var TOL := 0.012
 				if miss_at.call(0.0) > TOL: tl = 0.0
 				elif miss_at.call(0.48) > TOL:
@@ -1389,7 +1394,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			var ball_l := Vector3(0, 0.11, -0.048)
 			var flat_ball := Vector2(fx + sfw.x * ball_l.y, fz + sfw.z * ball_l.y)
 			var flat_heel := Vector2(fx + sfw.x * heel_l.y, fz + sfw.z * heel_l.y)
-			for _pass in 4:
+			for _pass in 8:
 				var lift := 0.0
 				for sp_ in SOLE_PTS:
 					var q: Vector3 = solved.finMat * sp_
@@ -1446,6 +1451,14 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 								break
 			# FIX (stress J6/J7): a planted foot the leg can no longer reach (the body climbed away from it) was
 			# dragged; step it like a clamped one
+			if not fst.stepping and is_finite(land_drop[foot_k]):
+				# eased: the gap to where the foot rests closes by e^(-40 t), not at a fixed rate
+				var rest_y: float = solved.ik.eff.y
+				var hold: float = minf(rest_y + (land_drop[foot_k] - rest_y) * exp(-40.0 * dt), land_drop[foot_k] - 1.2 * dt)     # (at least 1.2 m/s: planted, it may hover only briefly)
+				land_drop[foot_k] = hold if hold > rest_y + 0.0005 else -INF
+				if hold > rest_y + 0.0005:
+					adj.y += minf(hold - rest_y, 0.15)
+					solved = BM.leg(hip, ft + adj, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
 			var miss: float = solved.ik.eff.distance_to(ft + adj)
 			if not fst.stepping: pivot_carry[foot_k] = adj if not s.shore_is_airborne else Vector3.ZERO
 			var fk2 := "L" if side < 0 else "R"
