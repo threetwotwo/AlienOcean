@@ -94,7 +94,7 @@ def drop(o): bpy.data.objects.remove(o)
 def bones(D, cutters_on=True):
     """{spine index: (V, F)} for every spine bone, each its blocks' union cut to its slab, the head cutters taken out."""
     from creature_maker import rig as RIG
-    C = dict(bones=D['bones'], xend=D['xend']); NB, xs = RIG.spine_stations(C)
+    C = dict(bones=D['bones'], xend=D['xend'], head_end=D['head_end']); NB, xs = RIG.spine_stations(C)
     BIG = 10.0; out = {}
     cut = [q for q in (D.get('kit3') or {}).get('cutters', []) if q.get('target') == 'head'] if cutters_on else []
     # the whole chain's union, then each bone's slab of it: at rest neighbours meet in the same section (a hairline seam, no step);

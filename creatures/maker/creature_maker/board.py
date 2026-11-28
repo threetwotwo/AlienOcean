@@ -12,7 +12,8 @@ KEEP = ('GP0_rest_crossings', 'GP1_pass', 'GP1_opening_share', 'GF1_pass', 'SR1_
         'PF1_pass', 'PF1_own_side_min_pctSL', 'PF2_pass', 'PF2_reach_over_trace', 'PF3_pass', 'PF3_turned_area_share', 'PF3_blade_bend_deg', 'PF4_pass', 'PF4_root_to_skin_deg',
         'FN1_pass', 'FN1_folded_area_share', 'FN1_worst_fin',
         'SIL1_pass', 'SIL1_iou', 'SIL1_head_iou', 'SIL1_body_iou', 'SIL1_note',
-        'SIL2_pass', 'SIL2_front_iou', 'SIL2_top_iou', 'SIL2_note')
+        'SIL2_pass', 'SIL2_front_iou', 'SIL2_top_iou', 'SIL2_note',
+        'RG_pass', 'RG1_pass', 'RG1_head_end_SL', 'RG1_head_bend_pctBL', 'RG2_pass', 'RG2_paired', 'RG3_pass', 'RG3_caudal', 'RG_bones', 'RG_note')
 
 
 def find_records(dirs):
