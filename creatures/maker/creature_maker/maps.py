@@ -62,7 +62,7 @@ def bake_body(B, uvr, res, out):
     Pm, Nm, Tm, Fm = raster([mesh.faces[k] for k in sk], [uvr['face_uv'][k] for k in sk], V, VN, res)
     M = ~np.isnan(Pm[..., 0])
     P = Pm[M]
-    _, PID = form.sd_full(P, parts=True)
+    _, PID, PW = form.plates(P)          # which bone lies under the skin, and its share of that bone's step (0 at its outline)
     # fine relief = UV-space height (scales by row rule from the record count, lateral line); never in the SDF
     x = P[:, 0]; th = form.theta_of(P[:, 0], P[:, 1], P[:, 2]); arc = chart.arc_of(x, th)
     SC = rec['scales']; sp0 = 1.0 / max(SC['lateral_line'], 1.0)    # 0 rows = naked skin: relief zeroed below
@@ -92,8 +92,9 @@ def bake_body(B, uvr, res, out):
     col = c_back * wb[:, None] + c_fl * (1 - wb - wv)[:, None] + c_bel * wv[:, None]
     col = col * (0.86 + 0.14 * h[:, None])                  # scale-pocket pigment only
     mt = PA['metal']; metal = mt['back'] * wb + mt['flank'] * (1 - wb - wv) + mt['belly'] * wv
-    metal = metal * (0.75 + 0.25 * h) * np.where(PID > 0, 0.8, 1)
-    rough = PA['rough'] + 0.18 * (1 - h) * (h > 0) + 0.1 * (PID > 0)
+    # skin over bone is duller, by the bone's share of its step: it runs out with the bone, so a buried outline draws no line
+    metal = metal * (0.75 + 0.25 * h) * (1 - 0.2 * PW)
+    rough = PA['rough'] + 0.18 * (1 - h) * (h > 0) + 0.1 * PW
 
     def img(a, fill):
         o = np.zeros((res, res) + a.shape[1:]) + fill; o[M] = a; return o

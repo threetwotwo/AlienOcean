@@ -14,6 +14,8 @@ echo "== Thalassa port checks (golden traces from the v20.19 JS)"
 "$G" --headless --path . --script res://tests/test_golden_swimmer.gd 2>&1 | grep -E "PASS|FAIL|M02"; "$G" --headless --path . --script res://tests/test_golden_swimmer.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_golden_camera.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_golden_camera.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_golden_body.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_golden_body.gd >/dev/null 2>&1 || rc=1
+"$G" --headless --path . --script res://tests/test_golden_brain.gd 2>&1 | grep -E "FAIL|M04 brain"; "$G" --headless --path . --script res://tests/test_golden_brain.gd >/dev/null 2>&1 || rc=1
+"$G" --headless --path . --script res://tests/test_golden_brain.gd -- --fault >/dev/null 2>&1 && { echo "BRAIN PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Brain planted fault caught"
 echo "== GI light field (look)"
 "$G" --headless --path . --script res://tests/test_gi_light_field.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_gi_light_field.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_gi_light_field.gd -- --fault >/dev/null 2>&1 && { echo "GI PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "GI planted fault caught"
@@ -23,6 +25,9 @@ echo "== Bathymetry (the reef drop-off's stress-test world)"
 echo "== Overcast (look)"
 "$G" --headless --path . --script res://tests/test_overcast.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_overcast.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_overcast.gd -- --fault >/dev/null 2>&1 && { echo "OVERCAST PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Overcast planted fault caught"
+echo "== Image quality (look: soft shadows, temporal upscaler)"
+"$G" --headless --path . --script res://tests/test_image_quality.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_image_quality.gd >/dev/null 2>&1 || rc=1
+"$G" --headless --path . --script res://tests/test_image_quality.gd -- --fault >/dev/null 2>&1 && { echo "IMAGE QUALITY PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Image quality planted fault caught"
 echo "== Marine snow drift"
 "$G" --headless --path . --script res://tests/test_marine_snow.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_marine_snow.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_marine_snow.gd -- --fault >/dev/null 2>&1 && { echo "MARINE SNOW PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Marine snow planted fault caught"
@@ -51,6 +56,8 @@ grep -E "^(FAIL|XPASS)|^ +J[0-9]|M04 body stress tick" "$OUT/m04_60.txt"
 for f in len clip flip; do
   if "$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --fault $f --only B2 >/dev/null 2>&1; then echo "M04 PLANTED FAULT $f NOT CAUGHT"; rc=1; else echo "M04 planted fault $f caught"; fi
 done
+# J11 jitter fault: +-2 mm alternating offset on a still hover (B2 walks, where stepping noise would mask the check)
+if "$G" --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- --fault jitter --only B24 >/dev/null 2>&1; then echo "M04 PLANTED FAULT jitter NOT CAUGHT"; rc=1; else echo "M04 planted fault jitter caught"; fi
 # other tick rates and random monkey runs: reported, not yet gating (M04_STRICT=1 gates them)
 for r in 30 120; do
   "$G" --headless --fixed-fps $r --path . --script res://tests/test_body_stress.gd -- --tick $r > "$OUT/m04_$r.txt" 2>&1 || { [ "${M04_STRICT:-0}" = 1 ] && rc=1; }

@@ -1,5 +1,49 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, M04 brain port step 1): the character brain and her senses, breath outputs ready
+- Gary 28 Nov: port brain and sense organs from Thalassa, everything synced to the breath. Step 1: the brain and its sense
+  input. core/m04_body/character_brain.gd is a port of Thalassa v20.19 core/character-brain.js: point-of-interest scoring
+  and focus (dwell, cooldowns, glances), sound events with their head turns, intent focus from the camera, curiosity torso
+  yaw, idle hip shift, anticipation lean, swim hand touch (queryNearestSurface) and the breath oscillator (phase, signal,
+  centred, rate, amp, cycle, inflection). Golden trace tests/golden/brain_v20_19.json (brain_trace.mjs, 5 scenes x 25 s):
+  tests/test_golden_brain.gd MATCH, worst 3.9e-6; planted fault caught. Left out (we have none): ship and hull line of sight,
+  deck touch, vessel POIs, KORA's locked target.
+- Upgrades, off when body_rig.thalassa_exact is set (the golden body test keeps the quiet brain there, unchanged):
+  breath follows effort (stroke and sprint while swimming, speed and airborne on land), exertion rising over 2.5 s and
+  settling over 9 s, so breath rate and depth climb with work and ease back; a glance or sound turn only targets what is
+  inside the head's reach (yaw 0.92 rad, pitch by swim or walk frame), so a sound behind her no longer drags the gaze 2.8 rad
+  off and resets the gaze spring; an intent switch cannot cut a sound turn younger than 0.85 s.
+- core/m04_body/sense_context.gd (from style/runtime-senses.js getCharacterSenseContext): registry actors (grid query every
+  12 ticks, nearest 10, live positions each tick), each fish school as its centre plus its closest fish, the place's rock and
+  coral heads as landmarks, nearest 16 kept; line of sight is one ray per POI stopping short of its radius, cached 6 ticks,
+  at most 4 new rays a tick. adapters/godot/brain_senses.gd gathers these in the game (Jolt rays with her body excluded);
+  game_root.gd hands it to the girl. Game root tick means at 60 Hz: R1 3.40, R2 4.16, R3 3.75, R4 3.94 ms (main 3.52 /
+  4.24 / 3.64 / 4.07).
+- body_rig.gd: the brain is stepped once per tick (the swim step reuses the walk step's result while walking), and the rig
+  passes its own line of sight and effort. FIX: the swim-to-walk handover slerps the chest and pelvis bases (was a 0.1 rad
+  chest jump the live brain's gaze exposed). FIX: a stepping foot eases into its reach clamp over the first quarter of the
+  step (B14 at 120 Hz popped 14.6 m/s once the breath hip bob moved the pelvis).
+- Body stress: B45 (pool swim with POIs, a hidden vent, an orbiting fish, sounds, effort bursts) and B46 (blockout "senses"
+  kind, POIs from BlockoutKit.pois) check J9: gaze within 0.10 rad of reach (swim: 1.0 rad off the look), head rate under
+  4 rad/s against the chest, no ping-pong within 4 s, focus gap under 0.5 s and sound gap under 4.6 s, no flicker under
+  0.3 s, breath at most 0.6 Hz with signal under 2.5/s, amp under 1/s, rate under 1 rad/s^2, effort raising breath by 1.3x
+  and settling. New J11 for every case: more than 6 reversals of 1 mm to 15 mm (0.2 deg for the gaze, 2 mm for breath) in
+  0.5 s fails; on main at 30/60/120 Hz no case fails once steps over 15 mm are left to J5. With the brain the worst is B15 at
+  120 Hz, 6 (at the limit: kneeR while she steps in place against the 60 deg ramp; the breath's 4.5 mm hip bob, which the
+  quiet brain never moved, drives it; 2 with BS_QUIET=1), then B4 5. Planted fault --fault jitter (+-2 mm alternating)
+  fails B24; in run_all.sh with the golden brain test and its fault. J9 head rate is now the angle the head sweeps in the
+  chest frame (yaw / pitch deltas blew up swimming prone, where the head's forward nears the chest's up).
+- Interact focus (for the player UI): brain.engage_objective_focus(label, target_pos = null, target_dir = null,
+  hold_sec = 0.55), also ActorRig.engage_objective_focus; quiet brain has a no-op stub. Safe to call every tick: a repeat
+  call for the same label refreshes the target and hold (the JS re-ran the whole engage and snapped the gaze springs to 0
+  each call). Not exact: no spring snap on the first call, the target is held in the neck's reach, and the turn runs at
+  0.30 s half-life with the normal neck (the 0.09 s / fast-neck turn stays for the jump arc and water transition: on a
+  per-tick target 1.5 rad off it swung the head 8-10 rad/s). B45 and B46 engage a target every tick (B45 the circling
+  fish, B46 the object behind her, then the one ahead).
+- Open: no in-game sound sources yet (ActorRig.hear is the entry); the brain reads the registry and camera one tick old
+  (player phase runs before the actors commit, as in Thalassa); breath drives no body motion beyond what Thalassa's rig did
+  (next steps).
+
 ## 0.6.0-dev (28 Nov 2026, player UI): gamepad-playable test level: pause menu, interact, rumble, remap
 - Gary 28 Nov 07:27Z: plan the player UI and controls port, gamepad first, test gamepad gameplay soon. Swim and camera on the
   pad were already ported (M01 input 0.1.0, Thalassa v20.19 input.js); this adds what the slice lacked.
@@ -20,6 +64,7 @@
 - Controller loss pauses with "Controller disconnected. Reconnect it, then choose Resume."
 - Checks: tests/test_player_ui.gd U0-U8 23/23 (in run_all.sh via tests/run_player_ui.sh); planted faults flicker and nolatch
   caught; test_input 16/16; test level checks unchanged.
+
 ## 0.6.0-dev (28 Nov 2026, blockout kit 0.2.0): rideable creature stand-ins that swim like their animal
 - Gary 28 Nov 07:20Z: vary creature sizes and swimming motion for riding stress tests ("a dolphin swims differently from a
   whale"). blockout/blockout_species.gd: dolphin 2.6 m (up-down body wave, ~1 Hz), humpback 14 m (up-down, 0.24 Hz),

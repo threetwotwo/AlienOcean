@@ -2,7 +2,7 @@
 ## case the motor tests cover plus body-specific ones (standing, turning on the spot, jumps, hits, walls, ceilings),
 ## with body invariants checked every tick on every limb.
 ## Run: godot --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- [--tick 60] [--monkey 2]
-##        [--monkey-secs 60] [--only B7] [--fault len|flip|clip] [--out /tmp/b.json]
+##        [--monkey-secs 60] [--only B7] [--fault len|flip|clip|jitter] [--out /tmp/b.json]
 ## exit 0 = every case passed except the KNOWN open ones below. --fault plants a known body bug and the run must FAIL (run_all.sh checks that).
 ##
 ## Invariants (per tick, per limb; thresholds at the top):
@@ -19,6 +19,27 @@
 ##                   ground does not skate (> 0.35 m/s for 6 ticks running) while walking
 ##  J8 self contact  thighs and shins of the two legs never overlap; forearms and hands never sink 3 cm into the
 ##                   torso
+##  J11 jitter       no small fast back-and-forth: for every joint (the J10 set), the head's facing and, in brain cases,
+##                   the brain's gaze and breath signal, a reversal is a tick whose motion turns more than 90 deg from
+##                   the last tick's, counted only when the stretch before it and the stretch after it each move more
+##                   than JIT_AMP (1 mm; 0.2 deg for directions; 0.002 for the breath signal, 0..1) and less than 15x
+##                   that (a step, a stroke or a breath swings centimetres; a shake does not). More than JIT_MAX
+##                   (6) reversals inside any JIT_WIN (0.5 s) is jitter: a body does not reverse at 6 Hz on purpose
+##                   (strokes, steps and breaths reverse at 0.2-3 Hz). Same thresholds at 30, 60 and 120 Hz.
+##  J9 brain         (cases with "brain": the ported character brain fed points of interest and sounds through
+##                   core/m04_body/sense_context.gd, line of sight by real rays)
+##                   gaze   on land the brain's gaze stays inside the neck's reach from the chest (solve_head's yaw / pitch
+##                          limits + 0.10 rad, or no further out than the look itself already is + 0.10); swimming (prone,
+##                          chest to the sand) it turns at most 1.0 rad off the look direction
+##                   head   the head's yaw / pitch against the chest never turn faster than 4 rad/s (a calm head turn is
+##                          1-3 rad/s; a snap is a one-tick jump); the head's angular jerk p95 is reported
+##                   focus  no ping-pong (back to a target within 4 s of leaving it for another), new things looked at
+##                          at least 0.5 s apart (an urgent sound may interrupt at once, by design), sound turns at least
+##                          the 4.6 s refractory apart, no target replaced by another within 0.3 s (flicker); at least
+##                          one look and one sound turn happen
+##                   breath phase only advances, at most 0.6 Hz; signal changes <= 2.5 /s, amplitude <= 1 /s, rate
+##                          <= 1 rad/s^2 (continuous: no jumps); "effort" cases: the breath rate in the sprint is >= 1.3x
+##                          the rate at rest and falls again after it
 extends SceneTree
 
 const Packet := preload("res://core/m01_input/input_packet.gd")
@@ -53,6 +74,26 @@ const HOVER_GAP := 0.03       # a planted foot: lowest sole point at most 3 cm a
 const HOVER_RUN := 6          # ...for more than this many ticks
 const TORSO_R := 0.085
 const TORSO_SINK := 0.03
+const JIT_AMP := 0.001          # m
+const JIT_AMP_DIR := 0.0035      # rad (0.2 deg)
+const JIT_AMP_BREATH := 0.002
+const JIT_WIN := 0.5             # s
+const JIT_MAX := 6               # reversals per JIT_WIN
+const JIT_BIG := 15.0            # x JIT_AMP: a stretch longer than this is deliberate motion, not a shake
+const SenseContext := preload("res://core/m04_body/sense_context.gd")
+const BM := preload("res://core/m04_body/body_math.gd")
+const BRAIN_GAZE_YAW_PAD := 0.10
+const BRAIN_SWIM_OFF_LOOK := 1.0  # rad: the brain's turn from the look while swimming (its reach window 0.92 x blend <= 0.66)
+const BRAIN_HEAD_RATE := 4.0      # rad/s, neck yaw and pitch
+const BRAIN_PINGPONG := 4.0       # s
+const BRAIN_FOCUS_GAP := 0.5      # s between new things looked at (the brain's shortest scan beat after a loss is 0.55)
+const BRAIN_SOUND_GAP := 4.6      # s, the brain's sound refractory
+const BRAIN_FLICKER := 0.3        # s: a target replaced by another sooner than this is a flicker
+const BRAIN_MAX_HZ := 0.6
+const BRAIN_SIG_RATE := 2.5
+const BRAIN_AMP_RATE := 1.0
+const BRAIN_RATE_RATE := 1.0
+const BRAIN_EFFORT_GAIN := 1.3
 
 ## Open cases, listed so the suite still gates everything else: a KNOWN case may fail (reported, not counted against
 ## the exit code); every other case must pass, and a KNOWN case that starts passing is reported so it can come off.
@@ -235,6 +276,14 @@ func _define_cases() -> void:
 	# Mac playtest: a foot poked into the sand while she hovered and drifted slowly just above the floor (pool floor y=-20)
 	_case("B44 hover low over the sand", "pool", {"start": Vector3(0, -17.5, 0), "mode": Motor.Mode.SWIM}, 12.0,
 		func(tt): var k = _pk(Vector2(0, 0.35) if fmod(tt, 4.0) < 2.0 else Vector2.ZERO, tt * 0.3); k.descend = true; k.descend_amount = 0.4 if fmod(tt, 3.0) < 1.5 else 1.0; return k)
+	# the brain (J9): points of interest around her (one moving, one behind, one hidden behind a rock) and loud sounds
+	_case("B45 brain: swim among things, a loud sound behind, sprint and recover", "pool", {"start": Vector3(0, -8, 0), "mode": Motor.Mode.SWIM}, 22.0,
+		func(tt):
+			var k = _pk(Vector2(0, 0.3) if tt < 6.0 else (Vector2(0, 1) if tt < 11.0 else Vector2.ZERO), 0.35 * sin(tt * 0.4))
+			k.thrust = 1.0 if (tt >= 6.0 and tt < 11.0) else 0.0
+			return k, {"brain": "swim", "effort": [[2.0, 5.5], [9.0, 11.0], [20.0, 22.0]]})
+	_case("B46 brain: stand idle on land, then walk, things to look at and sounds", "senses", {"start": Vector3(0, 0.05, 0)}, 20.0,
+		func(tt): return _pk(Vector2(0, 0.7) if (tt >= 12.0 and tt < 16.0) else Vector2.ZERO, 0.2 * sin(tt * 0.25)), {"brain": "walk"})
 	# Mac breach test: holding ascend and forward from the 2.4 m lagoon floor skimmed 20 m through the air
 	_case("B47 lagoon: breach from the floor, ascend held", "lagoon_pool", {"start": Vector3(0, -1.4, 0), "mode": Motor.Mode.SWIM}, 12.0,
 		func(_t): var k = _pk(Vector2(0, 1)); k.thrust = 1.0; k.ascend = true; return k)
@@ -299,6 +348,9 @@ func _start_next() -> bool:
 		"worst": {"bone_mm": 0.0, "span": 0.0, "elbow": 0.0, "knee": 0.0, "knee_back": 0.0, "neck": 0.0, "head_chest": 0.0,
 			"pop": 0.0, "pelvis_jump": 0.0, "pen_run": 0, "sole_under": 0.0, "stand_gap": 0.0, "skate": 0.0, "leg_overlap": 0.0,
 			"torso_sink": 0.0, "flips": 0}}
+	if cur.opts.has("brain"): _brain_setup()
+	# BS_QUIET=1: run every case on the quiet brain (to tell a brain-caused failure from a body one)
+	if OS.has_environment("BS_QUIET"): rig.brain = preload("res://core/m04_body/quiet_brain.gd").new()
 	rec.hit_rng = RandomNumberGenerator.new()
 	rec.hit_rng.seed = 77 + ci
 	rec.next_hit = 1.0
@@ -340,7 +392,9 @@ func _physics_process(dt: float) -> bool:
 			return false
 		rdt = rec.hitch_acc
 		rec.hitch_acc = 0.0
-	var pose: Dictionary = rig.update_swim(rdt, s, null, t, renv)
+	var pose: Dictionary = rig.update_swim(rdt, s, null, t, renv, _brain_sense(s) if cur.opts.has("brain") else null)
+	if fault == "jitter":
+		_shift_pose(pose, Vector3(0.002 if int(rec.ticks) % 2 == 0 else -0.002, 0, 0))   # planted: the whole body shaking +-2 mm
 	if fault == "flip" and rec.ticks == 120:
 		var a: Dictionary = pose.armL
 		a.mid = a.root + (a.root - a.mid)             # planted: elbow mirrored through the shoulder for one tick
@@ -551,6 +605,13 @@ func _check(p: Dictionary, dt: float) -> void:
 		for k in J: jv0[k] = (J[k] - prev.J[k]) / dt
 		prev.Jv = jv0
 	prev.J = J
+	# J11 jitter
+	if not prev.has("jit"): prev.jit = {}
+	for k in J: _jitter(prev.jit, k, J[k], JIT_AMP)
+	_jitter(prev.jit, "head facing", (p.headMotion.fwd as Vector3).normalized(), JIT_AMP_DIR)
+	if cur.opts.has("brain") and rig.brain_out.has("breathSignal"):
+		_jitter(prev.jit, "brain gaze", rig.brain_out.gazeDirWorld, JIT_AMP_DIR)
+		_jitter(prev.jit, "breath signal", Vector3(rig.brain_out.breathSignal, 0, 0), JIT_AMP_BREATH)
 	prev.eye = body.motor.swimmer.pos
 	# J6 world: spheres along limbs (mannequin radii)
 	var samples := [["head", p.headMat * Vector3(0, 0.10, 0), 0.095], ["chest", p.chestPos, 0.08], ["pelvis", p.pelvisPos, 0.08]]
@@ -638,6 +699,7 @@ func _check(p: Dictionary, dt: float) -> void:
 		var ov: float = pr[4] - _seg_dist(pr[0], pr[1], pr[2], pr[3])
 		_w("leg_overlap", ov)
 		if ov > 0.02: _fail("J8", "legs overlap %.0f mm" % (ov * 1000.0))
+	if cur.opts.has("brain"): _check_brain(p, dt)
 	for side in ["L", "R"]:
 		var arm3: Dictionary = p["arm" + side]
 		for pt in [arm3.mid.lerp(arm3.eff, 0.5), arm3.eff]:
@@ -645,6 +707,201 @@ func _check(p: Dictionary, dt: float) -> void:
 			var sink: float = TORSO_R + 0.025 - pt.distance_to(cp)
 			_w("torso_sink", sink)
 			if sink > TORSO_SINK: _fail("J8", "arm%s %.0f mm into the torso" % [side, sink * 1000.0])
+
+## J11: one signal's reversal counter (see the header). st holds per-signal state across ticks.
+func _jitter(st: Dictionary, key: String, x: Vector3, amp: float) -> void:
+	var j: Dictionary = st.get(key, {})
+	if j.is_empty():
+		st[key] = {"x": x, "d": Vector3.ZERO, "len": 0.0, "last": 0.0, "rev": []}
+		return
+	var dx: Vector3 = x - j.x
+	j.x = x
+	var L := dx.length()
+	if L < 1e-9: return
+	var turned: bool = j.d != Vector3.ZERO and dx.dot(j.d) < 0.0
+	j.d = dx / L
+	if not turned:
+		j.len += L
+		return
+	# a turn back: the reversal between the last two stretches counts when both were small but real (amp..JIT_BIG x amp):
+	# a step, a stroke or a breath swings far more than that, a shake does not
+	var big := amp * JIT_BIG
+	var counts: bool = j.last >= amp and j.last <= big and j.len >= amp and j.len <= big
+	j.last = j.len
+	j.len = L
+	if counts:
+		var rv: Array = j.rev
+		rv.append(t)
+		while rv.size() > 0 and rv[0] < t - JIT_WIN: rv.pop_front()
+		rec.worst.jitter = maxi(rec.worst.get("jitter", 0), rv.size())
+		if rv.size() > JIT_MAX: _fail("J11", "%s jitters: %d reversals in %.1f s" % [key, rv.size(), JIT_WIN])
+
+## planted fault: move every point of the pose by off (bones keep their lengths)
+func _shift_pose(p: Dictionary, off: Vector3) -> void:
+	for k in ["chestPos", "pelvisPos", "neckPos", "waistPos", "shoulderL", "shoulderR", "hipL", "hipR", "clavicleL", "clavicleR"]:
+		if p.has(k): p[k] += off
+	for k in ["headMat", "chestMat", "pelvisMat", "handLMat", "handRMat", "torchMat"]:
+		if p.has(k): p[k] = Transform3D(p[k].basis, p[k].origin + off)
+	for k in ["armL", "armR"]:
+		for q in ["root", "mid", "eff"]: p[k][q] += off
+	for k in ["legL", "legR"]:
+		for q in ["root", "mid", "eff"]: p[k].ik[q] += off
+		for m in ["finMat", "toeMat"]:
+			if p[k].has(m): p[k][m] = Transform3D(p[k][m].basis, p[k][m].origin + off)
+	p.headMotion.pos += off
+
+# ---------------------------------------------------------------- brain cases (J9)
+func _brain_setup() -> void:
+	var st: Vector3 = cur.p.start
+	var sc = SenseContext.new()
+	sc.world = wq
+	var reg := ActorRegistry.new()
+	sc.registry = reg; sc.self_id = "girl"
+	var swim: bool = cur.opts.brain == "swim"
+	if swim:
+		Worlds.box(world, st + Vector3(2.2, 0, -6), Vector3(2, 3, 2), 0)      # a rock between her and the vent
+		sc.landmarks = [
+			{"id": "arch", "kind": "arch", "label": "Arch", "pos": st + Vector3(-4, 1, -10), "priority": 0.8, "selfRadius": 2.0, "maxRange": 54.0},
+			{"id": "vent", "kind": "vent", "label": "Vent (behind the rock)", "pos": st + Vector3(5, -1, -15), "priority": 0.8, "selfRadius": 1.0, "maxRange": 54.0}]
+		reg.add("fish", "fish", 0.3, {"label": "Fish", "priority": 0.87})
+		reg.add("buoy", "vessel", 0.6, {"label": "Buoy behind", "priority": 0.8, "moving": false, "pos": st + Vector3(0, 0.5, 6)})
+		rec.brain_sounds = [[4.0, "impact", Vector3(3, 0, 4), 0.95], [13.0, "ping", Vector3(6, 0, -2), 0.6], [16.0, "crack", Vector3(-4, 1, 3), 0.9]]
+	else:
+		# the blockout kit's "senses" world (blockout/blockout_kit.gd): an object ahead, a creature circling, an object
+		# behind her, a knock that sounds 0.5 s every 3 s; read each tick through BlockoutKit.pois
+		rec.brain_sounds = []
+	rec.brain = {"sc": sc, "reg": reg, "swim": swim, "focus": "", "focus_t": -99.0, "left": {}, "last_new": -99.0, "last_snd": -99.0,
+		"looks": 0, "sounds": 0, "prev": {}, "rates": [], "head_rate": 0.0, "gaze_yaw": 0.0, "hjerk": []}
+
+func _brain_sense(s) -> Dictionary:
+	var b: Dictionary = rec.brain
+	var st: Vector3 = cur.p.start
+	var reg: ActorRegistry = b.reg
+	var eye: Vector3 = s.pos
+	reg.begin()
+	if b.swim:     # a fish circling her at 3 m, bobbing: in and out of view
+		var fp := eye + Vector3(3.0 * cos(t * 0.6), 0.6 * sin(t * 0.9), 3.0 * sin(t * 0.6))
+		reg.move("fish", fp, Vector3.ZERO)
+		# the player UI's interact target, engaged every tick as the game does (it circles behind her in this window)
+		if t >= 7.0 and t < 9.5: rig.brain.engage_objective_focus("interact", fp)
+	else:
+		var lm := []
+		for q in BlockoutKit.pois(world):
+			if q.kind == "sound":
+				if q.alive and not b.get("snd_" + q.name, false):     # each knock as it starts
+					rig.brain.register_sound_event(q.name, q.pos, 0.9, 1.8)
+				b["snd_" + q.name] = q.alive
+			else:
+				var cr: bool = q.kind == "creature"
+				# interact target engaged every tick: the object behind her (out of the neck's reach), then the one ahead
+				if (q.name == "behind" and t >= 5.0 and t < 7.0) or (q.name == "ahead" and t >= 9.0 and t < 10.5):
+					rig.brain.engage_objective_focus("interact", q.pos)
+				lm.append({"id": q.name, "kind": "fauna" if cr else "console", "label": q.name, "pos": q.pos,
+					"priority": 0.9 if cr else 0.78, "moving": cr, "selfRadius": 0.3, "maxRange": 32.0})
+		b.sc.landmarks = lm
+	reg.commit(int(rec.ticks))
+	for snd in rec.brain_sounds:     # sounds placed around where she is when they ring
+		if t >= snd[0] and t - 1.0 / tick < snd[0]:
+			rig.brain.register_sound_event(snd[1], eye + snd[2], snd[3], 1.8)
+	return b.sc.build(s.pos, BM.fwd(s.yaw, s.pitch), [])
+
+func _check_brain(p: Dictionary, dt: float) -> void:
+	var b: Dictionary = rec.brain
+	var o: Dictionary = rig.brain_out
+	if o.is_empty() or not o.has("gazeDirWorld"): return
+	# gaze inside the neck's reach from the chest, beyond what the look itself already asks (swimming prone the chest
+	# faces the sand and the look ahead is already past the neck's pitch; the brain must not add to it)
+	var cm: Basis = p.chestMat.basis
+	var cf: Vector3 = -cm.z.normalized(); var cx: Vector3 = cm.x.normalized(); var cy: Vector3 = cm.y.normalized()
+	var g: Vector3 = o.gazeDirWorld
+	var sw = body.motor.swimmer
+	var lk := BM.fwd(sw.yaw, sw.pitch)
+	var gyaw := atan2(g.dot(cx), g.dot(cf)); var lyaw := atan2(lk.dot(cx), lk.dot(cf))
+	var gpitch := asin(clampf(g.dot(cy), -1.0, 1.0)); var lpitch := asin(clampf(lk.dot(cy), -1.0, 1.0))
+	var off_look := acos(clampf(g.dot(lk), -1.0, 1.0))
+	b.gaze_yaw = maxf(b.gaze_yaw, off_look)
+	if p.mode == "swim":
+		# prone, the chest faces the sand: yaw / pitch in its frame are ill-conditioned round the look ahead, so the
+		# brain's own turn is checked: at most BRAIN_SWIM_OFF_LOOK from where she looks (solve_head takes it from there)
+		if off_look > BRAIN_SWIM_OFF_LOOK: _fail("J9 gaze", "brain gaze %.2f rad off the look" % off_look)
+	else:
+		var ylim := maxf(0.96 + BRAIN_GAZE_YAW_PAD, absf(lyaw) + BRAIN_GAZE_YAW_PAD)
+		var plo := minf(-0.54 - BRAIN_GAZE_YAW_PAD, lpitch - BRAIN_GAZE_YAW_PAD)
+		var phi := maxf(0.60 + BRAIN_GAZE_YAW_PAD, lpitch + BRAIN_GAZE_YAW_PAD)
+		if absf(gyaw) > ylim: _fail("J9 gaze", "brain gaze yaw %.2f rad from the chest (neck reach %.2f, look %.2f)" % [gyaw, ylim, lyaw])
+		if gpitch < plo or gpitch > phi: _fail("J9 gaze", "brain gaze pitch %.2f rad from the chest (look %.2f)" % [gpitch, lpitch])
+	# head: no snaps (the head's yaw and pitch in the chest frame: the swim / walk blend pose reports no neck angles)
+	var hm: Dictionary = p.headMotion
+	var hf: Vector3 = (hm.fwd as Vector3).normalized()
+	var hy := atan2(hf.dot(cx), hf.dot(cf))
+	var hp := asin(clampf(hf.dot(cy), -1.0, 1.0))
+	var pv: Dictionary = b.prev
+	var hl := Vector3(hf.dot(cx), hf.dot(cy), hf.dot(cf))      # the head's forward in the chest frame
+	if pv.has("ny"):
+		# ROOT (B45 interact window): yaw / pitch deltas blow up where the head's forward nears the chest's up (swimming
+		# prone, looking ahead), so a smooth turn read 4.7 rad/s; the rate is the angle the head swept in the chest frame
+		var rate: float = (pv.hl as Vector3).angle_to(hl) / dt
+		b.head_rate = maxf(b.head_rate, rate)
+		if rate > BRAIN_HEAD_RATE: _fail("J9 head", "head turned %.1f rad/s against the chest" % rate)
+		var w := Vector2(wrapf(hy - pv.ny, -PI, PI), hp - pv.np) / dt
+		if pv.has("w"):
+			var a: Vector2 = (w - pv.w) / dt
+			if pv.has("a"): b.hjerk.append(((a - pv.a) / dt).length())
+			pv.a = a
+		pv.w = w
+	pv.ny = hy; pv.np = hp; pv.hl = hl
+	# focus: dwell, cooldowns, no ping-pong
+	var fid = o.get("focusId")
+	var fs: String = fid if fid != null else ""
+	if fs != b.focus:
+		if b.focus != "":
+			b.left[b.focus] = t
+			if t - b.focus_t < BRAIN_FLICKER and fs != "" and not o.get("focusIsSound", false): _fail("J9 focus", "%s held only %.2f s before %s took over" % [b.focus, t - b.focus_t, fs])
+		b.focus_t = t
+		if fs != "":
+			# ping-pong: A, then another thing looked at, then A again within 4 s (turning to a sound and back is not)
+			var vis_prev: String = b.get("vis_prev", "")
+			if not o.get("focusIsSound", false) and vis_prev != "" and vis_prev != fs and b.left.has(fs) and t - b.left[fs] < BRAIN_PINGPONG \
+					and b.left.get(vis_prev, -99.0) > b.left[fs]:
+				_fail("J9 focus", "ping-pong back to %s after %.1f s" % [fs, t - b.left[fs]])
+			if not o.get("focusIsSound", false): b.vis_prev = fs
+			if o.get("focusIsSound", false):
+				if t - b.last_snd < BRAIN_SOUND_GAP - 1e-6: _fail("J9 focus", "sound turn %.1f s after the last" % (t - b.last_snd))
+				b.last_snd = t; b.sounds += 1
+			else:
+				if t - b.last_new < BRAIN_FOCUS_GAP: _fail("J9 focus", "new target %s %.2f s after the last" % [fs, t - b.last_new])
+				b.last_new = t
+				b.looks += 1
+		b.focus = fs
+	# breath: continuous, paced by effort
+	if pv.has("bp"):
+		var dph := fposmod(float(o.breathPhase) - pv.bp, 1.0)
+		if dph > BRAIN_MAX_HZ * dt * 1.001: _fail("J9 breath", "breath phase jumped %.3f in a tick" % dph)
+		if absf(o.breathSignal - pv.bs) / dt > BRAIN_SIG_RATE: _fail("J9 breath", "breath signal %.1f /s" % (absf(o.breathSignal - pv.bs) / dt))
+		if absf(o.breathAmp - pv.ba) / dt > BRAIN_AMP_RATE: _fail("J9 breath", "breath amplitude %.2f /s" % (absf(o.breathAmp - pv.ba) / dt))
+		if absf(o.breathRate - pv.br) / dt > BRAIN_RATE_RATE: _fail("J9 breath", "breath rate changing %.2f rad/s^2" % (absf(o.breathRate - pv.br) / dt))
+	pv.bp = o.breathPhase; pv.bs = o.breathSignal; pv.ba = o.breathAmp; pv.br = o.breathRate
+	b.rates.append([t, o.breathRate])
+
+func _brain_end() -> String:
+	var b: Dictionary = rec.brain
+	if b.looks == 0: _fail("J9 focus", "she never looked at anything")
+	if b.sounds == 0: _fail("J9 focus", "she never turned to a sound")
+	var win := func(a: float, z: float) -> float:
+		var sm := 0.0; var n := 0
+		for r in b.rates:
+			if r[0] >= a and r[0] < z: sm += r[1]; n += 1
+		return sm / maxf(1.0, n)
+	var eff_txt := ""
+	if cur.opts.has("effort"):
+		var e: Array = cur.opts.effort
+		var rest: float = win.call(e[0][0], e[0][1]); var peak: float = win.call(e[1][0], e[1][1]); var after: float = win.call(e[2][0], e[2][1])
+		eff_txt = ", breath %.2f -> %.2f -> %.2f rad/s" % [rest, peak, after]
+		if peak < rest * BRAIN_EFFORT_GAIN: _fail("J9 breath", "sprint breath %.2f rad/s not above rest %.2f x %.1f" % [peak, rest, BRAIN_EFFORT_GAIN])
+		if after >= peak: _fail("J9 breath", "breath did not settle after the sprint (%.2f -> %.2f)" % [peak, after])
+	var hj: Array = b.hjerk.duplicate(); hj.sort()
+	return "; brain: %d looks, %d sound turns, gaze off look max %.2f rad, head rate max %.2f rad/s, head ang. jerk p95 %.0f rad/s3%s" % [
+		b.looks, b.sounds, b.gaze_yaw, b.head_rate, hj[int(hj.size() * 0.95)] if hj.size() > 0 else 0.0, eff_txt]
 
 func _film_setup() -> void:
 	var rock := Worlds.visual_material as StandardMaterial3D
@@ -710,6 +967,7 @@ func _film_save(path: String) -> void:
 	root.get_texture().get_image().save_png(path)
 
 func _end_case() -> void:
+	var brain_txt: String = _brain_end() if cur.opts.has("brain") else ""
 	var ok: bool = rec.fail.is_empty()
 	var w: Dictionary = rec.worst
 	var summary := "bone %.2f mm, span %.0f%%, elbow %.0f, knee %.0f, knee back %.0f mm, neck +%.2f, head/chest %.0f, pop %.1f m/s, pelvis %.2f m, rock %d ticks, sole under %.0f mm, stand gap %.0f mm, slide %.0f mm, legs %.0f mm, torso %.0f mm" % [
@@ -721,7 +979,7 @@ func _end_case() -> void:
 	var jerk_p50: float = jk[int(jk.size() * 0.50)] if jk.size() > 0 else 0.0
 	w["jerk_p95"] = jerk_p95
 	w["jerk_p50"] = jerk_p50
-	summary += ", jerk p50 %.0f p95 %.0f m/s3" % [jerk_p50, jerk_p95]
+	summary += ", jerk p50 %.0f p95 %.0f m/s3, jitter %d rev/%.1fs" % [jerk_p50, jerk_p95, w.get("jitter", 0), JIT_WIN] + brain_txt
 	if OS.has_environment("BS_JERK"):
 		for k in rec.jk_by: summary += "\n        jerk %s rms %.0f" % [k, sqrt(rec.jk_by[k] / maxf(1.0, rec.jerk.size()))]
 	var fails: Array = rec.fail.map(func(f): return "%s  (%d ticks)" % [f, rec.count.get(f.substr(0, f.find(" ")), 1)])
