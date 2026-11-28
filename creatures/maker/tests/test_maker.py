@@ -536,7 +536,11 @@ def test_blockout_follows_the_record_and_catches_planted_faults(tmp_path):
     from creature_maker.fins import build_fins
     D = blockout(REC, str(tmp_path / 'bk'), log=lambda *a: None)
     assert D['checks']['BK1_pass'] and D['checks']['BK2_pass'] and D['checks']['BK3_pass']
-    assert len(D['segments']) == 2 * D['bones'] and D['tris'] < 16000 and len(D['lods'][2]['F']) < 6000
+    assert D['tris'] < 16000 and len(D['lods'][2]['F']) < 6000
+    # the blocks follow the rig's stations: every bone has at least 2, none lies across a joint, and the rigid head bone has its own
+    from creature_maker import rig as RIG
+    NB, xs = RIG.spine_stations(dict(bones=D['bones'], xend=D['xend'], head_end=D['head_end'])); per = [sum(q['bone'] == i for q in D['segments']) for i in range(NB)]
+    assert min(per) >= 2 and per[0] > 2 and all(xs[q['bone']] - 0.021 <= q['c'][0] <= xs[q['bone'] + 1] + 0.031 for q in D['segments']), per
     rec = adapt(REC); form = Form(rec); segs, x_end = segments(form, rec); os.makedirs(tmp_path / 'f'); fins = build_fins(form, rec, str(tmp_path / 'f'))
     sq = copy.deepcopy(segs)
     for s in sq: s['r'][1] *= 0.7
@@ -596,3 +600,72 @@ def test_clips_have_no_jitter_at_any_tick_rate():
     sparse = jitter(clip(24 * f), 24 * f); dense = jitter(clip(67 * f), 67 * f)
     assert not sparse['pass'] and sparse['120Hz'] > 2, sparse
     assert dense['pass'] and max(v for k, v in dense.items() if k.endswith('Hz')) <= JT_MAX, dense
+
+
+def _rig_setup(tmp_path):
+    import shutil, pytest
+    if shutil.which('node') is None: pytest.skip('node not installed')
+    from creature_maker.record import adapt
+    out = str(tmp_path / 'beryx'); build(REC, out, res=64, dense_form=False, log=lambda *a: None)
+    C = json.load(open(os.path.join(out, 'cage.json'))); V = np.load(os.path.join(out, 'cage.npz'))['V']; rec = adapt(REC, C.get('style'))
+    raw = json.load(open(REC))            # the proof record has no gait yet: lend it one, as test_swim_clip_loops does
+    raw['body'] = dict(raw.get('body', {}), motion=dict(A=0.1, alpha=3.4, lam=1.0, St=0.3, U=1.5, f=3.0, alphaSlope=0.6, alphaMin=2.8, alphaMax=4.4))
+    return C, V, rec, raw
+
+
+def test_head_is_one_rigid_bone_and_the_bend_starts_behind_the_gill_covers(tmp_path):
+    """RG1 (the reference rigs keep the cranium rigid through a swim and a turn; the first bend starts right behind the gill covers):
+    spine_00 runs from the snout to the head's end (the gill cover's rear line of the record, no further back than the pectoral base),
+    every vertex ahead of it rides the head bone alone, so linear blend skinning through the swim clip moves no head vertex against
+    the head bone. Planted: the old rule (bones evenly from the snout, weights blended between bone centres) bends the skull."""
+    from creature_maker import rig, swim_clip
+    C, V, rec, raw = _rig_setup(tmp_path)
+    he = rig.head_end(rec); assert C['head_end'] == he == min(np.asarray(rec['cover']['rear'])[:, 0].max(), rec['fins']['pectoral']['x'])
+    NB, xs = rig.spine_stations(C); assert xs[1] == he and np.allclose(np.diff(xs[1:]), np.diff(xs[1:])[0]) and xs[1] - xs[0] > 2 * (xs[2] - xs[1])
+    def run(c):
+        bl = rig.bones(c, V, rec) + rig.fin_bones(c); W, _ = rig.weights(c, V, rec); assert np.allclose(sum(W.values()), 1.0)
+        return W, swim_clip.rig_checks(C, V, W, bl, swim_clip.clips(c, V, raw, bl))
+    W, R = run(C); head = V[:, 0] <= he
+    assert np.allclose((W['spine_00'] + W['jaw'] + W['opercleL'] + W['opercleR'])[head], 1.0) and W['spine_01'][V[:, 0] > he].max() > 0.99
+    assert R['RG1_pass'] and R['RG1_head_bend_pctBL'] < 1e-6 and R['RG1_head_verts'] > 100, R
+    Wf, Rf = run(dict(C, rig_fault='even'))
+    assert not Rf['RG1_pass'] and Rf['RG1_head_bend_pctBL'] > 0.1, Rf          # the skull's rear moved by over 0.1 % BL against its front
+    sw = swim_clip.clips(C, V, raw, rig.bones(C, V, rec) + rig.fin_bones(C))
+    assert abs(sw['extras']['wave']['s_rigid'] - he / C['xend']) < 1e-3 and sw['extras']['jitter']['JT1_pass']    # the wave starts at the head's end
+    with __import__('pytest').raises(KeyError): rig.spine_stations({k: v for k, v in C.items() if k != 'head_end'})
+
+
+def test_fin_chains_carry_the_fins_and_trail_the_body(tmp_path):
+    """RG2, RG3 (the reference rigs: pectorals flex along the blade, caudal lobes lag past the peduncle bend): paired fins have a
+    root -> tip chain, the caudal fin a root and two lobe bones; weights pass along the fin by T; in swim_loop each tip trails its
+    rigid place (a positive phase lag) with a measured flex, the loop still closes and no key kinks (JT1 at 30/60/120/144 Hz).
+    Planted: a fin all on its root bone, chains that do not trail (boards), chains that LEAD the body."""
+    from creature_maker import rig, swim_clip
+    C, V, rec, raw = _rig_setup(tmp_path)
+    fb = rig.fin_bones(C); bl = rig.bones(C, V, rec) + fb; names = [b['name'] for b in bl]
+    assert len(names) == len(set(names)) <= 24                                   # the export's bone budget (P7)
+    assert not {b['name'] for b in fb} & ({'fin_' + k for k in C['fins']} | set(C['fins']))     # no bone named as a fin's mesh node (Godot)
+    assert {'fin_caudal_root', 'fin_caudal_upper', 'fin_caudal_lower'} <= set(names)
+    for k, f in C['fins'].items():
+        g = rig.fin_groups(C, k); T = np.asarray(f['T'], float); assert np.allclose(sum(g.values()), 1.0)
+        own = [n for n in g if n.startswith('fin_')]
+        if k.startswith(rig.PAIRED):
+            assert own == [f'fin_{k}_root', f'fin_{k}_tip'] and g[f'fin_{k}_tip'][T >= 1].min() == 1.0 and g[f'fin_{k}_root'][T >= 1].max() == 0.0
+            assert sum(g[n] for n in own)[T <= 0].max() == 0.0                    # the root row stays welded to the skin's own bones
+        elif k == 'caudal': assert len(own) == 3 and (g['fin_caudal_upper'] + g['fin_caudal_lower'])[T >= 1].min() > 0.999
+        else: assert not own                                                      # median fins follow the trunk
+    W, _ = rig.weights(C, V, rec); SW = swim_clip.clips(C, V, raw, bl); R = swim_clip.rig_checks(C, V, W, bl, SW)
+    assert R['RG2_pass'] and R['RG3_pass'] and R['RG_pass'], R
+    c = R['RG3_caudal']['caudal']; assert swim_clip.RG3_FLEX_MIN <= c['flex_peak_deg'] <= swim_clip.FLEX_MAX_DEG and c['tip_lag_turns'] > swim_clip.RG_LAG_MIN, c
+    assert SW['loop_err'] < 1e-4 and SW['extras']['jitter']['JT1_pass'] and len(SW['swim'][0]) == C['bones'] + 4 + 2 * len(fb), SW['extras']['jitter']   # chain + 2 covers + fin bones and their tips
+    assert set(SW['extras']['rig']['fin_measures']) == {b['name'] for b in fb}
+    # planted
+    Rr = swim_clip.rig_checks(C, V, W, bl, SW, fin_fault='rigid'); assert not Rr['RG2_pass'] and not Rr['RG3_pass'], Rr
+    Rb = swim_clip.rig_checks(C, V, W, bl, swim_clip.clips(C, V, raw, bl, fin_fault='board')); assert not Rb['RG2_pass'] and not Rb['RG3_pass'], Rb
+    nb = C['bones'] + 4; body = tuple(a[:, :nb] if i > 1 else a[:nb] for i, a in enumerate(SW['swim']))
+    lead, m = swim_clip.fin_lag(body, C, bl, {b['fin']: 0.25 for b in fb}, {b['fin']: -0.25 for b in fb})
+    Rl = swim_clip.rig_checks(C, V, W, bl, dict(swim=lead, fin_measures=m)); assert not Rl['RG3_pass'] and Rl['RG3_caudal']['caudal']['tip_lag_turns'] < 0, Rl
+    # a clip that does not loop (a turn, a start): the chain starts from rest and trails what the body does next
+    nl, m2 = swim_clip.fin_lag(body, C, bl, {b['fin']: 8 for b in fb}, {b['fin']: 0.25 for b in fb}, loop=False)
+    i = nl[0].index('fin_caudal_upper'); j = body[0].index(swim_clip.bone_joints(C['bones'])[f"spine_{C['bones'] - 1:02d}"])
+    assert np.allclose(nl[3][0, i], body[3][0, j]) and m2['fin_caudal_upper']['flex_peak_deg'] > 1
