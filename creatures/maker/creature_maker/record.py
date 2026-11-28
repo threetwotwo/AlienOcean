@@ -19,6 +19,12 @@ def get(d, path, default=None, need=True, where=''):
     return cur
 SPINE_NOTCH = 0.22   # DEFAULT: membrane dip between spine tips, share of the spine length (seabream/snapper-like; deep-notched fins say so in the record)
 
+def eye_iris(R, E):
+    """iris colour: record paint.eye.iris (hex, read from photos) where present, else skeleton.eye.iris, else the DEFAULT gold."""
+    h = get(R, 'paint.eye.iris', None, need=False)
+    if isinstance(h, str) and h.startswith('#'): return hex_rgb(h)
+    return get(E, 'iris', [0.92, 0.62, 0.18], need=False, where='skeleton.eye')
+
 def dget(d, key, default, where):
     """dict.get that records the default it fell back to."""
     if isinstance(d, dict) and key in d: return d[key]       # a record may hold a bare number where a block is expected (0 = none)
@@ -70,7 +76,7 @@ def adapt(path, style=None):
     P('body loft', 'record.outline top/bot/hw/nUp/nLo (/ outline.end)')
     E = R['skeleton']['eye']
     out['eye'] = dict(x=E['u'] * f, y=E['y'] * f, d=2 * E['R'] * f, orbit=dget(E, 'orbitR', E['R'] / 0.8, 'skeleton.eye') * f,
-                      iris=get(E, 'iris', [0.92, 0.62, 0.18], need=False, where='skeleton.eye'), pupil=get(E, 'pupil', 0.42, need=False, where='skeleton.eye'))
+                      iris=eye_iris(R, E), pupil=get(E, 'pupil', 0.42, need=False, where='skeleton.eye'))
     P('eye opening', 'record.skeleton.eye.u/y/R (R = visible eye, 0.8 orbitR); orbit ring from orbitR')
     seam = np.array(get(R, 'mouth.seam')) * f
     out['mouth'] = dict(line=seam.tolist(), maxilla_h=float(get(R, 'mouth.maxilla_h', 0.18 * (seam[-1, 0] - seam[0, 0]) + 0.012, need=False)))
@@ -162,13 +168,16 @@ def adapt(path, style=None):
     else: P('pelvic fin', 'absent in record.skeleton (no pelvic fins)')
     out['fins'] = fins
     S = R.get('scales', {})
-    ll = get(S, 'lateral_line.pored_scales', None, need=False) or get(S, 'grow.lateral_line.pored_scales.value', None, need=False)
+    # pored scales: older records hold them at scales.lateral_line, grown ones at scales.grow.lateral_line, as a [lo, hi]
+    # list or a {value: ...} block (the list form was missed: trevally fell back to the rows ESTIMATE, scales 25 % small)
+    pv = lambda v: v.get('value') if isinstance(v, dict) else v
+    ll = pv(get(S, 'lateral_line.pored_scales', None, need=False)) or pv(get(S, 'grow.lateral_line.pored_scales', None, need=False))
     rows = float(np.mean(ll)) if ll else float(dget(S, 'rows', 60, 'scales'))
     naked = 'naked' in str(get(S, 'grow.type_body.value', '', need=False))
     if naked: rows = 0.0                     # naked skin (blennies): no scale relief
     elif rows <= 0:                          # record: 0 = "none or too small to count" on a scaled body -> minute scales
         rows = 150.0; DEFAULTS.append(dict(input='scales.rows', source='DEFAULT', value=150, note='scaled body with rows 0: minute scales'))
-    out['scales'] = dict(lateral_line=rows, ll_frac=float(get(S, 'll_frac', 0.27, need=False, where='scales')),
+    out['scales'] = dict(lateral_line=rows, ll_frac=float(get(S, 'll_frac', None, need=False) or get(S, 'grow.lateral_line.ll_frac', 0.27, need=False, where='scales')),
                          type=get(S, 'grow.type_body.value', get(S, 'type', 'ctenoid', need=False), need=False))
     P('scale height (UV)', 'record.scales lateral_line pored_scales (else scales.rows)')
     G0 = R['paint']['ground']; sh = dget(G0, 'shade', {}, 'paint.ground')
