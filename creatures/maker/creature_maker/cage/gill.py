@@ -65,10 +65,7 @@ def plan_leg(B, ring_dx):
     g['ia'] = ia; g['ne'] = g['nj'] + i_g - ia
     D = np.zeros(T.NU)
     for i in range(ia, i_g + 1):          # angle where the loft is as wide as the V edge, seen from below
-        x = XS[i] + ring_dx(i, jc); zt = float(form.vedge_z(x)); lo, hi = np.pi / 2, np.pi
-        for _ in range(30):
-            m = 0.5 * (lo + hi); lo, hi = (m, hi) if form.loft_point(np.array(x), np.array(m))[2] > zt else (lo, m)
-        D[i] = min(0.5 * (lo + hi), form.isthmus_th(x)) - TH[jc]
+        D[i] = float(form.vedge_th(XS[i] + ring_dx(i, jc))[0]) - TH[jc]
     for i in range(iK, ia): D[i] = D[ia] * (i - iK) / (ia - iK)                       # fades out to the mouth ring
     for k in (1, 2, 3):
         if i_g + k < T.NU: D[i_g + k] = D[i_g] * 0.5 * (1 + np.cos(np.pi * k / 4))     # and behind the corner

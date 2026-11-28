@@ -154,7 +154,7 @@ bpy.data.objects.remove(form)
 body_m = pbr('body', image('body_base', 'body_base.png'), image('body_normal', 'body_normal.png', True), image('body_orm', 'body_orm.png', True))
 body.data.materials[0] = body_m
 # interior slot: cavity + gill passage faces on their own material 'interior' (engine contract), maps baked from the cage itself
-INT_IDX, INT_STATS = interior.setup(body, body_m, C, OUT, INT_IDX, INT_SKIP)
+INT_IDX, INT_STATS = interior.setup(body, body_m, C, OUT, INT_IDX, INT_SKIP, V=V)
 int_m = pbr('interior', image('interior_base', 'interior_base.png'), None, image('interior_orm', 'interior_orm.png', True), two_sided=False)
 body.data.materials[INT_IDX] = int_m
 # underwater skin: reflectance 0.01-0.06 % (lessons, fins handover s5) -> IOR of water-skin, not 1.5
