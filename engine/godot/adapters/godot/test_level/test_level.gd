@@ -368,6 +368,20 @@ func _bench_floor(secs: float) -> Dictionary:
 
 ## Stand at the key-frame view; measure everything on, then each system off in turn (back on after), then all of them off.
 ## Writes playtest_reports/bench_<utc>.json (IssueReport.root_dir) and returns its path.
+## A bench run is invalid when the GPU hung (Godot 4.7 on Metal logs "timeout waiting for fence"; afterwards every frame
+## reads a flat ~6.9-7.3 ms) or when every row's frame time sits within +-0.2 ms (no switch changed anything = not measuring).
+func _bench_invalid(rows: Array) -> String:
+	var lo := INF; var hi := -INF
+	for r in rows:
+		var fm: float = r.r.frame_ms
+		lo = minf(lo, fm); hi = maxf(hi, fm)
+	if rows.size() > 3 and hi - lo <= 0.4: return "flat frame times (%.2f-%.2f ms across all rows)" % [lo, hi]
+	var logp := "user://logs/godot.log"
+	if FileAccess.file_exists(logp):
+		var t := FileAccess.get_file_as_string(logp)
+		if "timeout waiting for fence" in t: return "GPU hang in this session's log (timeout waiting for fence)"
+	return ""
+
 func run_bench(settle := 2.0, secs := 4.0) -> String:
 	if bench_running: return ""
 	bench_running = true
@@ -443,6 +457,9 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 			"screen_scale": DisplayServer.screen_get_scale(), "vsync_during_run": "off", "window": win0,
 			"render_scale": get_viewport().scaling_3d_scale, "upscaler": get_viewport().scaling_3d_mode},
 		"view": "Key-frame view", "rows": rows, "video_mem_mb": P.get_monitor(P.RENDER_VIDEO_MEM_USED) / 1048576.0}
+	var inval := _bench_invalid(rows)
+	out["valid"] = inval.is_empty()
+	if not inval.is_empty(): out["invalid_reason"] = inval; print("BENCH INVALID: ", inval)
 	var dir := IssueReport.root_dir()
 	DirAccess.make_dir_recursive_absolute(dir)
 	var path := dir.path_join("bench_%s.json" % Time.get_datetime_string_from_system(true).replace(":", "-"))

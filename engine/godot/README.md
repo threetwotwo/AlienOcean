@@ -62,6 +62,7 @@ dressed lagoon; look work stays in the key-frame scenes.
 |---|---|---|
 | Kit 0.1.0 | `blockout/blockout_kit.gd` | `BlockoutKit.build(world, kind, p)` -> {env, markers, pois, rider}; kinds listed in its header; `tests/harness/test_worlds.gd` is a shim over it |
 | Rider 0.1.0 | `blockout/blockout_rider.gd` | `ride` kind: `rider.marker("saddle")`, hand_l/r, foot_l/r, `rider.velocity`; collision layer 2 |
+| Species stand-ins 0.1.0 | `blockout/blockout_species.gd` | `ride` kind `{species: dolphin, humpback, whale_shark, manta or turtle; scale}`: own swim wave, size, speed; Thalassa grab slots `<slot>_hand_l/_hand_r/_body` |
 | Points of interest | `blockout/blockout_poi.gd` | `senses` kind; `BlockoutKit.pois(world)` -> [{pos, kind, name, alive, velocity}] |
 | Grey mode 0.1.0 | `blockout/grey_mode.gd`, `grey_mode_toggle.gd` | `GreyMode.apply(roots, on)`; F7 in the game (GameRoot: lagoon + streamed cells), AO_GREY=1 |
 | Gym (stress scene) | `blockout/blockout_gym.gd`, `blockout_play.gd` | AO_BLOCKOUT=1 (AO_STATION=<label>), `run_blockout.command`; F6 next station |
