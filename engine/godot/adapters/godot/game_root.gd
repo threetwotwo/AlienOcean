@@ -51,6 +51,7 @@ const Packet := preload("res://core/m01_input/input_packet.gd")
 @export var use_camera := true
 @export var use_sea := true                    # the drawn FFT sea needs a RenderingDevice (off headless)
 @export var with_mannequin := true
+@export var bubbles_on := true                 # air bubbles under water (adapters/godot/bubbles.gd, a plug: her exhales, kicks, plunges, creatures)
 @export var cells_dir := "res://test_world/cells"
 @export var apply_every_hours := 1.0 / 120.0   # re-light when the clock moved this far (30 game seconds), or the eye crossed the surface
 
@@ -65,6 +66,7 @@ var cam: Camera3D = null
 var reader = null
 var input_source := Callable()                 # (t) -> InputPacket; set by tests/films, else the InputReader
 var school_nodes: Array = []
+var bubbles: Node = null                       # Bubbles plug (bubbles thread)
 var lagoon: Node3D
 var sea: Node3D = null
 var trace: Array = []                          # phases run this tick, in order (the stress test checks TICK_ORDER)
@@ -116,6 +118,8 @@ func _ready() -> void:
 	girl.senses = bs
 	world_root.apply(spawn_feet.y + 1.0)
 	_applied_hours = clock.hours
+	if bubbles_on:
+		bubbles = Bubbles.new(); add_child(bubbles); register_plug(bubbles)
 	ready_done = true
 
 ## A fish school (fish school thread's FishSchool, M31) plugged into the registry. Returns the node, or null when the
