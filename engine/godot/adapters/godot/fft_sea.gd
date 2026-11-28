@@ -73,6 +73,7 @@ static func declare_globals() -> void:
 	rs.global_shader_parameter_add("sea_ring_hi", rs.GLOBAL_VAR_TYPE_VEC4, Vector4(32, 32, 32, 64))
 	rs.global_shader_parameter_add("sea_open_gain", rs.GLOBAL_VAR_TYPE_FLOAT, float(OS.get_environment("AO_OPEN_GAIN")) if OS.get_environment("AO_OPEN_GAIN") != "" else 2.0)   # look/sea_top: open water art levers (1, 0 = the physical deep sea; 2, 0.5 = the lifted Abzu blue, 28 Nov)
 	rs.global_shader_parameter_add("sea_open_teal", rs.GLOBAL_VAR_TYPE_FLOAT, float(OS.get_environment("AO_OPEN_TEAL")) if OS.get_environment("AO_OPEN_TEAL") != "" else 0.5)
+	rs.global_shader_parameter_add("sea_horizon_melt", rs.GLOBAL_VAR_TYPE_FLOAT, float(OS.get_environment("AO_HORIZON_MELT")) if OS.get_environment("AO_HORIZON_MELT") != "" else 0.8)   # look/sea_top + look/sky: art lever, the last ~0.5 deg of sea melts into the sky's horizon (0 = a hard line)
 	rs.global_shader_parameter_add("sea_mom_x", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
 	rs.global_shader_parameter_add("sea_mom_y", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
 	rs.global_shader_parameter_add("sea_mom_r", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
