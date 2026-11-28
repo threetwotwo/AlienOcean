@@ -74,7 +74,8 @@ func _ready() -> void:
 	if DisplayServer.get_name() != "headless":
 		# project.godot opens full screen at window creation (macOS can ignore a switch made after load); a window only on request
 		var want_window := OS.get_environment("AO_WINDOWED") == "1" or "--resolution" in OS.get_cmdline_args() or "--windowed" in OS.get_cmdline_args()
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if want_window else DisplayServer.WINDOW_MODE_FULLSCREEN)
+		if want_window: DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		else: _hold_fullscreen()
 	# Retina (screen scale 2): render at half resolution, upscaled. Gary's M1 Pro bench, key-frame view at 2704x1696: 83 ms -> 28 ms;
 	# the picture keeps the pixel count of a non-Retina screen of the same size. AO_FULL_RES=1 keeps full resolution.
 	if DisplayServer.get_name() != "headless" and DisplayServer.screen_get_scale() >= 1.99 and OS.get_environment("AO_FULL_RES") != "1":
@@ -148,7 +149,7 @@ func worst_frame_ms(seconds := 10.0) -> float:
 # ---- switches: every one has a getter and a setter, so the test can prove each one returns to where it was ----
 
 func toggle_names() -> Array:
-	return ["sdfgi", "god_rays", "caustics", "agx", "bloom", "taa", "ssao", "cortao", "gtao", "vbao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider"]
+	return ["sdfgi", "god_rays", "caustics", "agx", "bloom", "taa", "ssao", "cortao", "gtao", "vbao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider", "bubbles"]
 
 func get_toggle(n: String) -> bool:
 	var wr := game.world_root
@@ -172,6 +173,7 @@ func get_toggle(n: String) -> bool:
 		"lagoon": return game.mounts.is_mounted("lagoon")
 		"tide": return wr.tide_on
 		"collider": return _show_collider
+		"bubbles": return game.bubbles != null and game.bubbles.visible
 	push_error("TestLevel: unknown toggle " + n); return false
 
 func set_toggle(n: String, on: bool) -> void:
@@ -205,6 +207,7 @@ func set_toggle(n: String, on: bool) -> void:
 			if grass: grass.visible = on
 		"tide": wr.tide_on = on; game.tide_on = on
 		"collider": _set_collider(on)
+		"bubbles": if game.bubbles: game.bubbles.visible = on     # the draw (its births cost 0.03 ms CPU and keep running)
 		_: push_error("TestLevel: unknown toggle " + n); return
 	_relight()
 
@@ -296,6 +299,25 @@ func _make_teleports() -> void:
 		{"name": "Snell's window (30 cm under)", "feet": Vector3(24.0, surf - 1.6, 30.0), "yaw": 0.0, "swim": true},
 		{"name": "Reef edge", "feet": kf.call([6.0, 18.0], 2.5), "yaw": 0.6, "swim": true},
 	]
+	_add_reef_teleports(surf)
+
+## The reef drop-off's stress sectors (core/world/bathymetry.gd, water surface thread's spots): per sector one view from the crest
+## out over the drop, and one hanging in the water at 10 m facing the wall; plus the sand pass at 3 m. Only with the reef drawn.
+func _add_reef_teleports(surf: float) -> void:
+	if not game.reef_on or game.world_root.lagoon_radius <= 0.0 or game.pieces_dir == "": return
+	var b: Bathymetry = game.world_root.bathymetry()
+	var face := func(d: Vector2) -> float: return atan2(-d.x, -d.y)   # yaw that looks along d (forward = (-sin yaw, -cos yaw))
+	for k in Bathymetry.SECTOR_WALL_M.size():
+		var th := b.sector_mid(k)
+		var out := Vector2(cos(th), sin(th))
+		var nm: String = Bathymetry.SECTOR_NAMES[k]
+		var c := b.at(th, 27.0)                                        # just past the crest, over the reef flat (1.2 m deep)
+		teleports.append({"name": "Reef %d %s: crest" % [k, nm], "feet": Vector3(c.x, surf - 0.7, c.y), "yaw": face.call(out), "swim": true})
+		var w := b.at(th, 27.0 + b.wall_m(th) * 0.5 + 25.0)           # off the wall, in open water
+		teleports.append({"name": "Reef %d %s: wall at 10 m" % [k, nm], "feet": Vector3(w.x, surf - 10.0, w.y), "yaw": face.call(-out), "swim": true})
+	var tp := b.sector_mid(Bathymetry.PASS_SECTOR)
+	var p := b.at(tp, 7.0)
+	teleports.append({"name": "Reef pass at 3 m", "feet": Vector3(p.x, surf - 3.0, p.y), "yaw": face.call(Vector2(cos(tp), sin(tp))), "swim": true})
 
 ## Move the girl and the camera to a teleport (no swoop: the camera's springs start fresh there).
 func teleport(i: int) -> void:
@@ -410,10 +432,16 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 	# mid-run (macOS resized it to the full Retina size once, which made a whole run invalid)
 	var vs0 := DisplayServer.window_get_vsync_mode()
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	# full screen (the default) must have taken before the size is read; a full-screen window is never locked or resized (on
+	# macOS that can drop it out of full screen, which left small windows on 28 Nov); only a requested window is locked
+	var tw := Time.get_ticks_msec() + 10000
+	while not fullscreen_ok and DisplayServer.window_get_mode() != DisplayServer.WINDOW_MODE_WINDOWED and Time.get_ticks_msec() < tw:
+		await get_tree().process_frame
+	var lock_win := DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_WINDOWED
 	var win0 := DisplayServer.window_get_size()
-	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_RESIZE_DISABLED, true)
+	if lock_win: DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_RESIZE_DISABLED, true)
 	await get_tree().process_frame
-	if DisplayServer.window_get_size() != win0: DisplayServer.window_set_size(win0)
+	if lock_win and DisplayServer.window_get_size() != win0: DisplayServer.window_set_size(win0)
 	teleport(1)
 	await get_tree().create_timer(settle * 2.0).timeout
 	var rows := []
@@ -443,9 +471,10 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 			"saves_ms": snappedf(am - r.frame_ms, 0.01), "saves_gpu_ms": snappedf((a.gpu_ms + a2.gpu_ms) * 0.5 - r.gpu_ms, 0.01)})
 		if DisplayServer.window_get_size() != win0:
 			rows[-1]["window_changed"] = true
-			# macOS can change the content size when the resize flag flips (title bar re-layout): put it back before the next row
-			DisplayServer.window_set_size(win0)
-			await get_tree().create_timer(settle).timeout
+			# macOS can change the content size when the resize flag flips (title bar re-layout): put a window back before the next row
+			if lock_win:
+				DisplayServer.window_set_size(win0)
+				await get_tree().create_timer(settle).timeout
 	for n in BENCH_SWITCHES:
 		if not n in ["half_res", "lagoon", "grass_v2", "cortao", "gtao", "vbao"]: set_toggle(n, false)
 	await get_tree().create_timer(settle).timeout
@@ -468,12 +497,12 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 	rows.append({"case": "floor view, lagoon off", "r": fl[1], "saves_ms": snappedf(fl[0].frame_ms - fl[1].frame_ms, 0.01)})
 	apply_state(s0)
 	DisplayServer.window_set_vsync_mode(vs0)
-	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_RESIZE_DISABLED, false)
+	if lock_win: DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_RESIZE_DISABLED, false)
 	var P := Performance
 	var out := {"utc": Time.get_datetime_string_from_system(true), "version": IssueReport._version(),
 		"machine": {"os": OS.get_name(), "cpu": OS.get_processor_name(), "gpu": RenderingServer.get_video_adapter_name(),
 			"driver": RenderingServer.get_video_adapter_api_version(), "resolution": get_viewport().get_visible_rect().size,
-			"screen_scale": DisplayServer.screen_get_scale(), "vsync_during_run": "off", "window": win0,
+			"screen_scale": DisplayServer.screen_get_scale(), "vsync_during_run": "off", "window": win0, "fullscreen": not lock_win, "screen": DisplayServer.screen_get_size(),
 			"render_scale": get_viewport().scaling_3d_scale, "upscaler": get_viewport().scaling_3d_mode},
 		"view": "Key-frame view", "rows": rows, "video_mem_mb": P.get_monitor(P.RENDER_VIDEO_MEM_USED) / 1048576.0}
 	var inval := _bench_invalid(rows)
@@ -498,3 +527,17 @@ func _set_ao_toggle(wr: WorldRoot, mode: String, on: bool) -> void:
 	elif wr.ao_mode == mode:
 		wr.set_ao(_ao_prev if _ao_prev != mode else "off")
 
+
+## Keep asking for full screen until macOS has actually done it (Mac thread, 28 Nov). A request made while another full-screen
+## space is still closing (a Godot that just quit full screen) or during load is dropped silently, which left small windows.
+## Tries every 0.5 s for 10 s; fullscreen_ok says whether it took.
+var fullscreen_ok := false
+func _hold_fullscreen() -> void:
+	var t_end := Time.get_ticks_msec() + 10000
+	while Time.get_ticks_msec() < t_end:
+		if DisplayServer.window_get_mode() >= DisplayServer.WINDOW_MODE_FULLSCREEN and DisplayServer.window_get_size().x >= DisplayServer.screen_get_usable_rect().size.x:
+			fullscreen_ok = true
+			return
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+		await get_tree().create_timer(0.5).timeout
+	push_warning("TestLevel: full screen did not take (window %s)" % DisplayServer.window_get_size())
