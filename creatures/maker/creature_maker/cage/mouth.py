@@ -31,8 +31,10 @@ class SnoutChart:
 
     def disc_theta(self, y, z):
         """chart angle of a front-disc point = loft theta of the disc rim point on the same ray from the mouth tip."""
-        _angb, _thb = self._angb, self._thb
-        a = np.arctan2(z, y - self.y_m0) % (2 * np.pi); return np.interp(a, _angb % (2 * np.pi) if _angb[-1] < 2 * np.pi + 1e-6 else _angb, _thb)
+        # the table runs from 0 to 2 pi and is looked up as it is. (Taken modulo 2 pi its last entry fell back to 0, the
+        # lookup then answered 2 pi for every angle, and the lower lip's tip was charted above the mouth: the first loops
+        # under the chin started on the wrong side of the lips.)
+        a = np.arctan2(z, y - self.y_m0) % (2 * np.pi); return np.interp(a, self._angb, self._thb)
 
     def az(self, x, th, f=None):
         x = np.asarray(x, float); th = np.asarray(th, float)

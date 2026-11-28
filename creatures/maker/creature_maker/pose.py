@@ -17,12 +17,13 @@ def smooth(t): t = np.clip(t, 0, 1); return t * t * (3 - 2 * t)
 SOFTEN_IT = 12      # DEFAULT: neighbour-averaging passes over the structural weights
 
 
-def soften(C, w, pins, it=SOFTEN_IT):
+def soften(C, w, pins, it=SOFTEN_IT, tags=None):
     """average each free weight with its mesh neighbours, holding the pinned ones. The structural rules (by column, by
     region, by tag) leave steps where two rules meet: a vertex at 1 beside one at 0 folds the face between them once the
     pose is large (the stylized range found these at gape 50 and flare 15). Skinning wants weights that vary smoothly."""
     nb = [[] for _ in range(len(w))]
-    for f in C['faces']:
+    for f, t in zip(C['faces'], C['ftag']):
+        if tags is not None and t not in tags: continue      # only across these faces (the skin: a lining is not its neighbour)
         for a, b in zip(f, f[1:] + f[:1]): nb[a].append(b); nb[b].append(a)
     free = np.array([bool(nb[v]) for v in range(len(w))]); free[list(pins)] = False; fi = np.where(free)[0]
     w = w.copy()
@@ -32,6 +33,7 @@ def soften(C, w, pins, it=SOFTEN_IT):
 
 HINGE = 3.0                 # DEFAULT: the corner blends over this many times the gap it must take up (gape x rictus-to-joint)
 HINGE_MIN = 0.009           # DEFAULT: and never over less than three lip thicknesses (SL)
+HINGE_LIPS = 0.5            # DEFAULT: nor over more than this share of the mouth's length: the front of each lip is its jaw's
 FAN = 45.0                  # DEFAULT: half-angle of the blend between rictus and joint (deg)
 FADE = (30.0, 170.0)        # DEFAULT: the jaw fades out between these angles about the joint, from the jaw line downward (deg)
 
@@ -39,21 +41,30 @@ FADE = (30.0, 170.0)        # DEFAULT: the jaw fades out between these angles ab
 def jaw_weights(C, V, rec):
     """one field in the side view (x, y), the same for the skin and for the lining under it. The jaw turns about an axis
     across the body, so a field that does not change with z moves the skin and the lining under it together: a wall keeps
-    its thickness, and a face folds only where the field itself is too steep. It is built round the two points of the hinge:
+    its thickness, and a face folds only where the field itself is too steep. Its frame is the lower jaw's own line, from
+    the mouth tip to the jaw joint (the mandible): along it, and square to it toward the skull. The line from rictus to
+    joint was the frame before; it is as short as 0.6 % SL and points anywhere (up, on the sweetlips and the blenny), and
+    the whole field turned with it. The field is built round the two points of the hinge:
       rictus   the upper lip stays (0), the lower lip goes (1), and they blend to 1/2 toward the corner over the length the
                corner has to stretch (the real rictal fold has that much spare skin). A blend by column count was too short
                on a sparse lower lip and too long on a dense one.
-      between  rictus and joint the blend is a lens through both points (circle arcs), narrow at both ends
-      joint    behind and below the joint the jaw fades out by angle about the joint. A fade by x squeezed the throat
-               skin far below the joint: how far a point moves grows with its distance from the joint, an angle does not."""
+      between  rictus and joint the blend is a lens through both points (circle arcs), narrow at both ends. The skull side
+               of it is taken across the jaw line: above the line from rictus to joint, and behind the joint above the jaw
+               line carried on. A joint that does not lie behind the rictus along the jaw leaves no line between them: the
+               jaw line through the rictus divides.
+      joint    behind and below the joint the jaw fades out by angle about the joint, from the jaw line downward. A fade
+               by x squeezed the throat skin far below the joint: how far a point moves grows with its distance from the
+               joint, an angle does not."""
     O = C['openings']; NT = len(O['mouth_rows'][0]); jr = O['jr']; J = np.array(O['jaw_joint'], float)
     ml = np.array(rec['mouth']['line']); ml = ml[np.argsort(ml[:, 0])]; R = ml[-1]
-    u = J - R; d = float(np.linalg.norm(u)); u = u / d; n = np.array([-u[1], u[0]]) * (1 if u[0] > 0 else -1)   # n: skull side
-    P = V[:, :2]; a, b = P - R, P - J
+    e = J - ml[0]; e = e / np.linalg.norm(e); n = np.array([-e[1], e[0]]) * (1 if e[0] > 0 else -1)    # e: back along the jaw; n: skull side
+    d = float(np.linalg.norm(J - R))
+    P = V[:, :2]; a, b = P - R, P - J; s, h = a @ e, a @ n; sj, hj = (J - R) @ e, (J - R) @ n
     # which side: in front of the rictus the slit divides (lips, their lining and the loops by column: closed lips touch);
-    # behind it the line from rictus to joint
-    front = a @ u < 0
-    up = np.where(front, P[:, 1] >= np.interp(P[:, 0], ml[:, 0], ml[:, 1]), a @ n >= 0)
+    # behind it the line from rictus to joint, then the jaw line on from the joint
+    front = s < 0
+    div = hj * np.clip(s / sj, 0, 1) if sj > 1e-9 else 0.0
+    up = np.where(front, P[:, 1] >= np.interp(P[:, 0], ml[:, 0], ml[:, 1]), h >= div)
     for row in O['mouth_rows'][:-1] + O['cavity_rows'][:O.get('mouth_lining_rows', 2)]:
         for j, v in enumerate(row):
             jj = j if j <= NT // 2 else NT - j
@@ -61,8 +72,12 @@ def jaw_weights(C, V, rec):
     ra, rb = np.linalg.norm(a, axis=1), np.linalg.norm(b, axis=1)
     lens = np.pi - np.arccos(np.clip((a * b).sum(1) / (ra * rb + 1e-15), -1, 1))     # 0 on the segment rictus-joint, pi beyond its ends
     w = smooth(0.5 - np.where(up, lens, -lens) / (2 * np.radians(FAN)))
-    w = 0.5 + (w - 0.5) * smooth(ra / max(HINGE * np.radians(rec.get('gape_deg', 30.0)) * d, HINGE_MIN))
-    psi = np.degrees(np.arctan2(-(b @ n), -(b @ u))); psi = np.where(psi < -90, psi + 360, psi)    # 0 toward the rictus, 90 below
+    # the blend stops short of the lip tips: the front of each lip belongs to its jaw. A joint far behind the rictus
+    # (trevally: 5 % SL, as long as its mouth) asked for a blend longer than the mouth; the upper lip's tip then went 20 %
+    # of the way down with the jaw and the lower lip's only 80 %: a snout that droops and a mouth that hardly opens.
+    hinge = min(max(HINGE * np.radians(rec.get('gape_deg', 30.0)) * d, HINGE_MIN), HINGE_LIPS * float(np.linalg.norm(R - ml[0])))
+    w = 0.5 + (w - 0.5) * smooth(ra / hinge)
+    psi = np.degrees(np.arctan2(-(b @ n), -(b @ e))); psi = np.where(psi < -90, psi + 360, psi)    # 0 toward the mouth tip, 90 below
     w = w * smooth((FADE[1] - psi) / (FADE[1] - FADE[0]))
     for row in O['cavity_rows'][1:O.get('mouth_lining_rows', 2)]: w[row] = w[O['cavity_rows'][0]]    # a lip's lining goes with its lip
     still = set(v for f, t in zip(C['faces'], C['ftag']) if t in ('eye', 'gill') for v in f)
@@ -91,21 +106,30 @@ def cover_weights(C, V, rec):
     skin = set(v for f, t in zip(C['faces'], C['ftag']) if t in ('body',) for v in f)
     w = np.where([v in skin or v in flaps for v in range(len(V))], w, 0.0)
     for v in flaps: w[v] = 1.0
-    for rows in O.get('gill_rows', []):          # the body lip of the slit (under the flap) stays with the body
-        for v in rows[0]:
-            if v not in flaps: w[v] = 0.0
-    # passage rows: the flap side of each row follows the flap, fading to the fixed hole in the cavity wall
-    for rows in O.get('gill_rows', []):
-        side_A = [k for k, v in enumerate(rows[0]) if v in flaps]
-        for r, row in enumerate(rows[1:-1], 1):
-            for k in side_A: w[row[k]] = 1.0 - r / (len(rows) - 1)
+    # the slit opens as a lens: the flap goes with the cover, the body lip under it stays with the body, and the two
+    # ends, where flap and lip are one vertex, go as far as the skin round them does. (An end held at 0 beside a flap at 1
+    # and cover skin at 0.7 was a step: the lining next to it swung out through the skin at the first degrees of flare.)
+    rows_ = O.get('gill_rows', []); ends = set(r[0][e] for r in rows_ for e in (0, len(r[0]) // 2))
+    lip = set(v for rows in rows_ for v in rows[0] + rows[-1]) - flaps - ends
+    for v in lip: w[v] = 0.0
     eye = set(v for f, t in zip(C['faces'], C['ftag']) if t == 'eye' for v in f)
     inner = set(v for f, t in zip(C['faces'], C['ftag']) if t in ('cavity', 'mouth') for v in f)
-    lip = set(v for rows in O.get('gill_rows', []) for v in rows[0] + rows[-1]) - flaps
+    lining = set(v for rows in rows_ for r in rows[1:-1] for v in r)
     for v in eye | inner: w[v] = 0.0
     mid = set(np.where((np.abs(V[:, 2]) < 0.25 * hw) & ~memb)[0].tolist()) - flaps    # left and right swing apart: the midline holds
     w[list(mid)] = 0.0
-    return soften(C, w, flaps | lip | eye | inner | mid)              # flap, body lip, cavity hole, eye, mouth, midline stay put
+    # the flap is the cover's own edge and takes the weight of the cover skin it ends (held at 1 it stood proud of a
+    # cover that fades toward the throat and the nape, and tore from it in the stylized range)
+    w = soften(C, w, lip | eye | inner | mid, tags=('body', 'eye', 'mouth', 'cap'))    # body lip, eye, mouth, midline stay put
+    # the lower jaw is the jaw's: the cover takes at most what the jaw leaves of a vertex. (The softened cover faded out
+    # over the jaw skin in front of the joint, 8 % on vertices the jaw holds at 99 %: more than one whole, which the
+    # export rig had to scale down, and the exported gape was no longer the stress pose's.)
+    w = np.minimum(w, 1.0 - jaw_weights(C, V, rec))
+    # passage rows: each lining vertex follows its own vertex of the slit, fading to the fixed hole in the cavity wall
+    for rows in rows_:
+        for r, row in enumerate(rows[1:-1], 1):
+            for k, v in enumerate(rows[0]): w[row[k]] = w[v] * (1.0 - r / (len(rows) - 1))
+    return w
 
 
 def gape(V, w, joint, deg):
@@ -179,6 +203,9 @@ def self_intersections(V, T):
     return int(hit.sum()), list(zip(a[hit].tolist(), b[hit].tolist()))
 
 
+OPEN_MIN = 0.95     # DEFAULT: share of the gape angle by which the two lip tips must part (GP1)
+
+
 def stress(C, V, rec, gape_steps=None, flare_steps=(0, 10, 20), jaw_w=None):
     """gape steps run to the record's real gape (jaw.linkage.gape, DEFAULT 30) in 10 deg steps. Returns per step: crossing triangle pairs (new versus rest), flipped faces, eye rim drift; and the pass flags."""
     if gape_steps is None: g = rec.get('gape_deg', 30.0); gape_steps = sorted(set(list(range(0, int(g), 10)) + [g]))
@@ -200,7 +227,11 @@ def stress(C, V, rec, gape_steps=None, flare_steps=(0, 10, 20), jaw_w=None):
     for deg in flare_steps:
         P = flare(V, wc, C['openings']['opercle_hinge'], deg, zh, flare_apex(C))
         out['flare'][deg] = dict(new_crossings=new_pairs(P), flipped=int((((normals(P) * N0).sum(1) < 0) & free).sum()))
-    out['GP1_pass'] = all(s['new_crossings'] <= 0 and s['flipped'] == 0 and s['eye_rim_drift_pctSL'] < 0.05 for s in out['gape'].values())
+    # the mouth must really open: the lower lip's tip goes with the jaw and the upper lip's tip stays. A jaw weight that
+    # smears the gape over the whole snout passes every crossing test and opens nothing (trevally after the rictus fix:
+    # the tips at 0.8 and 0.2, a drooping snout in the engine)
+    lips = C['openings']['mouth_rows'][0]; out['opening_share'] = round(float(wj[lips[len(lips) // 2]] - wj[lips[0]]), 3)
+    out['GP1_pass'] = out['opening_share'] >= OPEN_MIN and all(s['new_crossings'] <= 0 and s['flipped'] == 0 and s['eye_rim_drift_pctSL'] < 0.05 for s in out['gape'].values())
     out['GF1_pass'] = all(s['new_crossings'] <= 0 and s['flipped'] == 0 for s in out['flare'].values())
     out['jaw_weighted_verts'] = int((wj > 0.01).sum()); out['cover_weighted_verts'] = int((wc > 0.01).sum())
     return out

@@ -190,11 +190,11 @@ def cage_checks(C, V, form, rec):
 
 def pose_checks(C, V, rec, jaw_w=None, sweep=True):
     """GP0 no crossing faces at rest; GP1 gape to the record's real gape and GF1 gill flare 0-20 deg add no crossings or flipped faces and
-    leave the eye rims in place; SR1 stylized range: gape, flare, C-bend, S-wave, arch and all at once each stay
+    leave the eye rims in place, and the lip tips part by the gape (GP1_opening_share); SR1 stylized range: gape, flare, C-bend, S-wave, arch and all at once each stay
     clean up to the species' own target x 1.3 (record gape, muscle strain limit for the body), poses it cannot make skipped (pose.py)."""
     from .pose import stress, range_sweep
     S = stress(C, V, rec, jaw_w=jaw_w)
-    R = {'GP0_rest_crossings': S['rest_crossings'], 'GP0_pass': S['GP0_pass'], 'GP1_gape': S['gape'], 'GP1_pass': S['GP1_pass'],
+    R = {'GP0_rest_crossings': S['rest_crossings'], 'GP0_pass': S['GP0_pass'], 'GP1_gape': S['gape'], 'GP1_opening_share': S['opening_share'], 'GP1_pass': S['GP1_pass'],
          'GF1_flare': S['flare'], 'GF1_pass': S['GF1_pass']}
     if sweep:
         R['SR1_range'] = range_sweep(C, V, rec, jaw_w=jaw_w)
@@ -320,6 +320,8 @@ def planted(C0, V0, VN0, form, rec):
     w = jaw_weights(C0, V0, rec); up = C0['openings']['mouth_rows'][1]
     for v in up[1:C0['openings']['jr'] - 1:2]: w[v] = 1.0       # upper-lip loop vertices wrongly bound to the jaw
     PL['GP1 (upper lip loop bound to the jaw)'] = not pose_checks(C0, V0, rec, jaw_w=w, sweep=False)['GP1_pass']
+    ws = 0.5 + (jaw_weights(C0, V0, rec) - 0.5) * 0.6            # the gape smeared over the snout: lip tips at 0.2 and 0.8
+    PL['GP1 (jaw weight that opens the mouth by 60 % of the gape)'] = not pose_checks(C0, V0, rec, jaw_w=ws, sweep=False)['GP1_pass']
     from .pose import range_sweep, gape_target
     PL['SR1 (upper lip loop bound to the jaw)'] = range_sweep(C0, V0, rec, jaw_w=w, only=['gape'])['gape']['safe'] < gape_target(rec)
     c = copy.deepcopy(C0); bodyf = [i for i, t in enumerate(C0['ftag']) if t == 'body']; a_, b_ = (np.array(c['uv'][bodyf[i]]) for i in (0, 40))
@@ -366,6 +368,8 @@ def check(out, record_path, with_planted=False, sweep=True):
         R['PLANTED_caught'] = planted(C, Z['V'], Z['VN'], form, rec)
         from .silhouette import planted_sil
         R['PLANTED_caught'].update(planted_sil(C, Z['V'], rec))
+        from .silhouette import planted_sil2
+        R['PLANTED_caught'].update(planted_sil2(C, Z['V']))
     J = lambda o: bool(o) if isinstance(o, np.bool_) else (float(o) if isinstance(o, np.generic) else str(o))
     json.dump(R, open(os.path.join(out, 'checks.json'), 'w'), indent=1, default=J)
     return R

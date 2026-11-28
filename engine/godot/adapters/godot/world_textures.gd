@@ -3,7 +3,7 @@
 class_name WorldTextures
 extends RefCounted
 
-const BIBLE := {"sand": "cdcac4", "sand_d": "c8c4bb", "rock": "797265", "rock_crev": "5f5a50", "turf": "7b8164", "crust": "a98a8e",
+const BIBLE := {"sand": "f0e1c0", "sand_d": "e3cca2", "rock": "797265", "rock_crev": "5f5a50", "turf": "7b8164", "crust": "a98a8e",
 	"rub_a": "9f9583", "rub_b": "c5bfac"}
 const SLOTS := {"rBC": "T_Rock_Reef_Base_BC.png", "rN": "T_Rock_Reef_Base_N.png", "rORM": "T_Rock_Reef_Base_ORM.png",
 	"tBC": "T_Rock_Reef_Turf_BC.png", "tN": "T_Rock_Reef_Turf_N.png", "tORM": "T_Rock_Reef_Turf_ORM.png",

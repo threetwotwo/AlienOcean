@@ -14,6 +14,18 @@ def pch(tab):
     return lambda x: f(np.clip(x, lo, hi))
 
 
+def smax(a, b, k):
+    """smooth maximum: exactly a where b is more than k below it."""
+    h = np.clip(0.5 + 0.5 * (b - a) / k, 0, 1); return a * (1 - h) + b * h + k * h * (1 - h)
+
+
+JAW_MIN = 0.003    # DEFAULT: least thickness of each jaw at the mouth line (SL): one lip thickness (cage.mouth.TLIP)
+JAW_K = 0.002      # DEFAULT: the outline is carried round the mouth line over this height (SL), no crease
+HW_MIN = 0.002    # DEFAULT: least half-width of a cross-section (SL). A traced top view can close to a point at the snout
+                  # while the side view still has height there; a zero width is a section with no inside (the loft divided by it)
+PLATE_CHAMFER = 0.004   # DEFAULT: the edge of a plate drawn from below rises to full thickness over two cells of the dense form (0.2 % SL each)
+
+
 def smin(a, b, k):
     h = np.clip(0.5 + 0.5 * (b - a) / k, 0, 1); return b * (1 - h) + a * h - k * h * (1 - h)
 
@@ -55,14 +67,22 @@ class Form:
 
     def __init__(self, rec):
         self.rec = rec; O = self.O = rec['outline']
-        self._TOP0, self.BOT, self.HW, self.NUP, self.NLO = (pch(O[k]) for k in ('top', 'bot', 'hw', 'nUp', 'nLo'))
+        self._TOP0, self._BOT0, self.HW, self.NUP, self.NLO = (pch(O[k]) for k in ('top', 'bot', 'hw', 'nUp', 'nLo'))
+        _hw = self.HW; self.HW = lambda x: np.maximum(_hw(x), HW_MIN)
         self.XEND = O['top'][-1][0]
+        self.SECT = self._sections(O.get('sections'))
         self.EY = EY = rec['eye']; self.CV = CV = rec['cover']; self.MO = MO = rec['mouth']
+        # structure rule: the jaws enclose the mouth. A traced outline can leave the mouth line in the open (an upper lip
+        # that overhangs, a notch where the lips part: the outline is one height per x), and lips laid on a seam outside the
+        # loft fell on the midline, a mouth with no width. Each jaw is at least JAW_MIN thick at the seam.
+        _ml = np.array(MO['line'], float); self._seam = _ml[np.argsort(_ml[:, 0])]
         self.ex, self.eyy, self.er = EY['x'], EY['y'], EY['d'] / 2
         # structure rule: the orbit shapes the head profile. Where the record's eye (plus a skin margin for the eye loops)
         # rises above the dorsal outline, the outline is lifted over it (ceiling frame: the alfonsino eye bulges the profile).
         self._CLR = 0.15 * EY['d'] / 2
-        _xs = np.linspace(0, self.XEND, 400); self.ORBIT_LIFT = float(np.max(self.TOP(_xs) - self._TOP0(_xs)))
+        _xs = np.linspace(0, self.XEND, 400); self.ORBIT_LIFT = float(np.max(self._top_orbit(_xs) - self._TOP0(_xs)))
+        _xm = np.linspace(0, self._seam[-1, 0], 60)
+        self.JAW_LIFT = float(max(np.max(self.TOP(_xm) - self._top_orbit(_xm)), np.max(self._BOT0(_xm) - self.BOT(_xm))))
         # bone plates: (name, outline, thickness, free (stepped) edge curve or None, buried-side fade width, provenance)
         self.rear, self.preop = smooth_curve(CV['rear']), smooth_curve(CV['preop'])
         self.ring_x = float(np.mean([p[0] for p in smooth_curve(CV['edge_all'])]))      # where the slit's ring goes (see record.py)
@@ -131,11 +151,65 @@ class Form:
         return self.HW(np.clip(x, 0, self.XEND)) * (e['fa'] + (e['fc'] - e['fa']) * s_)
 
     # ---- level 0: the loft
-    def TOP(self, x):
+    def _top_orbit(self, x):
         E = self.EY; t0 = self._TOP0(x); rr = E["d"] / 2 + self._CLR; w = rr
         bump = E['y'] + rr * np.sqrt(np.clip(1 - ((np.asarray(x) - E['x']) / w) ** 2, 0, 1)) - (np.abs(np.asarray(x) - E['x']) >= w) * 1.0
-        k = 0.004; h = np.clip(0.5 + 0.5 * (bump - t0) / k, 0, 1)
-        return t0 * (1 - h) + bump * h + k * h * (1 - h)              # smooth max
+        return smax(t0, bump, 0.004)
+
+    def _seam_y(self, x):
+        """mouth line height at x, and whether x lies in the mouth (in front of the rictus)."""
+        x = np.asarray(x, float); return np.interp(x, self._seam[:, 0], self._seam[:, 1]), x <= self._seam[-1, 0]
+
+    def TOP(self, x):
+        y, on = self._seam_y(x); return smax(self._top_orbit(x), np.where(on, y + JAW_MIN, -1.0), JAW_K)
+
+    def BOT(self, x):
+        y, on = self._seam_y(x); return -smax(-self._BOT0(x), np.where(on, JAW_MIN - y, -1.0), JAW_K)
+
+    # ---- the cross-section. Without traced sections it is two half superellipses (record nUp above, nLo below the
+    # section centre), widest at mid-height. A traced section (record outline.sections) is the photo's own shape: half-width
+    # w (0..1 of the record half-width) at normalised height s (-1 ventral edge, +1 dorsal edge), so a keel, a flat flank or
+    # a widest point above the middle come from the reference. Between stations the shape blends linearly in x; before the
+    # first and after the last it holds. Width stays the record hw; height stays top/bot (front and top silhouette: SIL2).
+    SECT_S, SECT_PHI = 129, 361          # DEFAULTS: samples down a traced section and round its polar boundary
+
+    def _sections(self, S):
+        if not S: return None
+        S = sorted(S, key=lambda q: q['x']); ss = np.linspace(-1, 1, self.SECT_S); phi = np.linspace(0, np.pi, self.SECT_PHI)
+        X, W, RHO = [], [], []
+        for q in S:
+            w = np.array(q['w'], float); w = w[np.argsort(w[:, 0])]
+            ws = np.clip(np.interp(ss, w[:, 0], w[:, 1]), 0, None); ws = ws / max(ws.max(), 1e-9)
+            ws[0] = ws[-1] = 0.0                                             # the section closes on the midline at both edges
+            ang = np.arctan2(ws, ss); rad = np.hypot(ws, ss)                 # polar boundary in normalised (u = s, v = w)
+            o = np.argsort(ang); X.append(q['x']); W.append(ws); RHO.append(np.interp(phi, ang[o], rad[o]))
+        return dict(x=np.array(X), s=ss, w=np.array(W), phi=phi, rho=np.array(RHO))
+
+    def _blend(self, x, T):
+        S = self.SECT; x = np.asarray(x, float); k = np.clip(np.searchsorted(S['x'], x) - 1, 0, len(S['x']) - 1)
+        k1 = np.minimum(k + 1, len(S['x']) - 1); span = np.maximum(S['x'][k1] - S['x'][k], 1e-9)
+        t = np.clip((x - S['x'][k]) / span, 0, 1)[..., None]
+        return (1 - t) * T[k] + t * T[k1]
+
+    def rnorm(self, x, u, v, n=None):
+        """how far (u, v) = (dy / a, dz / b) lies out from the section centre, in units of the boundary (1 = on the skin)."""
+        if self.SECT is None:
+            n = np.where(u > 0, self.NUP(x), self.NLO(x)) if n is None else n
+            return (np.abs(u) ** n + np.abs(v) ** n) ** (1 / n)
+        S = self.SECT; R = self._blend(np.broadcast_to(x, np.broadcast(x, u).shape), S['rho'])
+        ph = np.arctan2(np.abs(v), u) / np.pi * (len(S['phi']) - 1); i = np.clip(ph.astype(int), 0, len(S['phi']) - 2); f = ph - i
+        rb = np.take_along_axis(R, i[..., None], -1)[..., 0] * (1 - f) + np.take_along_axis(R, (i + 1)[..., None], -1)[..., 0] * f
+        return np.hypot(u, v) / np.maximum(rb, 1e-9)
+
+    def wnorm(self, x, s):
+        """half-width (0..1 of the record half-width) of the section at normalised height s."""
+        if self.SECT is None:
+            nn = np.where(s > 0, self.NUP(x), self.NLO(x))
+            return np.maximum(1 - np.minimum(np.abs(s), 1) ** nn, 1e-6) ** (1 / nn)
+        S = self.SECT; Wx = self._blend(np.broadcast_to(x, np.broadcast(x, s).shape), S['w'])
+        q = (np.clip(s, -1, 1) + 1) / 2 * (len(S['s']) - 1); i = np.clip(q.astype(int), 0, len(S['s']) - 2); f = q - i
+        w = np.take_along_axis(Wx, i[..., None], -1)[..., 0] * (1 - f) + np.take_along_axis(Wx, (i + 1)[..., None], -1)[..., 0] * f
+        return np.maximum(w, 1e-6)
 
     def sec(self, x):
         t, b, w = self.TOP(x), self.BOT(x), self.HW(x)
@@ -144,9 +218,7 @@ class Form:
     def loft_point(self, x, th):
         """exact point of the record loft at body coords (x, theta)."""
         c, a, b = self.sec(x); dy, dz = np.cos(th), np.sin(th)
-        n = np.where(dy > 0, self.NUP(x), self.NLO(x))
-        r = (np.abs(dy / a) ** n + np.abs(dz / b) ** n) ** (1 / n)
-        rho = 1 / r
+        rho = 1 / self.rnorm(x, dy / a, dz / b)
         return np.stack([x, c + rho * dy, rho * dz], -1)
 
     def theta_of(self, x, y, z):
@@ -154,8 +226,7 @@ class Form:
 
     def z_on(self, x, y):
         """flank z of the loft at side-view point (x, y)."""
-        c, a_, b_ = self.sec(x); dy = y - c; nn = np.where(dy > 0, self.NUP(x), self.NLO(x))
-        return b_ * np.maximum(1 - np.minimum(np.abs(dy / a_), 1) ** nn, 1e-6) ** (1 / nn)
+        c, a_, b_ = self.sec(x); return b_ * self.wnorm(x, (y - c) / a_)
 
     def radial(self, p):
         """unit direction from the section centre line to p, in the section plane."""
@@ -166,14 +237,14 @@ class Form:
         XEND = self.XEND
         x, y, z = P[..., 0], P[..., 1], P[..., 2]
         xc = np.clip(x, 0, XEND); c, a, b = self.sec(xc)
-        dy = y - c; n = np.where(dy > 0, self.NUP(xc), self.NLO(xc))
-        r = (np.abs(dy / a) ** n + np.abs(z / b) ** n) ** (1 / n)
+        dy = y - c; n = None if self.SECT is not None else np.where(dy > 0, self.NUP(xc), self.NLO(xc))
+        r = self.rnorm(xc, dy / a, z / b, n)
         q = np.sqrt(dy * dy + z * z) + 1e-9
         d = q * (1 - 1 / np.maximum(r, 1e-6))
         h = 2e-3  # slope correction so the field stays close to a distance
         s = (q / np.maximum(r, 1e-6))
         c2, a2, b2 = self.sec(np.clip(xc + h, 0, XEND))
-        r2 = (np.abs((y - c2) / a2) ** n + np.abs(z / b2) ** n) ** (1 / n)
+        r2 = self.rnorm(np.clip(xc + h, 0, XEND), (y - c2) / a2, z / b2, n)      # same exponents as r: a slope, not a new shape
         s2 = q / np.maximum(r2, 1e-6)
         d = d / np.sqrt(1 + ((s2 - s) / h) ** 2)
         return np.maximum(d, np.maximum(-x, x - XEND))
@@ -197,7 +268,11 @@ class Form:
             t = t0
             if free is not None:      # full thickness at the free edge, thinning away from it and running out at its front end
                 x0, ez = free; t = t0 * np.clip(1 - np.abs(az - ez(x)) / fade, 0.15, 1) * np.clip((x - x0) / (0.6 * fade), 0, 1)
-            plate = np.maximum(np.maximum(d0 - t, -d0 - 0.004), np.maximum(poly_sd2(x, az, poly), y - under(x)))
+            # the plate's edges are chamfers, not walls: its outline is drawn from below and its upper limit in the side view,
+            # so a wall there stands along y or along z, not along the skin's normal; where the head rounds from the
+            # underside into the flank such a wall leans over the skin (a ledge) and the bake sees it from behind
+            t = t * np.clip(np.minimum(-poly_sd2(x, az, poly), under(x) - y) / PLATE_CHAMFER, 0, 1)
+            plate = np.maximum(d0 - t, -d0 - 0.004)
             nd = smin(d, plate, 0.0006)
             ids = np.where(nd < d - 1e-5, len(self.PLATES) + k + 1, ids); d = nd
         # orbit: circumorbital ring (bone) around the eye opening, a low torus in the side plane
@@ -216,7 +291,8 @@ class Form:
         return [dict(region=p[0], source=p[5]) for p in self.PLATES] + [dict(region=p[0], source=p[6]) for p in self.VPLATES] + [
             dict(region='orbit ring', source='circumorbital bone ring: record skeleton.eye.orbitR'),
             dict(region='mouth cleft', source='gape between jaws: record mouth.line'),
-            dict(region='body mass', source='record outline top/bot/hw/nUp/nLo loft')]
+            dict(region='body mass', source='record outline top/bot/hw/nUp/nLo loft; lifted over the orbit, and carried round the mouth line '
+                                            f'(each jaw at least {JAW_MIN * 100:g} % SL thick at record mouth.seam, DEFAULT; moved the outline {self.JAW_LIFT * 100:.2f} % SL)')]
 
     def dense_mesh(self, hres=0.002):
         """the form as a dense triangle mesh (marching cubes): the bake source, never shipped."""

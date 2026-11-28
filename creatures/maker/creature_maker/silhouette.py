@@ -66,8 +66,10 @@ def score(C, V, rec, ref):
 
 def silhouette_check(C, V, rec, record_path):
     p = find_reference(record_path)
-    if p is None: return dict(SIL1_pass=False, SIL1_reference=None, SIL1_note='no traced reference silhouette yet')
-    R = score(C, V, rec, json.load(open(p))); R['SIL1_reference'] = p
+    if p is None: return dict(SIL1_pass=False, SIL1_reference=None, SIL1_note='no traced reference silhouette yet',
+                              SIL2_pass=False, SIL2_note='no front or top reference yet')
+    ref = json.load(open(p)); R = score(C, V, rec, ref); R['SIL1_reference'] = p
+    R.update(score2(C, V, ref) or dict(SIL2_pass=False, SIL2_note='no front or top reference yet'))
     return R
 
 
@@ -98,6 +100,73 @@ def planted_sil(C, V, rec):
     xh = max(p[0] for p in rec['cover']['rear'])
     bad = dict(side=[[x, y * 1.2] if x < xh else [x, y] for x, y in ref['side']])
     return {'SIL1 (own outline passes)': bool(good), 'SIL1 (head 20 % deeper)': not score(C, V, rec, bad)['SIL1_pass']}
+
+
+# ---- SIL2: front and top silhouettes (Gary 28 Nov: "check if front views are correct"). The side view (SIL1) cannot see
+# girth, the cross-section's shape (keel, flat flank, where it is widest) or head width. Reference keys in the same
+# silhouettes/<name>.json, SL units: "front": [[z, y], ...] the fish seen head-on (body and median fins, no paired fins;
+# z to the fish's left, y as the record outline), "top": [[x, z], ...] seen from above (body only, no fins; snout x 0).
+# Each is scored by IoU on its own canvas fitted to the reference, pass mark SIL2_MIN.
+SIL2_MIN = 0.90       # DEFAULT: same pass mark as the side view
+VIEW2 = {'front': lambda Q: np.c_[Q[:, 2], Q[:, 1]], 'top': lambda Q: np.c_[Q[:, 0], Q[:, 2]]}
+
+
+def front_has_fins(ref):
+    """a "front" reference holds the median fins unless the tracer marks it body only ("front_fins": false, or a note that
+    starts "body only": a folded spine or edge-on fins in the head-on photo)."""
+    v = ref.get('front_fins', True)
+    return not (v is False or (isinstance(v, str) and v.strip().lower().startswith('body only')))
+
+
+def _faces2(C, V, view, fins=True):
+    F = [V[f] for f, t in zip(C['faces'], C['ftag']) if t in ('body', 'eye', 'mouth', 'cap')]
+    if view == 'front' and fins:
+        for k, fn in C.get('fins', {}).items():
+            if k.startswith(MEDIAN): FV = np.array(fn['V']); F += [FV[f] for f in fn['F']]
+    return [VIEW2[view](q) for q in F]
+
+
+def _box2(P, pad=0.15):
+    lo, hi = P.min(0), P.max(0); m = (hi - lo).max() * pad; return lo - m, hi + m
+
+
+def mask2(polys, box, res=500):
+    lo, hi = box; s = res / (hi - lo).max(); w, h = [int(np.ceil(v * s)) + 2 for v in (hi - lo)]
+    im = Image.new('L', (w, h), 0); d = ImageDraw.Draw(im)
+    for q in polys: d.polygon([((x - lo[0]) * s, (hi[1] - y) * s) for x, y in q], fill=1)
+    ImageDraw.floodfill(im, (0, 0), 2); return np.asarray(im) != 2
+
+
+def score2(C, V, ref):
+    R = {}
+    for view in ('front', 'top'):
+        if not ref.get(view): continue
+        P = np.asarray(ref[view], float); F = _faces2(C, V, view, front_has_fins(ref)); box = _box2(np.vstack([P] + F))
+        R[f'SIL2_{view}_iou'] = round(iou(mask2(F, box), mask2([P], box)), 3)
+    if R: R['SIL2_pass'] = all(v >= SIL2_MIN for v in R.values())
+    return R
+
+
+def outline2(C, V, view, res=500):
+    """the built front or top silhouette as a reference would be traced (planted fault, tracing aid)."""
+    polys = _faces2(C, V, view); box = _box2(np.vstack(polys)); A = mask2(polys, box, res); lo, hi = box; s = res / (hi - lo).max()
+    from skimage import measure
+    c = max(measure.find_contours(A.astype(float), 0.5), key=len)
+    return [[lo[0] + p[1] / s, hi[1] - p[0] / s] for p in c[::2]]
+
+
+def overlay2(C, V, ref, view, out_png):
+    P = np.asarray(ref[view], float); F = _faces2(C, V, view, front_has_fins(ref)); box = _box2(np.vstack([P] + F))
+    A, B = mask2(F, box), mask2([P], box)
+    img = np.full(A.shape + (3,), 245, np.uint8); img[B & ~A] = (90, 130, 255); img[A & ~B] = (255, 90, 90); img[A & B] = (150, 110, 190)
+    Image.fromarray(img).save(out_png)
+
+
+def planted_sil2(C, V):
+    """own front and top outlines pass; the same body 30 % wider (a guessed girth) fails both."""
+    ref = {v: outline2(C, V, v) for v in ('front', 'top')}; good = score2(C, V, ref).get('SIL2_pass')
+    W = V.copy(); W[:, 2] *= 1.3; bad = score2(C, W, ref)
+    return {'SIL2 (own front and top pass)': bool(good), 'SIL2 (girth 30 % wider)': not bad['SIL2_pass']}
 
 
 def fin_edges(ref, rec, margin_px=2):
@@ -179,8 +248,10 @@ def board(outroot, record_dirs, names=()):
         ref = find_reference(rp)
         if ref is None: return n, dict(SIL1_pass=False, SIL1_note='no traced reference silhouette yet')
         C = json.load(open(os.path.join(d, 'cage.json'))); V = np.load(os.path.join(d, 'cage.npz'))['V']
-        rec = adapt(rp, C.get('style')); R = score(C, V, rec, json.load(open(ref)))
-        overlay(C, V, json.load(open(ref)), os.path.join(d, 'silhouette.png')); R['png'] = os.path.join(d, 'silhouette.png')
+        rec = adapt(rp, C.get('style')); RF = json.load(open(ref)); R = score(C, V, rec, RF); R.update(score2(C, V, RF))
+        overlay(C, V, RF, os.path.join(d, 'silhouette.png')); R['png'] = os.path.join(d, 'silhouette.png')
+        for view in ('front', 'top'):
+            if RF.get(view): overlay2(C, V, RF, view, os.path.join(d, f'silhouette_{view}.png'))
         return n, R
     with ThreadPoolExecutor(4) as ex: res = dict(ex.map(one, recs))
     json.dump(res, open(os.path.join(outroot, 'silboard.json'), 'w'), indent=1)

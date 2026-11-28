@@ -5,9 +5,10 @@ message) or the check results.
 import glob, json, os, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 
-KEEP = ('GP0_rest_crossings', 'GP1_pass', 'GF1_pass', 'SR1_pass', 'SR1_safe', 'SR1_short', 'P2_worst_corner_p1_deg', 'P5_pass', 'P5_stretch_ok_area', 'P5_uv_folded_faces', 'P5_uv_overlap_texels', 'OP1_pass', 'OP2_pass', 'OP3_folds', 'OP3_folds_by_region',
+KEEP = ('GP0_rest_crossings', 'GP1_pass', 'GP1_opening_share', 'GF1_pass', 'SR1_pass', 'SR1_safe', 'SR1_short', 'P2_worst_corner_p1_deg', 'P5_pass', 'P5_stretch_ok_area', 'P5_uv_folded_faces', 'P5_uv_overlap_texels', 'OP1_pass', 'OP2_pass', 'OP3_folds', 'OP3_folds_by_region',
         'IC1_input_faults', 'IC1_missing', 'P3_pass', 'EY1_pass',
-        'SIL1_pass', 'SIL1_iou', 'SIL1_head_iou', 'SIL1_body_iou', 'SIL1_note')
+        'SIL1_pass', 'SIL1_iou', 'SIL1_head_iou', 'SIL1_body_iou', 'SIL1_note',
+        'SIL2_pass', 'SIL2_front_iou', 'SIL2_top_iou', 'SIL2_note')
 
 
 def find_records(dirs):

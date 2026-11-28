@@ -61,6 +61,10 @@ def adapt(path, style=None):
     sc = lambda tab: [[a * f, b * f] for a, b in tab]
     out['outline'] = dict(top=sc(O['top']), bot=sc(O['bot']), hw=sc(O['hw']),
                           nUp=[[a * f, b] for a, b in O['nUp']], nLo=[[a * f, b] for a, b in O['nLo']])
+    if O.get('sections'):     # traced cross-sections: x in record units, w as [s, half-width share] (form.Form._sections)
+        out['outline']['sections'] = [dict(x=q['u'] * f, w=q['w']) for q in O['sections']]
+        P('body cross-section', 'record.outline.sections (traced: u, w = [s -1 ventral .. +1 dorsal, half-width 0..1])')
+    else: DEFAULTS.append(dict(input='outline.sections', source='DEFAULT', value='two half superellipses from nUp/nLo, widest at mid-height'))
     P('body loft', 'record.outline top/bot/hw/nUp/nLo (/ outline.end)')
     E = R['skeleton']['eye']
     out['eye'] = dict(x=E['u'] * f, y=E['y'] * f, d=2 * E['R'] * f, orbit=dget(E, 'orbitR', E['R'] / 0.8, 'skeleton.eye') * f,
