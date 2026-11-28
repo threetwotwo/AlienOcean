@@ -85,9 +85,7 @@ var key := ""
 var last := {}
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
-var film_fx: WaterlineFilm         # the tank's lens film where the waterline crosses the lens (after the sea, before AgX)
 var under_mat: ShaderMaterial       # the underwater view quad's material (attach_camera)
-var _cam: Camera3D                  # attach_camera's: its wave decides whether the eye is under water (eye_under)
 var caustics: CausticsMap           # the light net's map, drawn once a frame (adapters/godot/caustics_map.gd)
 var _dome_g := 0.0
 
@@ -153,8 +151,7 @@ func _init() -> void:
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	env.glow_enabled = true; env.glow_intensity = 0.3
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
-	agx_fx = AgxEffect.new(); film_fx = WaterlineFilm.new()
-	var comp := Compositor.new(); comp.compositor_effects = [film_fx, agx_fx]; we.compositor = comp
+	agx_fx = AgxEffect.new(); var comp := Compositor.new(); comp.compositor_effects = [agx_fx]; we.compositor = comp
 	set_agx(true)
 	cam_attr = CameraAttributesPhysical.new(); cam_attr.auto_exposure_enabled = false
 	cam_attr.frustum_near = 0.02; cam_attr.frustum_far = 400.0
@@ -169,7 +166,6 @@ func set_agx(on: bool) -> void:
 func attach_camera(cam: Camera3D) -> void:
 	## physical exposure on the camera, plus the water between the eye and every pixel (look/underwater_view)
 	cam.attributes = cam_attr
-	_cam = cam
 	var q := MeshInstance3D.new(); q.name = "UnderwaterView"
 	var qm := QuadMesh.new(); qm.size = Vector2(2, 2); q.mesh = qm
 	var qmat := ShaderMaterial.new(); qmat.shader = load("res://look/underwater_view.gdshader"); q.material_override = qmat
@@ -181,10 +177,6 @@ func attach_camera(cam: Camera3D) -> void:
 func _process(_dt: float) -> void:
 	## the god rays' start point moves on each frame only where TAA averages it (Unreal: StateFrameIndexMod8 under TSR);
 	## without TAA it holds still, or the shafts would boil.
-	var f = water.waves if water else null   # the lens film follows the drawn sea (FftSea)
-	if film_fx and f and f.ready_ok:
-		film_fx.disp = f.disp_tex.texture_rd_rid; film_fx.patch = f.patch; film_fx.surf = water.level
-		film_fx.hs = (f.moments.get("mom_r", Vector4.ZERO) as Vector4).w
 	if under_mat == null: return
 	var vp := get_viewport()
 	under_mat.set_shader_parameter("god_frame", float(Engine.get_frames_drawn() % 8) if vp and vp.use_taa else 0.0)
@@ -201,11 +193,6 @@ func make_surface(_size_m := 160.0) -> Node3D:
 	water.waves = s.fft            # water.water_y(x, z) follows the drawn crests
 	return s
 
-func eye_under(eye: Vector3) -> bool:
-	## the eye is under the drawn wave at its spot (the waves' height read back from the GPU), not under the flat level:
-	## in a 14 m sea the flat level is meaningless at the lens. look/underwater_view decides each pixel the same way.
-	return eye.y < water.water_y(eye.x, eye.z, 0.0)
-
 func apply(cam_y: float) -> Dictionary:
 	if tide_on: water.set_clock(hours)   # the sea level follows the two moons (core/world/tide.gd)
 	var water_y := water.level
@@ -214,7 +201,7 @@ func apply(cam_y: float) -> Dictionary:
 	key = SkyClock.pick_key(st, key)
 	var body: Dictionary = st[key]
 	var fade := SkyClock.key_fade(st, key)
-	var under := eye_under(Vector3(_cam.global_position.x, cam_y, _cam.global_position.z)) if _cam and _cam.is_inside_tree() else cam_y < water_y
+	var under := cam_y < water_y
 	var up_air := to_godot(body.dir)
 	var beam_h: float = SkyClock.beam_lux(body.elev) * (body.toa / SkyClock.STAR.toa_lux if key != "sun" else 1.0) * fade
 	var tint: Color = SkyClock.kelvin_rgb(body.kelvin) * air_tint(body.elev)

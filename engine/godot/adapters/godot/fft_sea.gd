@@ -51,7 +51,7 @@ var foam_eye := Vector2.ZERO     # island xy of the eye (set each frame from the
 var _fa: RID; var _fb: RID; var _foam_ubo: RID; var _set_foam: RID
 var _foam_c := Vector2(INF, INF); var _foam_acc := Vector2.ZERO
 var _last_t := -1.0
-var _hb := [PackedByteArray(), PackedByteArray(), PackedByteArray()]   # cascades 0-2, RGBA16F texels, row major (render thread)
+var _hb := [PackedByteArray(), PackedByteArray()]   # RGBA16F texels, row major (written on the render thread)
 var _hb_t := -1.0                                   # the wave clock the bytes were drawn at
 var _hb_mutex := Mutex.new()
 var _frame := 0
@@ -235,13 +235,13 @@ func _foam_step(cl: int) -> void:
 	rd.compute_list_dispatch(cl, FOAM_N / 8, FOAM_N / 8, 1)
 
 func _readback(t: float) -> void:
-	for c in 3:
+	for c in 2:
 		rd.texture_get_data_async(_disp, c, _got.bind(c, t))
 
 func _got(data: PackedByteArray, c: int, t: float) -> void:
 	_hb_mutex.lock()
 	_hb[c] = data
-	if c == 2: _hb_t = t
+	if c == 1: _hb_t = t
 	_hb_mutex.unlock()
 
 func has_height() -> bool:
@@ -249,7 +249,7 @@ func has_height() -> bool:
 
 func _disp_tap(c: int, X: Vector2) -> Vector3:
 	## cascade c's (Dx, Dy, Dz) at island point X, bilinear with wrap (the GPU's own sampling of mip 0)
-	var L: float = patch.x if c == 0 else (patch.y if c == 1 else patch.z)
+	var L: float = patch.x if c == 0 else patch.y
 	var u := X / L * NS - Vector2(0.5, 0.5)
 	var i0 := Vector2i(floori(u.x), floori(u.y)); var f := u - Vector2(i0)
 	var b: PackedByteArray = _hb[c]
@@ -263,19 +263,18 @@ func _disp_tap(c: int, X: Vector2) -> Vector3:
 
 func height_at(gx: float, gz: float) -> float:
 	## the sea's height (m, about the still level) at Godot (x, z): the crest or trough that is drawn there, found by
-	## undoing the sideways push (three fixed-point steps: X = x - D(X)), as the vertex shader places it. Cascades 0-2,
-	## as the lens test (look/sea_side.gdshaderinc) and the near sea mesh; cascade 3 (centimetres) is left out (28 Nov:
-	## cascade 2 added, it carries tens of cm in a gale). 0 until the first readback lands.
+	## undoing the sideways push (three fixed-point steps: X = x - D(X)), as the vertex shader places it. Cascades 2
+	## and 3 (2.56 m, 0.32 m: millimetres in the lagoon) are left out. 0 until the first readback lands.
 	_hb_mutex.lock()
-	if _hb_t < 0.0 or _hb[0].size() < NS * NS * 8 or _hb[1].size() < NS * NS * 8 or _hb[2].size() < NS * NS * 8:
+	if _hb_t < 0.0 or _hb[0].size() < NS * NS * 8 or _hb[1].size() < NS * NS * 8:
 		_hb_mutex.unlock(); return 0.0
 	var x := Vector2(gx, -gz)              # island xy
 	var X := x
 	var D := Vector3.ZERO
 	for it in 3:
-		D = _disp_tap(0, X) + _disp_tap(1, X) + _disp_tap(2, X)
+		D = _disp_tap(0, X) + _disp_tap(1, X)
 		X = x - Vector2(D.x, D.y)
-	D = _disp_tap(0, X) + _disp_tap(1, X) + _disp_tap(2, X)
+	D = _disp_tap(0, X) + _disp_tap(1, X)
 	_hb_mutex.unlock()
 	return D.z
 

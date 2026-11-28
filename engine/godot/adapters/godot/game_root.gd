@@ -204,7 +204,7 @@ func _world_phase(tp: int) -> void:
 	## sky, light, exposure and water uniforms (WorldRoot), then M12 streaming around the committed viewers
 	if mounts.is_mounted("world"):
 		var eye_y: float = cam.global_position.y if cam != null else girl.eye_point().y
-		var under := world_root.eye_under(cam.global_position) if cam != null else eye_y < world_root.water.level
+		var under := eye_y < world_root.water.level
 		if absf(clock.hours - _applied_hours) >= apply_every_hours or under != _applied_under:
 			world_root.hours = clock.hours
 			world_root.apply(eye_y)

@@ -3,7 +3,7 @@
 ## ceiling at the level; from above: low over the water toward the sun and away, and high over it (tile check).
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/surface_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
 ## Env as lagoon_shots, plus AO_TIDE=1 (let the tide move the level; default pinned at the mean so frames compare),
-## AO_SEA=B0..B12 (the open sea at that Beaufort force, no floor: shots o1-o5 over the crests and under the troughs, o6-o7 the lens half in a wave), AO_DRESS (lagoon_shots': adds s8_arch_mirror, the key frame's arch in the ceiling), AO_SEA_T (the waves' clock, s; default 37.0, held), AO_SURF_SHOTS (two-character prefixes, e.g. s1,s4; AO_SHOTS
+## AO_SEA=B0..B12 (the open sea at that Beaufort force, no floor: shots o1-o5 over the crests and under the troughs), AO_DRESS (lagoon_shots': adds s8_arch_mirror, the key frame's arch in the ceiling), AO_SEA_T (the waves' clock, s; default 37.0, held), AO_SURF_SHOTS (two-character prefixes, e.g. s1,s4; AO_SHOTS
 ## filters lagoon_shots' own list and must stay unset here).
 extends "res://tools/lagoon_shots.gd"
 
@@ -27,7 +27,6 @@ func _setup():
 		["s5_above_low_away", Vector3(0.0, y + 1.5, -4.0), Vector3(0.0, y + 1.5, -4.0) + away * 10.0 + Vector3(0, -3.0, 0), 70.0],
 		["s6_above_high", Vector3(0.0, y + 20.0, 30.0), Vector3(0.0, y, 0.0), 60.0],
 		["s7_reef_mirror", Vector3(-6.0, 1.4, 3.0), Vector3(2.0, 2.4, -12.0), 65.0],
-		["s9_waterline", Vector3(0.0, y, 10.0), Vector3(0.0, y, 10.0) + away * 10.0 + Vector3(0, -0.6, 0), 70.0, 0.0],
 	]
 	for n in root.find_children("*", "Node3D", true, false):   # with AO_DRESS: the key frame's arch, mirrored in the ceiling
 		if n is DressCell:
@@ -53,9 +52,6 @@ func _setup():
 			["o3_above_high", Vector3(0, y + 30.0 + 3.0 * hs, 40.0 + 4.0 * hs), Vector3(0, y, 0), 60.0],
 			["o4_under_up", Vector3(0, dn, 0), Vector3(0, dn, 0) + (away + Vector3(0, tan(deg_to_rad(35.0)), 0)) * 10.0, 75.0],
 			["o5_under_window", Vector3(0, dn, 0), Vector3(0, dn, 0) + Vector3(0.05, 10.0, -0.3), 90.0],
-			# the lens at the still level and half a wave up: half in the water, the waterline across it (per pixel)
-			["o6_waterline", Vector3(0, y, 0), Vector3(0, y, 0) + away * 40.0 + Vector3(0, -3.0, 0), 75.0, 0.0],
-			["o7_waterline_sun", Vector3(0, y, 0), Vector3(0, y, 0) - away * 40.0 + Vector3(0, 2.0, 0), 75.0, 0.0],
 		]
 		print("SEA ", sea_env, " ", SeaSpectrum.BEAUFORT[force][2], " Hs ", hs)
 	if OS.get_environment("AO_SURF_SHOTS") != "":
@@ -65,15 +61,6 @@ func _setup():
 	_next()
 
 func _process(d):
-	# a waterline shot (5th entry: the lens's height over the drawn wave, m): once the waves' height has been read back
-	# from the GPU, the lens is put on the wave under it, so the waterline crosses the frame
-	if i >= 0 and i < shots.size() and shots[i].size() > 4 and wait == 6:
-		var fs := root.find_child("FftSea", true, false)
-		var p: Vector3 = shots[i][1]
-		var hgt: float = fs.height_at(p.x, p.z) if fs and fs.has_height() else 0.0
-		var dy: float = WATER_Y + hgt + shots[i][4] - p.y
-		cam.look_at_from_position(p + Vector3(0, dy, 0), shots[i][2] + Vector3(0, dy, 0), Vector3.UP)
-		print("WATERLINE ", shots[i][0], " wave ", hgt, " lens y ", p.y + dy, " ", wr.apply(p.y + dy).get("under", "?"))
 	if OS.get_environment("AO_DUMP_FLOOR") != "" and wait == 20:   # the sea floor map, for checks
 		var fm := root.find_child("SeaFloorMap", true, false)
 		if fm:
