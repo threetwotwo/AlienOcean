@@ -14,6 +14,11 @@ const SHOTS := [
 	{"name": "05_snell_window", "tp": 5, "hour": 12.0, "sea": "B3", "pitch": 1.2},
 	{"name": "06_night", "tp": 1, "hour": 23.0, "sea": "lagoon"},
 	{"name": "07_feet", "tp": 1, "hour": 12.0, "sea": "lagoon", "feet": true},   # close camera on the girl's feet and the sand (AO checks)
+	# Gary 28 Nov (force 12): standing in a trough, the eye in air but metres under the still level, got the under-water
+	# exposure and haze (sky blown to white, a hard line across the arch). Waits for the wave at the eye to be a trough
+	# (and a crest, eye under it) before the shot.
+	{"name": "08_force12_trough", "tp": 2, "hour": 12.0, "sea": "B12", "wave": -0.8},
+	{"name": "09_force12_crest", "tp": 2, "hour": 12.0, "sea": "B12", "wave": 0.8},
 ]
 
 func _initialize() -> void:
@@ -45,6 +50,16 @@ func _run(main) -> void:
 		for i in warm:
 			if s.has("pitch") and lvl.game.cam != null: lvl.game.cam.pitch = s.pitch
 			await process_frame
+		if s.has("wave") and lvl.game.sea is SeaSurface and lvl.game.cam != null:   # wait (up to 30 s of frames) for a trough or crest at the eye
+			var want: float = s.wave
+			var ft: FftSea = (lvl.game.sea as SeaSurface).fft
+			var dh := 0.0
+			for i in 900:
+				var e: Vector3 = lvl.game.cam.global_position
+				dh = ft.height_at(e.x, e.z)
+				if (want < 0.0 and dh < want) or (want > 0.0 and dh > want): break
+				await process_frame
+			print("WAVE %s at the eye %.2f m (eye %.2f m over the still level)" % [s.name, dh, lvl.game.cam.global_position.y - lvl.game.world_root.water.level])
 		if s.get("feet", false):
 			var b: Vector3 = lvl.game.girl.body.global_position
 			var gc: Camera3D = lvl.game.cam

@@ -214,7 +214,14 @@ func _physics_process(_delta: float) -> void:
 func _world_phase(tp: int) -> void:
 	## sky, light, exposure and water uniforms (WorldRoot), then M12 streaming around the committed viewers
 	if mounts.is_mounted("world"):
-		var eye_y: float = cam.global_position.y if cam != null else girl.eye_point().y
+		var eye: Vector3 = cam.global_position if cam != null else girl.eye_point()
+		# the eye is under water when it is under the wave drawn over it, not under the still level (Gary 28 Nov, force 12:
+		# standing in a trough the eye was metres under the still level but in air, and got the under-water exposure, sky and
+		# haze: the sky blew out to white and a hard line cut the arch). The world's light and the under-water view take the
+		# eye's height above that wave as if the sea were still there.
+		var dh: float = (sea as SeaSurface).fft.height_at(eye.x, eye.z) if sea is SeaSurface and sea.visible else 0.0
+		world_root.set_eye_wave(dh)
+		var eye_y: float = eye.y - dh
 		var under := eye_y < world_root.water.level
 		if absf(clock.hours - _applied_hours) >= apply_every_hours or under != _applied_under:
 			world_root.hours = clock.hours

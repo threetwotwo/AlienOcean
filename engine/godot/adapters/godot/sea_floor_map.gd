@@ -1,10 +1,14 @@
-## Sea floor map 0.1.4 (adapters/godot; water surface thread, 27 Nov 2026): what lies under the sea round the eye, seen
+## Sea floor map 0.2.0 (adapters/godot; water surface thread, 27 Nov 2026): what lies under the sea round the eye, seen
 ## straight down: its light (radiance, nits, as the world's own shaders light it at its depth: sun, net, sky, sand
 ## bounce) and its top height, for the mirror in the underside of the surface (where a reflected ray really lands:
 ## sand, grass, rock; lagoonwater v73/v87 read a baked floor map of the slice the same way, with stand-in colours).
 ## Godot version: two orthographic captures from above of everything except the sea (visual layer 2), the eye's quads
 ## (layer 4) and this map's own height pass (layer 3): radiance at exposure x 1, height from the depth buffer. Re-centred on the eye
 ## (snapped) whenever it moves far enough, so it follows the eye through an open world with nothing baked or streamed.
+## 0.2.0 (28 Nov, Gary's playtest: bodies seen from above drawn flat, fish as teal cut-outs): the map is captured only when
+## the eye moves 12 m, so anything that moves (the girl, fish, creatures, floating things) was frozen into it where it was
+## then, and the water drew that stale copy as the floor. Movers now sit on MOVER_LAYER, which the captures skip: a mover
+## calls SeaFloorMap.mark_mover(self) once, and every mesh under it, then or later, goes on that layer.
 ## Shader globals: water_floor_albedo (sampler2D: the floor's radiance in nits, linear; alpha 0 = nothing there),
 ## water_floor_height (sampler2D: world y = r / g, alpha 0 = nothing there),
 ## water_floor_org (vec4: centre x, centre z, size m, 1 = valid), water_floor_mean (vec4: the mean radiance, nits; 1 = valid).
@@ -14,6 +18,8 @@ extends Node3D
 const SEA_LAYER := 2           # visual layer the sea mesh sits on (never captured)
 const PASS_LAYER := 3          # the height pass quad (only the height capture sees it)
 const EYE_LAYER := 4           # the eye's own full-screen quads (WorldRoot.attach_camera: the underwater view)
+const MOVER_LAYER := 5         # things that move (mark_mover): never frozen into the map
+const MOVER_GROUP := &"sea_mover"
 const ALTITUDE := 60.0       # m: the captures look down from here (world y), to 100 m below sea level
 @export var size_m := 96.0
 @export var res := 512
@@ -48,7 +54,7 @@ func _init() -> void:
 		cam.projection = Camera3D.PROJECTION_ORTHOGONAL; cam.size = size_m
 		cam.near = 0.05; cam.far = ALTITUDE + 100.0
 		cam.environment = env; cam.attributes = attr; cam.compositor = Compositor.new()
-		cam.cull_mask = 0xFFFFF & ~(1 << (SEA_LAYER - 1)) & ~(1 << (PASS_LAYER - 1)) & ~(1 << (EYE_LAYER - 1))
+		cam.cull_mask = 0xFFFFF & ~(1 << (SEA_LAYER - 1)) & ~(1 << (PASS_LAYER - 1)) & ~(1 << (EYE_LAYER - 1)) & ~(1 << (MOVER_LAYER - 1))
 		if k == 1: cam.cull_mask |= 1 << (PASS_LAYER - 1)
 		vp.add_child(cam); add_child(vp); _cams.append(cam)
 		if k == 0: _vp_alb = vp
@@ -73,6 +79,27 @@ static func declare_globals() -> void:
 func _ready() -> void:
 	RenderingServer.global_shader_parameter_set("water_floor_albedo", _vp_alb.get_texture())
 	RenderingServer.global_shader_parameter_set("water_floor_height", _vp_h.get_texture())
+	get_tree().node_added.connect(_on_node_added)
+	for n in get_tree().get_nodes_in_group(MOVER_GROUP): _to_mover_layer(n)
+
+## A thing that moves: it and every mesh under it (now, and added later while a map is in the tree) stay out of the map.
+static func mark_mover(n: Node) -> void:
+	n.add_to_group(MOVER_GROUP)
+	_to_mover_layer(n)
+
+static func _to_mover_layer(n: Node) -> void:
+	if n is VisualInstance3D:
+		var v := n as VisualInstance3D
+		var keep := v.layers & ((1 << (SEA_LAYER - 1)) | (1 << (EYE_LAYER - 1)))
+		v.layers = keep | (1 << (MOVER_LAYER - 1))
+	for c in n.get_children(): _to_mover_layer(c)
+
+func _on_node_added(n: Node) -> void:
+	if not (n is VisualInstance3D): return
+	var p := n.get_parent()
+	while p != null:
+		if p.is_in_group(MOVER_GROUP): _to_mover_layer(n); return
+		p = p.get_parent()
 
 func set_ambient(nits: Vector3) -> void:
 	## the ambient the floor's shaders expect (WorldRoot.apply: the water's fill reference, nits): the captures run at
