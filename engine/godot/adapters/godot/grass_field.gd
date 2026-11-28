@@ -13,6 +13,7 @@ const TRAIL_N := 12                 # girl trail samples (the grass closes back 
 const TRAIL_DT := 0.08              # seconds between trail samples
 const TRAIL_TAU := 0.6              # trail fade (s)
 const FISH_N := 10
+const FISH_R := 12.0                # metres from the camera: only fish this near push grass
 
 var material: ShaderMaterial
 var tiles: Array = []               # [{src: MeshInstance3D, mmi: MultiMeshInstance3D, aabb: AABB, blades: int}]
@@ -24,10 +25,12 @@ var _trail: Array = []              # [{p: Vector3, t: float}]
 var _t := 0.0
 var _last_sample := -1.0
 var _rng := RandomNumberGenerator.new()
+var _boxes: Array = []              # tile AABBs grown 0.3 m (fish test)
+var _union := AABB()                # all of them
 
 static func blade_mesh(segments := 4) -> ArrayMesh:
 	## one blade, 1 m tall (scaled per instance), 8 mm wide at the root tapering to a point; a slight natural curl forward.
-	## UV.y = 0 root .. 1 tip (the shader's height share).
+	## UV.y = 0 root .. 1 tip (the shader's height share); UV.x = 0 / 1 on the two edges (pale leaf margins).
 	var st := SurfaceTool.new(); st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var rows := []
 	for i in segments + 1:
@@ -38,8 +41,8 @@ static func blade_mesh(segments := 4) -> ArrayMesh:
 		var a: Array = rows[i]; var b: Array = rows[i + 1]
 		var p0 := Vector3(-a[1] * 0.5, a[0], a[2]); var p1 := Vector3(a[1] * 0.5, a[0], a[2])
 		var p2 := Vector3(-b[1] * 0.5, b[0], b[2]); var p3 := Vector3(b[1] * 0.5, b[0], b[2])
-		for q in [[p0, a[0]], [p1, a[0]], [p2, b[0]], [p1, a[0]], [p3, b[0]], [p2, b[0]]]:
-			st.set_normal(Vector3(0, 0, -1)); st.set_uv(Vector2(0.5, q[1])); st.add_vertex(q[0])
+		for q in [[p0, a[0], 0.0], [p1, a[0], 1.0], [p2, b[0], 0.0], [p1, a[0], 1.0], [p3, b[0], 1.0], [p2, b[0], 0.0]]:
+			st.set_normal(Vector3(0, 0, -1)); st.set_uv(Vector2(q[2], q[1])); st.add_vertex(q[0])
 	return st.commit()
 
 func _ready() -> void:
@@ -62,20 +65,20 @@ func adopt(root: Node) -> void:
 			var L0: float = r[1] * (0.3 + 0.65 * pow(_rng.randf(), 0.6))  # skewed: many mid blades, few long, some short
 			var yaw0 := _rng.randf() * TAU
 			var hue := clampf(0.5 + 0.35 * sin(p.x * 1.7 + 2.0 * sin(p.z * 1.3)) * cos(p.z * 1.1) + _rng.randf_range(-0.12, 0.12), 0.0, 1.0)
-			var n := _rng.randi_range(1, 2)
+			var n := _rng.randi_range(1, 3)
 			for k in n:
 				var side := float(k) - (n - 1) * 0.5
 				var L := L0 * (1.0 - 0.18 * absf(side)) * _rng.randf_range(0.9, 1.1)
 				var b := Basis(Vector3.UP, yaw0 + side * 0.25 + _rng.randf_range(-0.1, 0.1)) * Basis(Vector3.RIGHT, -side * 0.10 + _rng.randf_range(0.10, 0.35))
-				leaves.append([Transform3D(b.scaled(Vector3(1.0, L, 1.0)), p + b.x * side * 0.004), Color(_rng.randf() * TAU, _rng.randf_range(0.7, 1.4), clampf(hue + _rng.randf_range(-0.05, 0.05), 0.0, 1.0), L)])
+				leaves.append([Transform3D(b.scaled(Vector3(1.0, L, 1.0)), p + b.x * side * 0.004), r[2], Color(_rng.randf() * TAU, _rng.randf_range(0.7, 1.4), clampf(hue + _rng.randf_range(-0.05, 0.05), 0.0, 1.0), L)])
 		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D; mm.use_custom_data = true; mm.mesh = blade
+		mm.transform_format = MultiMesh.TRANSFORM_3D; mm.use_custom_data = true; mm.use_colors = true; mm.mesh = blade
 		mm.instance_count = leaves.size()
 		var lo := Vector3.INF; var hi := -Vector3.INF
 		for i in leaves.size():
-			mm.set_instance_transform(i, leaves[i][0]); mm.set_instance_custom_data(i, leaves[i][1])
+			mm.set_instance_transform(i, leaves[i][0]); mm.set_instance_color(i, leaves[i][1]); mm.set_instance_custom_data(i, leaves[i][2])
 			var o: Vector3 = (leaves[i][0] as Transform3D).origin
-			lo = lo.min(o); hi = hi.max(o + Vector3(0, (leaves[i][1] as Color).a, 0))
+			lo = lo.min(o); hi = hi.max(o + Vector3(0, (leaves[i][2] as Color).a, 0))
 		var mmi := MultiMeshInstance3D.new(); mmi.name = String(mi.name) + "_blades"; mmi.multimesh = mm
 		mmi.material_override = material
 		mmi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED   # SDFGI must not voxelize the meadow as a solid (darkened the girl)
@@ -86,19 +89,24 @@ func adopt(root: Node) -> void:
 		var src_tris: int = mi.mesh.get_faces().size() / 3
 		tiles.append({"src": mi, "mmi": mmi, "aabb": mmi.custom_aabb, "blades": leaves.size()})
 		stats.tiles += 1; stats.blades += leaves.size(); stats.src_tris += src_tris; stats.tris += leaves.size() * 8
+		var gb := mmi.custom_aabb.grow(0.3)
+		_union = gb if _boxes.is_empty() else _union.merge(gb)
+		_boxes.append(gb)
 	stats.build_ms = (Time.get_ticks_usec() - t0) / 1000.0
 	print("GRASS ", stats)
 
 ## The tile's shoots: consecutive vertices further than 3 cm apart start a new piece (the tiles are written blade by blade);
 ## a piece's lowest vertex is a root, deduplicated on a 2.5 cm grid (a blade is often written as several pieces).
 ## Blade length comes from the tile as a whole (its 5th to 95th percentile height), since pieces are often only part of a blade.
-## Returns [[root, length]].
+## Returns [[root, length, colour]] (colour white when the tile has no vertex colours).
 func _roots(mi: MeshInstance3D) -> Array:
 	var out := []
 	var xf := mi.global_transform
 	var seen := {}
 	for s in mi.mesh.get_surface_count():
-		var v: PackedVector3Array = mi.mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]
+		var arrs: Array = mi.mesh.surface_get_arrays(s)
+		var v: PackedVector3Array = arrs[Mesh.ARRAY_VERTEX]
+		var cols = arrs[Mesh.ARRAY_COLOR]          # the dressing's per-blade vertex colour, if the tile has one
 		var n := v.size()
 		if n == 0: continue
 		var ys := PackedFloat32Array()
@@ -109,14 +117,17 @@ func _roots(mi: MeshInstance3D) -> Array:
 		for i in range(1, n + 1):
 			if i < n and v[i].distance_squared_to(v[i - 1]) < 0.0009: continue
 			var lo := v[start]
+			var csum := Color(0, 0, 0, 0)
 			for k in range(start, i):
 				if v[k].y < lo.y: lo = v[k]
+				if cols is PackedColorArray and cols.size() == n: csum += cols[k]
+			var col := Color(1, 1, 1) if csum.a <= 0.0 else Color(csum.r / csum.a, csum.g / csum.a, csum.b / csum.a)
 			start = i
 			var w := xf * lo
 			var key := Vector2i(int(floor(w.x / 0.025)), int(floor(w.z / 0.025)))
 			if seen.has(key): continue
 			seen[key] = true
-			out.append([w, tile_h])
+			out.append([w, tile_h, col])
 	# local density on a 20 cm grid: blade length follows it (meadow edges short and sparse, the core tall), no flat hedge top
 	var cnt := {}
 	for r in out:
@@ -137,6 +148,7 @@ func set_enabled(on: bool) -> void:
 
 func _process(delta: float) -> void:
 	if not enabled or material == null: return
+	var tp := Time.get_ticks_usec()
 	_t += delta
 	var arr := []
 	# the girl now and her fading trail
@@ -152,13 +164,17 @@ func _process(delta: float) -> void:
 	# fish inside a meadow's box, nearest the camera first
 	var cam := get_viewport().get_camera_3d()
 	var cp := cam.global_position if cam else Vector3.ZERO
+	# cheap tests first: near the camera (a pushed blade further than FISH_R is not seen moving), then the meadows' union box,
+	# then each tile's box (precomputed, grown). The old loop tested every fish against every tile: thousands of AABB tests a frame.
 	var fish := []
+	var r2 := FISH_R * FISH_R
 	for sc in schools:
 		if not is_instance_valid(sc) or not "_cur" in sc: continue
 		var cur: PackedVector3Array = sc._cur
 		for p in cur:
-			for t in tiles:
-				if (t.aabb as AABB).grow(0.3).has_point(p):
+			if p.distance_squared_to(cp) > r2 or not _union.has_point(p): continue
+			for b in _boxes:
+				if (b as AABB).has_point(p):
 					fish.append(p); break
 	fish.sort_custom(func(a, b): return a.distance_squared_to(cp) < b.distance_squared_to(cp))
 	for i in mini(fish.size(), FISH_N):
@@ -176,3 +192,4 @@ func _process(delta: float) -> void:
 		material.set_shader_parameter("push_bound", Vector4(c.x, c.y, c.z, (hi - lo).length() * 0.5 + rmax))
 	else:
 		material.set_shader_parameter("push_bound", Vector4(0, -1e6, 0, 0))
+	stats["process_ms"] = snappedf(lerpf(float(stats.get("process_ms", 0.0)), (Time.get_ticks_usec() - tp) / 1000.0, 0.1), 0.001)

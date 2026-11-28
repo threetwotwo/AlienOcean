@@ -141,7 +141,7 @@ func set_toggle(n: String, on: bool) -> void:
 		"ssil": wr.env.ssil_enabled = on
 		"shadows": wr.light.shadow_enabled = on
 		"half_res":
-			# half the pixels each way, upscaled (upscaler(): Apple MetalFX temporal on Macs that have it, else AMD FSR 1)
+			# half the pixels each way, upscaled (upscaler(): AMD FSR 1 by default; AO_UPSCALER picks another)
 			get_viewport().scaling_3d_mode = upscaler() if on else Viewport.SCALING_3D_MODE_BILINEAR
 			get_viewport().scaling_3d_scale = 0.5 if on else 1.0
 		"grass_v2": if grass: grass.set_enabled(on)
@@ -157,8 +157,8 @@ func set_toggle(n: String, on: bool) -> void:
 		_: push_error("TestLevel: unknown toggle " + n); return
 	_relight()
 
-## The upscaler behind half_res. AO_UPSCALER = fsr | fsr2 | metalfx | metalfx_temporal picks one; by default MetalFX temporal
-## where the GPU has it (Apple silicon), else FSR 1. A temporal upscaler does its own anti-aliasing (TAA stays off).
+## The upscaler behind half_res. AO_UPSCALER = fsr | fsr2 | metalfx | metalfx_temporal picks one; by default FSR 1 (measured faster than
+## MetalFX temporal on the M1 Pro, 28 Nov). A temporal upscaler does its own anti-aliasing (TAA stays off).
 func upscaler() -> int:
 	var rd := RenderingServer.get_rendering_device()
 	var mfx_t := rd != null and rd.has_feature(RenderingDevice.SUPPORTS_METALFX_TEMPORAL)
@@ -168,7 +168,7 @@ func upscaler() -> int:
 		"fsr2": return Viewport.SCALING_3D_MODE_FSR2
 		"metalfx": return Viewport.SCALING_3D_MODE_METALFX_SPATIAL if mfx_s else Viewport.SCALING_3D_MODE_FSR
 		"metalfx_temporal": return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR
-	return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR
+	return Viewport.SCALING_3D_MODE_FSR   # default FSR 1: Mac bench 28 Nov, FSR 8.8 ms vs MetalFX temporal 11.5 ms (all on, 960x540)
 
 func _set_collider(on: bool) -> void:
 	_show_collider = on
@@ -306,7 +306,8 @@ func _bench_measure(secs: float) -> Dictionary:
 	var mean := func(a: Array) -> float: return a.reduce(func(s, x): return s + x, 0.0) / maxf(a.size(), 1)
 	var srt := fr.duplicate(); srt.sort()
 	var P := Performance
-	return {"frame_ms": snappedf(mean.call(fr), 0.01), "gpu_ms": snappedf(mean.call(gpu), 0.01), "cpu_render_ms": snappedf(mean.call(cpu), 0.01),
+	# median frame time: a toggle's first frames compile pipelines and spike; the median ignores them, the mean did not
+	return {"frame_ms": snappedf(srt[srt.size() / 2] if srt.size() > 0 else 0.0, 0.01), "mean_frame_ms": snappedf(mean.call(fr), 0.01), "gpu_ms": snappedf(mean.call(gpu), 0.01), "cpu_render_ms": snappedf(mean.call(cpu), 0.01),
 		"p95_frame_ms": snappedf(srt[int(srt.size() * 0.95)] if srt.size() > 0 else 0.0, 0.01), "frames": fr.size(),
 		"tick_ms": snappedf(game.stats.tick_ms, 0.01), "draw_calls": P.get_monitor(P.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 		"triangles": P.get_monitor(P.RENDER_TOTAL_PRIMITIVES_IN_FRAME)}
@@ -339,6 +340,13 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 	teleport(1)
 	await get_tree().create_timer(settle * 2.0).timeout
 	var rows := []
+	# warm-up: flip every switch once so each pipeline is compiled before anything is timed (compiles read as negative savings)
+	for n in BENCH_SWITCHES:
+		if n == "sdfgi": continue
+		var w: bool = get_toggle(n)
+		set_toggle(n, not w); await get_tree().create_timer(0.5).timeout
+		set_toggle(n, w); await get_tree().create_timer(0.5).timeout
+	await get_tree().create_timer(settle).timeout
 	var base: Dictionary = await _bench_measure(secs)
 	rows.append({"case": "everything on", "r": base})
 	# each switch is measured as a pair (its normal state, then flipped) so slow drift (heat, GI settling) cancels out
@@ -348,10 +356,14 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 		set_toggle(n, not on)
 		await get_tree().create_timer(settle).timeout
 		var r: Dictionary = await _bench_measure(secs)
-		rows.append({"case": ("%s on" % n) if not on else ("%s off" % n), "r": r, "paired_ms": a.frame_ms,
-			"saves_ms": snappedf(a.frame_ms - r.frame_ms, 0.01), "saves_gpu_ms": snappedf(a.gpu_ms - r.gpu_ms, 0.01)})
 		set_toggle(n, on)
 		await get_tree().create_timer(settle * (3.0 if n == "sdfgi" else 1.0)).timeout
+		# A-B-A: the baseline is measured before and after the flip, so a restore cost cannot leak into the next row
+		var a2: Dictionary = await _bench_measure(secs * 0.5)
+		var am: float = (float(a.frame_ms) + float(a2.frame_ms)) * 0.5
+		rows.append({"case": ("%s on" % n) if not on else ("%s off" % n), "r": r, "paired_ms": snappedf(am, 0.01),
+			"aba_spread_ms": snappedf(absf(a.frame_ms - a2.frame_ms), 0.01),
+			"saves_ms": snappedf(am - r.frame_ms, 0.01), "saves_gpu_ms": snappedf((a.gpu_ms + a2.gpu_ms) * 0.5 - r.gpu_ms, 0.01)})
 		if DisplayServer.window_get_size() != win0: rows[-1]["window_changed"] = true
 	for n in BENCH_SWITCHES:
 		if not n in ["half_res", "lagoon", "grass_v2"]: set_toggle(n, false)
