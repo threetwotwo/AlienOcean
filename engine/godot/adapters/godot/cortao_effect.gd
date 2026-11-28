@@ -17,10 +17,12 @@ var backface_threshold := 0.5
 var backface_boost := 0.0
 var filter_depth := 512.0
 var filter_normal := 16.0           # CORTAO default 128; 16 with shape normals: key frame grain 3.70 -> 3.35 (SSAO 3.05)
-var animate := false              # force a new seed every frame; otherwise it follows the viewport's TAA (constant seed without TAA: no flicker)
+var animate := false              # force a new seed every frame; otherwise it follows the viewport (TAA / FSR 2 / MetalFX temporal); constant without one: no flicker
 var invert_flip := false          # checks only: the planted fault (AO lands mirrored)
 var depth_normals := true         # the shape's normal from depth, not the materials' detail normal (see cortao_prepass.glsl)
+var rays := int(OS.get_environment("CORTAO_RAYS")) if OS.get_environment("CORTAO_RAYS") != "" else 16   # 16 or 32 (lookup table per count)
 var samples := int(OS.get_environment("CORTAO_SAMPLES")) if OS.get_environment("CORTAO_SAMPLES") != "" else 16
+var filter_passes_temporal := 1   # with TAA / FSR 2 / MetalFX temporal the upscaler averages frames: one pass, as CORTAO intends
 var filter_passes := 3            # the filter 3 times: our renders have no temporal filter (TAA off, FSR 1 is spatial). cortao_check C5: grain 0.030 (1 pass) -> 0.016
 var capture_next := false         # checks: copy the next result into `captured` (stalls the GPU; tests only)
 var captured: Image
@@ -94,7 +96,7 @@ func _init_compute() -> void:
 	rd = RenderingServer.get_rendering_device()
 	if rd == null: return
 	sh_pre = _compile("res://look/cortao/cortao_prepass.glsl")
-	sh_main = _compile("res://look/cortao/cortao_main.glsl", "#define CORTAO_SAMPLES %d\n" % samples)
+	sh_main = _compile("res://look/cortao/cortao_main.glsl", "#define CORTAO_SAMPLES %d\n#define CORTAO_RAYS %d\n" % [samples, rays])
 	sh_filt = _compile("res://look/cortao/cortao_filter.glsl")
 	sh_filt2 = _compile("res://look/cortao/cortao_filter.glsl", "#define CORTAO_OUT_PACKED 1\n")
 	if not (sh_pre.is_valid() and sh_main.is_valid() and sh_filt.is_valid() and sh_filt2.is_valid()): return
@@ -113,13 +115,13 @@ func _init_compute() -> void:
 	sc.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE; sc.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
 	sc.repeat_w = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
 	smp_clamp = rd.sampler_create(sc)
-	# occluder lookup table: 24 x 24 x 16 texels of R16_UINT (one bit per ray), from CORTAO's tables/occluder
+	# occluder lookup table: 24 x 24 x 16 texels, one bit per ray (R16_UINT for 16 rays, R32_UINT for 32), from CORTAO's tables/occluder
 	var tf := RDTextureFormat.new()
 	tf.texture_type = RenderingDevice.TEXTURE_TYPE_3D
-	tf.format = RenderingDevice.DATA_FORMAT_R16_UINT
+	tf.format = RenderingDevice.DATA_FORMAT_R32_UINT if rays == 32 else RenderingDevice.DATA_FORMAT_R16_UINT
 	tf.width = 24; tf.height = 24; tf.depth = 16
 	tf.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
-	lut = rd.texture_create(tf, RDTextureView.new(), [FileAccess.get_file_as_bytes(DIR + "occluder_24x24x16_r16ui.bin")])
+	lut = rd.texture_create(tf, RDTextureView.new(), [FileAccess.get_file_as_bytes(DIR + ("occluder_24x24x16_r32ui.bin" if rays == 32 else "occluder_24x24x16_r16ui.bin"))])
 	ubo = rd.uniform_buffer_create(48)
 	ok = lut.is_valid()
 
@@ -164,6 +166,11 @@ func _read_time() -> void:
 		elif n == "CORTAO end": t1 = rd.get_captured_timestamp_gpu_time(i)
 	if t0 >= 0 and t1 > t0: gpu_ms = float(t1 - t0) / 1.0e6   # Godot reports these in nanoseconds (cloud check 28 Nov: 63.7 ms on llvmpipe at 960x540)
 
+## a temporal filter follows (TAA, FSR 2 or MetalFX temporal): a new seed each frame, which it averages away
+static func _temporal(rsb: RenderSceneBuffersRD) -> bool:
+	var m := rsb.get_scaling_3d_mode()
+	return rsb.get_use_taa() or m == RenderingServer.VIEWPORT_SCALING_3D_MODE_FSR2 or m == RenderingServer.VIEWPORT_SCALING_3D_MODE_METALFX_TEMPORAL
+
 static func _u(type: int, binding: int, ids: Array) -> RDUniform:
 	var u := RDUniform.new(); u.uniform_type = type; u.binding = binding
 	for i in ids: u.add_id(i)
@@ -185,7 +192,7 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	var P := rsd.get_view_projection(0)
 	var I := P.inverse()
 	if frame == 5 and OS.get_environment("CORTAO_DEBUG") != "": print("CORTAO P ", P, " size ", sz, " mips ", mips)
-	var seed := (frame * 2654435761) & 0xFFFFFFFF if (animate or rsb.get_use_taa()) else 0x9E3779B9
+	var seed := (frame * 2654435761) & 0xFFFFFFFF if (animate or _temporal(rsb)) else 0x9E3779B9
 	frame += 1
 	var res := sz.x | (sz.y << 16)
 	# Godot hands over the projection already corrected for Vulkan (measured 28 Nov: Y flipped, reverse-Z remapped to 0..1:
@@ -240,7 +247,8 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	rd.compute_list_dispatch(cl, (sz.x + 15) / 16, (sz.y + 15) / 16, 1)
 	rd.compute_list_add_barrier(cl)
 	var src := raw
-	for k in filter_passes - 1:   # extra passes ping-pong raw <-> raw2
+	var tmp := _temporal(rsb)
+	for k in (filter_passes_temporal if tmp else filter_passes) - 1:   # extra passes ping-pong raw <-> raw2
 		var dst := raw2 if src == raw else raw
 		rd.compute_list_bind_compute_pipeline(cl, pl_filt2)
 		rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_filt2, 0, [

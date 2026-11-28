@@ -1,5 +1,5 @@
 #version 450
-// CORTAO main pass, Godot wrapper (see cortao_prepass.glsl). 16 samples, 16 rays, occluder lookup table; the bent normal is summed
+// CORTAO main pass, Godot wrapper (see cortao_prepass.glsl). CORTAO_SAMPLES samples, CORTAO_RAYS rays (16/32), occluder lookup table; the bent normal is summed
 // from the rays (no lookup table: Godot's RD has no typed texel buffer from script). Output: occlusion + view-space bent normal,
 // packSnorm4x8 into R32_UINT for the filter pass.
 #extension GL_EXT_control_flow_attributes : enable
@@ -7,7 +7,7 @@
 #define CORTAO_PERSPECTIVE_PROJECTION 1
 #define CORTAO_16_BIT 0
 #define CORTAO_SAMPLE_COUNT CORTAO_SAMPLES
-#define CORTAO_RAY_COUNT 16
+#define CORTAO_RAY_COUNT CORTAO_RAYS
 #define CORTAO_OCCLUDER_LOOKUP_TABLE 1
 #define CORTAO_BENT_NORMAL_LOOKUP_TABLE 0
 #include <CORTAOMainPass.h>
@@ -15,7 +15,7 @@
 layout(push_constant, std430) uniform CORTAOMainPassPushUniforms { CORTAOMainPassParameters parameters; };
 layout(set = 0, binding = 0) uniform usampler2D packedDataBuffer;      // NEAREST, clamp to border (int transparent black = sky)
 layout(set = 0, binding = 1) uniform sampler2D normalBuffer;            // the prepass's shape normal (n * 0.5 + 0.5)
-layout(set = 0, binding = 2) uniform usampler3D occluderLookupTable;   // NEAREST, clamp to edge
+layout(set = 0, binding = 2) uniform usampler3D occluderLookupTable;   // NEAREST, clamp to edge; R16_UINT (16 rays) / R32_UINT (32)
 layout(r32ui, set = 0, binding = 3) uniform restrict writeonly uimage2D outputBuffer;
 
 uint cortao_samplePackedData(vec2 texCoords, float mipmap) { return textureLod(packedDataBuffer, texCoords, mipmap).r; }
