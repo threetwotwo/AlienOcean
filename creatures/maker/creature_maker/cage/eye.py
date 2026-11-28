@@ -130,6 +130,7 @@ def build_patches(B):
     B.eye = dict(rims=rims, tucks=tucks, rings=all_rings)
 
 
+EYE_RULE = 0.8         # DEFAULT: visible eye radius / globe radius, the Species records' own eye rule (skeleton.eye._origin: "R = 0.8 orbitR")
 LENS_M = 2.55          # DEFAULT: Matthiessen's ratio, retina to lens centre = 2.55 lens radii (old Eyes work: EYELENSOPT, handover/eyes.md)
 WINDOW_GAP = 0.05      # DEFAULT (x eye radius): the cornea clears the lens front by this (old Eyes work: EYEWINDOME 0.05, the flat window)
 IRIS_SEAT = 0.10       # DEFAULT (x eye radius): the iris root lies this far under the rim (record eye.groove, the same furrow, where a record has it)
@@ -146,7 +147,9 @@ def optics(EY, r):
       through the pupil; the pupil (record pupil_ED) is wider than the lens: the dark gap round it is real (aphakic);
       the iris runs from under the rim onto the lens; the cornea is a flat window, as high as the globe's front or the
       lens front plus a gap, whichever is higher."""
-    Rg = max(EY['orbit'], 1.02 * r); ax = float(np.clip(EY['axial'], 0.55, 1.0)); af = Rg * (2 * ax - 1)
+    # the globe is at least the visible eye / EYE_RULE: on traced records the visible eye (measured on the photo) can be
+    # as large as the bony orbit (FishBase), and a globe no wider than its own window is a hemisphere: goggles
+    Rg = max(EY['orbit'], r / EYE_RULE); ax = float(np.clip(EY['axial'], 0.55, 1.0)); af = Rg * (2 * ax - 1)
     eq = -af * np.sqrt(1 - (r / Rg) ** 2)                                   # the globe's equator, under the rim plane
     rL = EY['lens_ED'] * Rg; zL = eq - Rg + LENS_M * rL                      # lens radius and centre
     rp = float(np.clip(EY['pupil_ED'] * Rg if EY.get('pupil') is None else EY['pupil'] * r, 1.02 * rL, 0.8 * r))
