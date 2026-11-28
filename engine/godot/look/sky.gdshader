@@ -75,7 +75,7 @@ float vnoise(vec3 p) {
 	return m;
 }
 // one moon's face (MOON_HLSL), or -1 outside its disc
-vec4 moon(vec3 v, vec3 c, float deg, float real_deg, float albedo, float kelvin, vec3 night_tint, vec3 s) {
+vec4 moon(vec3 v, vec3 c, float deg, float real_deg, float albedo, float kelvin, vec3 night_tint, vec3 s, float pix) {
 	float R = radians(deg * 0.5);
 	float a = acos(clamp(dot(v, c), -1.0, 1.0));
 	if (a > R) return vec4(0.0);
@@ -107,11 +107,47 @@ vec4 moon(vec3 v, vec3 c, float deg, float real_deg, float albedo, float kelvin,
 	col *= mix(vec3(1.0), sc * mix(LightTint, vec3(1.0), moon_blue) * mt, night);
 	float my0 = dot(col, LUM);
 	col = mix(col, vec3(my0), (1.0 - clamp(moon_sat, 0.0, 1.0)) * night);
-	float soft = clamp((1.0 - rr) / max(fwidth(rr) * moon_edge, 1e-5), 0.0, 1.0);
+	// pix: one pixel's angle on the sky, taken in sky() before any branch (was fwidth(rr) here, after the early return
+	// above: screen derivatives in a branch some pixels of the 2 x 2 quad skip are undefined, garbage on Metal at the rim)
+	float soft = clamp((1.0 - rr) / max(pix / sin(R) * moon_edge, 1e-5), 0.0, 1.0);
 	return vec4(col * exp(-EXT * airmass(max(c.y, 0.0))), soft);
 }
 void sky() {
 	vec3 v = EYEDIR;
+	// 0.9.x (horizon line thread, 28 Nov): the sky above the horizon is worked out for EVERY pixel, before the branch on
+	// v.y. It takes screen derivatives (the sun disc's edge, the stars, the planet, the moons' edges); inside the branch,
+	// the 2 x 2 pixel quads that straddle the horizon ran it on some lanes only, and a derivative there is undefined:
+	// Metal (Gary's Mac) returned garbage, the sun disc's edge test passed, and the full sun radiance lit a 1 px row
+	// along the horizon (the pink line in Gary's playtest; lavapipe in the cloud happened to give sane values). Keep
+	// every derivative in uniform control flow here.
+	float pix = max(length(dFdx(v)) + length(dFdy(v)), 1e-6);   // one pixel's angle on the sky (rad)
+	vec3 s = normalize(sun_dir);
+	vec3 air = sky_overcast_air(dome(v, normalize(dome_sun)) * sky_norm, v);
+	vec3 col = air;
+	// sun disc + corona (SUN_HLSL)
+	float th = acos(clamp(dot(v, s), -1.0, 1.0));
+	float R = radians(0.2665 * sun_size);
+	float px = max(fwidth(th), 1e-6);
+	vec3 T = exp(-EXT * airmass(max(v.y, 0.0)));
+	float x = th / R;
+	float inside = clamp((R - th) / px + 0.5, 0.0, 1.0);
+	float smu = sqrt(clamp(1.0 - x * x, 0.0, 1.0));
+	float disc = (1.0 - 0.6 * (1.0 - smu)) / (0.8 * PI * R * R);
+	vec3 t1 = normalize(abs(s.y) < 0.9 ? cross(s, vec3(0, 1, 0)) : cross(s, vec3(1, 0, 0)));
+	vec3 t2 = cross(s, t1);
+	float phi = atan(dot(v, t2), dot(v, t1));
+	float sr = max(x, 1.0);
+	float streak = 0.6 + 0.4 * pow(abs(cos(phi - 0.3)), 4.0) + 0.12 * sin(7.0 * phi + 1.3) + 0.08 * sin(13.0 * phi + 0.4) + 0.05 * sin(29.0 * phi + 2.1);
+	float cor = corona * 1e-6 / (6.2831853 * R * R) * pow(sr, -3.0) * max(streak, 0.2) * clamp((7.0 - sr) / 2.0, 0.0, 1.0);
+	vec4 ma = moon(v, normalize(moon_a_dir), moon_a_deg, 0.52, moon_a_albedo, moon_a_kelvin, moon_a_night, s, pix);
+	vec4 mb = moon(v, normalize(moon_b_dir), moon_b_deg, 0.43, moon_b_albedo, moon_b_kelvin, moon_b_night, s, pix);
+	float mask = (1.0 - ma.a) * (1.0 - mb.a);
+	// the sun disc behind the cloud: its beam share (WorldRoot sky_oc_beam, Kasten-Czeplak)
+	if (s.y > -0.02) col += sky_oc_beam * (inside * disc + cor * vec3(1.0, 0.97, 0.92)) * sun_toa * T * mask;
+	// B is nearer (18 km) than A (20 km): it covers A
+	col = mix(col, air + ma.rgb * sky_oc_beam, ma.a * (1.0 - mb.a));   // the air in front of a moon still glows
+	col = mix(col, air + mb.rgb * sky_oc_beam, mb.a);
+	if (!AT_CUBEMAP_PASS) col += sky_oc_beam * stars(v, POSITION, TIME, s, normalize(moon_a_dir), normalize(moon_b_dir));
 	if (AT_CUBEMAP_PASS && under_k > 0.5) { COLOR = v.y >= 0.0 ? under_down : under_up; }
 	else if (v.y < 0.0) {     // 28 Nov: was -0.02, so the dome's own below-horizon light showed as a dark line between the drawn sea (to 400 m) and the sky
 		// the far sea, past the camera's far plane (seen from height it is a wide band under the horizon: it read flat grey
@@ -143,36 +179,7 @@ void sky() {
 			COLOR = mix(COLOR, sky_overcast_air(dome(hz, normalize(dome_sun)) * sky_norm, hz), sea_horizon_melt * (1.0 - smoothstep(0.0, 0.012, -v.y)));
 		} else { COLOR = vec3(sea_nits); }
 	}
-	else {
-		vec3 s = normalize(sun_dir);
-		vec3 air = sky_overcast_air(dome(v, normalize(dome_sun)) * sky_norm, v);
-		vec3 col = air;
-		// sun disc + corona (SUN_HLSL)
-		float th = acos(clamp(dot(v, s), -1.0, 1.0));
-		float R = radians(0.2665 * sun_size);
-		float px = max(fwidth(th), 1e-6);
-		vec3 T = exp(-EXT * airmass(max(v.y, 0.0)));
-		float x = th / R;
-		float inside = clamp((R - th) / px + 0.5, 0.0, 1.0);
-		float mu = sqrt(clamp(1.0 - x * x, 0.0, 1.0));
-		float disc = (1.0 - 0.6 * (1.0 - mu)) / (0.8 * PI * R * R);
-		vec3 t1 = normalize(abs(s.y) < 0.9 ? cross(s, vec3(0, 1, 0)) : cross(s, vec3(1, 0, 0)));
-		vec3 t2 = cross(s, t1);
-		float phi = atan(dot(v, t2), dot(v, t1));
-		float r = max(x, 1.0);
-		float streak = 0.6 + 0.4 * pow(abs(cos(phi - 0.3)), 4.0) + 0.12 * sin(7.0 * phi + 1.3) + 0.08 * sin(13.0 * phi + 0.4) + 0.05 * sin(29.0 * phi + 2.1);
-		float cor = corona * 1e-6 / (6.2831853 * R * R) * pow(r, -3.0) * max(streak, 0.2) * clamp((7.0 - r) / 2.0, 0.0, 1.0);
-		vec4 ma = moon(v, normalize(moon_a_dir), moon_a_deg, 0.52, moon_a_albedo, moon_a_kelvin, moon_a_night, s);
-		vec4 mb = moon(v, normalize(moon_b_dir), moon_b_deg, 0.43, moon_b_albedo, moon_b_kelvin, moon_b_night, s);
-		float mask = (1.0 - ma.a) * (1.0 - mb.a);
-		// the sun disc behind the cloud: its beam share (WorldRoot sky_oc_beam, Kasten-Czeplak)
-		if (s.y > -0.02) col += sky_oc_beam * (inside * disc + cor * vec3(1.0, 0.97, 0.92)) * sun_toa * T * mask;
-		// B is nearer (18 km) than A (20 km): it covers A
-		col = mix(col, air + ma.rgb * sky_oc_beam, ma.a * (1.0 - mb.a));   // the air in front of a moon still glows
-		col = mix(col, air + mb.rgb * sky_oc_beam, mb.a);
-		if (!AT_CUBEMAP_PASS) col += sky_oc_beam * stars(v, POSITION, TIME, s, normalize(moon_a_dir), normalize(moon_b_dir));
-		COLOR = col;
-	}
+	else COLOR = col;
 	// stress-shot switch (look/hot_probe), off in play
 	if (hot_probe > 0.0 && !AT_CUBEMAP_PASS) COLOR = hot_probe_paint(COLOR * water_exposure, v.y < 0.0 ? vec3(0.0, 1.0, 1.0) : vec3(1.0, 1.0, 0.0)) / max(water_exposure, 1e-12);
 }
