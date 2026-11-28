@@ -99,6 +99,7 @@ func _setup():
 	if OS.get_environment("AO_AO") != "": wr.set_ao(OS.get_environment("AO_AO"))   # ssao (default) | cortao | off (ao thread 28 Nov)
 	if OS.get_environment("AO_CORTAO_R") != "": wr.cortao_fx.radius = float(OS.get_environment("AO_CORTAO_R"))
 	if OS.get_environment("AO_CORTAO_FN") != "": wr.cortao_fx.filter_normal = float(OS.get_environment("AO_CORTAO_FN"))   # filter normal sensitivity
+	if OS.get_environment("AO_CORTAO_LIGHT") == "1": wr.cortao_fx.light_weighted = true   # occlusion weighted by the water light per direction
 	if OS.get_environment("AO_CORTAO_PASSES") != "": wr.cortao_fx.filter_passes = int(OS.get_environment("AO_CORTAO_PASSES"))
 	if OS.get_environment("AO_AGX") == "0": wr.set_agx(false)   # Godot's built-in AgX, for before/after
 	if OS.get_environment("AO_AGX_MODE") != "": wr.agx_fx.mode = int(OS.get_environment("AO_AGX_MODE"))

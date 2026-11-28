@@ -10,5 +10,6 @@ rc=0
 $X "$G" --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- "$OUT" 2>&1 | grep -E "^(PASS|FAIL)|CORTAO_CHECK"
 $X "$G" --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- "$OUT" >/dev/null 2>&1 || rc=1
 if $X "$G" --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- "$OUT" --fault flip >/dev/null 2>&1; then echo "CORTAO PLANTED FAULT flip NOT CAUGHT"; rc=1; else echo "CORTAO planted fault flip caught"; fi
+if CORTAO_FAULT_COARSE=1 $X "$G" --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- "$OUT" --fault coarse >/dev/null 2>&1; then echo "CORTAO PLANTED FAULT coarse NOT CAUGHT"; rc=1; else echo "CORTAO planted fault coarse caught"; fi
 echo "== CORTAO result: $([ $rc = 0 ] && echo ALL GREEN || echo FAILURES)"
 exit $rc
