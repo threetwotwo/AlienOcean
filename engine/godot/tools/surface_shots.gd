@@ -3,7 +3,7 @@
 ## ceiling at the level; from above: low over the water toward the sun and away, and high over it (tile check).
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/surface_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
 ## Env as lagoon_shots, plus AO_TIDE=1 (let the tide move the level; default pinned at the mean so frames compare),
-## AO_SEA=B0..B12 (the open sea at that Beaufort force, no floor: shots o1-o5 over the crests and under the troughs), AO_DRESS (lagoon_shots': adds s8_arch_mirror, the key frame's arch in the ceiling), AO_SEA_T (the waves' clock, s; default 37.0, held), AO_HOUR_THEN (the clock jumps there just before each shot, the eye still), AO_FILM=<frames> (videos: the waves run, frames to <out>/<shot>/, use --fixed-fps 30), AO_SURF_SHOTS (two-character prefixes, e.g. s1,s4; AO_SHOTS
+## AO_ISLAND=<dir> (the eroded atoll, world/erosion/handover/godot: edges E S W N x views a s e w u v, blue hole Ha Hu), AO_REEF=1 (the reef drop-off's stress-test matrix: per sector views a s e w d u v (+p in the pass), AO_REEF_SECTORS=0,2 picks sectors; with AO_SEA=Bn that sea over it), AO_SEA=B0..B12 (the open sea at that Beaufort force, no floor: shots o1-o5 over the crests and under the troughs), AO_DRESS (lagoon_shots': adds s8_arch_mirror, the key frame's arch in the ceiling), AO_SEA_T (the waves' clock, s; default 37.0, held), AO_HOUR_THEN (the clock jumps there just before each shot, the eye still), AO_FILM=<frames> (videos: the waves run, frames to <out>/<shot>/, use --fixed-fps 30), AO_SURF_SHOTS (two-character prefixes, e.g. s1,s4; AO_SHOTS
 ## filters lagoon_shots' own list and must stay unset here).
 extends "res://tools/lagoon_shots.gd"
 
@@ -36,7 +36,74 @@ func _setup():
 			shots.append(["s8_arch_mirror", e, e + f.normalized() * 10.0 + Vector3(0, tan(deg_to_rad(22.0)) * 10.0, 0), 70.0])
 			break
 	var sea_env := OS.get_environment("AO_SEA")      # the stress test: lagoon (default) or B0 .. B12 (the open sea at that force)
-	if sea and sea_env.begins_with("B"):
+	if OS.get_environment("AO_ISLAND") != "":       # the eroded atoll (adapters/godot/island_terrain.gd): the real-ground case
+		var isl := IslandTerrain.new(); isl.name = "Island"; root.add_child(isl)
+		if not isl.load_grids(OS.get_environment("AO_ISLAND")): push_error("AO_ISLAND: no grids")
+		isl.build(y)
+		wr.lagoon_radius = 1.0                         # past what is drawn: the deep (the island and its flank are drawn to 1.6 km)
+		wr.cam_attr.frustum_far = 2400.0              # so the far platform is drawn, not guessed
+		if sea and sea_env.begins_with("B"):
+			sea.set_params(SeaSpectrum.beaufort(int(sea_env.substr(1))))
+			sea.hold = false; sea.preroll(20.0); sea.hold = true; sea.step_now()
+		var D := func(q: Vector2) -> float: return -isl.height(q.x - isl.origin.x, q.y - isl.origin.y)
+		# edges: [letter, a point on the platform (Godot x z), outward]; the crest = where the floor passes 6 m going out
+		var edges := [["E", Vector2(120.0, -100.0), Vector2(1, 0)], ["S", Vector2(-75.0, 90.0), Vector2(0, 1)],
+			["W", Vector2(-200.0, -100.0), Vector2(-1, 0)], ["N", Vector2(150.0, -330.0), Vector2(0.7071, -0.7071)]]
+		shots = []
+		for e in edges:
+			var o: Vector2 = e[2]; var c: Vector2 = e[1]
+			while D.call(c) < 6.0 and (c - e[1]).length() < 400.0: c += o
+			var out := Vector3(o.x, 0.0, o.y)
+			var C := Vector3(c.x, y, c.y)
+			var L: String = e[0]
+			print("ISLAND EDGE ", L, " crest at ", c, " depth 30 m out ", D.call(c + o * 30.0))
+			shots.append([L + "a_island_aerial", C - out * 70.0 + Vector3(0, 45, 0), C + out * 20.0, 60.0])
+			shots.append([L + "s_island_surface", C - out * 15.0 + Vector3(0, 1.5, 0), C + out * 200.0 - Vector3(0, 6, 0), 70.0])
+			shots.append([L + "e_island_edge", C + out * 1.0 - Vector3(0, 1, 0), C + out * 11.0 - Vector3(0, 1.0 + tan(deg_to_rad(20.0)) * 10.0, 0), 75.0])
+			shots.append([L + "w_island_wall10", C + out * 35.0 - Vector3(0, 10, 0), C - Vector3(0, 12, 0), 70.0])
+			shots.append([L + "u_island_up50", C + out * 100.0 - Vector3(0, 50, 0), C - out * 10.0, 75.0])
+			shots.append([L + "v_island_down", C + out * 2.0 - Vector3(0, 5, 0), C + out * 8.0 - Vector3(0, 15, 0), 75.0])
+		var bh := Vector3(35.0, y, -190.0)               # the blue hole on the platform
+		shots.append(["Ha_island_bluehole_aerial", bh + Vector3(0, 40, 50), bh, 60.0])
+		shots.append(["Hu_island_bluehole_rim", bh + Vector3(0, -2.0, 30.0), bh + Vector3(0, -9.0, 0.0), 75.0])
+		print("ISLAND SHOTS ", shots.size())
+	elif OS.get_environment("AO_REEF") != "":         # the reef drop-off (adapters/godot/reef_terrain.gd): the stress-test matrix
+		# sector 0 (the vertical wall) faces away from the sun; the others follow round the ring (Bathymetry.SECTOR_NAMES)
+		wr.reef_sector_deg = rad_to_deg(atan2(away.z, away.x))
+		var bt: Bathymetry = wr.bathymetry()
+		var reef := ReefTerrain.new(); reef.name = "Reef"; root.add_child(reef); reef.build(bt, y)
+		if sea and sea_env.begins_with("B"):         # a stronger sea over the reef (the floor stays)
+			sea.set_params(SeaSpectrum.beaufort(int(sea_env.substr(1))))
+			sea.hold = false; sea.preroll(20.0); sea.hold = true; sea.step_now()
+			print("SEA ", sea_env, " over the reef")
+		# per sector k, views named "<k><v>_<sector>_<view>" (AO_SURF_SHOTS keeps two-character prefixes, e.g. 0a,2u):
+		#   a aerial 45 m up over the back reef     s at the surface, 1.5 m up, out over the edge
+		#   e just under at the crest, over the edge   w 10 m down, 25 m out, back at the wall
+		#   d 30 m down, 45 m out, back up the wall    u 60 m down over the slope, up at the reef and the window
+		#   v 5 m down above the wall, 60 deg down it  p (sector 4) in the pass, 3 m down, out through it
+		var ks := OS.get_environment("AO_REEF_SECTORS").split(",") if OS.get_environment("AO_REEF_SECTORS") != "" else PackedStringArray(["0", "1", "2", "3", "4"])
+		shots = []
+		for kk in ks:
+			var k := int(kk)
+			var th := bt.sector_mid(k)
+			var wm := bt.wall_m(th)
+			var cr := Bathymetry.FLAT_M + Bathymetry.SPUR_OUT * 0.5   # the crest, past the reef flat's inner edge
+			var P := func(sx: float, h: float) -> Vector3: var q: Vector2 = bt.at(th, sx); return Vector3(q.x, h, q.y)
+			var out := Vector3(cos(th), 0.0, sin(th))
+			var nm: String = Bathymetry.SECTOR_NAMES[k].replace(" ", "_").replace("+", "").replace("__", "_")
+			var wall_x := cr + wm * 0.5                               # the middle of the wall (m past the reef edge)
+			var Dw := func(h: float) -> float: return y - h
+			shots.append(["%da_%s_aerial" % [k, nm], P.call(-70.0, y + 45.0), P.call(cr + 20.0, y), 60.0])
+			shots.append(["%ds_%s_surface" % [k, nm], P.call(cr - 15.0, y + 1.5), P.call(cr + 200.0, y - 6.0), 70.0])
+			shots.append(["%de_%s_edge" % [k, nm], P.call(cr + 1.0, y - 1.0), P.call(cr + 1.0, y - 1.0) + (out + Vector3(0, -tan(deg_to_rad(20.0)), 0)) * 10.0, 75.0])
+			shots.append(["%dw_%s_wall10" % [k, nm], P.call(wall_x + 25.0, Dw.call(10.0)), P.call(wall_x, Dw.call(12.0)), 70.0])
+			shots.append(["%dd_%s_wall30" % [k, nm], P.call(wall_x + 45.0, Dw.call(30.0)), P.call(wall_x, Dw.call(14.0)), 70.0])
+			shots.append(["%du_%s_up60" % [k, nm], P.call(wall_x + 120.0, Dw.call(60.0)), P.call(cr - 10.0, y), 75.0])
+			shots.append(["%dv_%s_down" % [k, nm], P.call(cr + 2.0, Dw.call(5.0)), P.call(cr + 2.0, Dw.call(5.0)) + (out * 0.6 + Vector3(0, -1.0, 0)) * 10.0, 75.0])
+			if k == Bathymetry.PASS_SECTOR:
+				shots.append(["%dp_%s_pass" % [k, nm], P.call(cr - 20.0, Dw.call(3.0)), P.call(cr + 40.0, Dw.call(9.0)), 75.0])
+		print("REEF SHOTS ", shots.size())
+	elif sea and sea_env.begins_with("B"):
 		var force := int(sea_env.substr(1))
 		sea.set_params(SeaSpectrum.beaufort(force))
 		var pre := float(OS.get_environment("AO_PREROLL")) if OS.get_environment("AO_PREROLL") != "" else 20.0
@@ -54,6 +121,7 @@ func _setup():
 			["o5_under_window", Vector3(0, dn, 0), Vector3(0, dn, 0) + Vector3(0.05, 10.0, -0.3), 90.0],
 		]
 		print("SEA ", sea_env, " ", SeaSpectrum.BEAUFORT[force][2], " Hs ", hs)
+	if OS.get_environment("AO_FAR") != "": wr.cam_attr.frustum_far = float(OS.get_environment("AO_FAR"))   # check: the far plane (m)
 	if OS.get_environment("AO_SURF_SHOTS") != "":
 		var keep := OS.get_environment("AO_SURF_SHOTS").split(",")
 		shots = shots.filter(func(sh): return sh[0].substr(0, 2) in keep)
