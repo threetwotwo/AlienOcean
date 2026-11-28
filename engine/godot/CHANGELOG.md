@@ -1,5 +1,20 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, blockout kit): one grey test kit, grey mode in any level, the blockout gym
+- Gary 28 Nov 06:50Z: blockouts are the standard for testing and fast iteration. blockout/blockout_kit.gd 0.1.0 is the one kit
+  (24 kinds in metres: steps, stairs, ramps, slope across, ledge, drop, gaps, beams, grown rough field, walls, corner, low
+  ceiling, mantle, ceiling slab, tubes, pools incl. 2.4 m lagoon depth, shore, stool, bench, bunk, ride, senses). Each kind
+  returns its water env, named marker frames (-Z = facing), points of interest and the rider. tests/harness/test_worlds.gd is
+  now a shim over it (same kinds and params), so the motor, camera and body stress tests run in the kit unchanged.
+- blockout/blockout_rider.gd: a 2.5 m creature stand-in on a scripted loop (straight + dive, banked turn, straight + climb),
+  pose a pure function of time; saddle, hand and foot frames, velocity. blockout/blockout_poi.gd: fixed, circling, behind, sound.
+- Grey mode (blockout/grey_mode.gd, F7 in the game via GameRoot, AO_GREY=1): flat grey with a metre grid on every level mesh,
+  collision untouched (checked shape by shape), particles hidden, originals restored.
+- Blockout gym (blockout/blockout_gym.gd, AO_BLOCKOUT=1 or run_blockout.command; F6 next station): every station in one world,
+  the blockout stress scene. tests/test_blockout.gd measures every kind with physics rays, checks the rider, senses and grey
+  mode, and runs motor cases inside the gym: 72/72 at 30/60/120 fps and at a 30/120 Hz tick, rates agree to 0.0 cm, planted
+  faults (seats 5 cm low, grey mode dropping collision) caught (tests/run_blockout.sh, in run_all.sh).
+
 ## 0.6.0-dev (28 Nov 2026, lagoon dressing): lighter coral rubble
 - Test level thread: kf_coral_rubble was 462k tris, 94 MB (flat-shaded, unshared verts) with a full-detail concave copy as its
   collider (the second mesh seen on the Mac). Now one drawn mesh decimated to 80k tris (RUBBLE_TRIS), smooth by angle 40 deg so
