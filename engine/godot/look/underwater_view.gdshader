@@ -18,12 +18,13 @@ global uniform sampler2D water_floor_height : filter_linear;   // adapters/godot
 global uniform vec4 water_floor_org;                           // centre x, centre z, size m, 1 = valid
 uniform float max_path = 400.0;
 uniform float god_k = 1.0;      // Unreal GodK: 1 = the god rays, 0 = off (WorldRoot.god_rays); 2 = show the sum, 0.5 + 0.25 x metres (checks)
+uniform float eye_wave = 0.0;  // the wave's height over the still level at the eye (m, WorldRoot.set_eye_wave): under or not by the wave, not the still level
 uniform float god_frame = 0.0;  // the frame count mod 8 when TAA averages the jitter, else 0 (WorldRoot)
 
 void vertex() { POSITION = vec4(VERTEX.xy * 2.0, 1.0, 1.0); }
 
 void fragment() {
-	vec3 cam = (INV_VIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+	vec3 cam = (INV_VIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz - vec3(0.0, eye_wave, 0.0);   // the eye's height over the wave above or below it, as if the sea were still there
 	vec3 scene = textureLod(screen_tex, SCREEN_UV, 0.0).rgb;
 	if (cam.y >= water_y) { ALBEDO = scene; }
 	else {

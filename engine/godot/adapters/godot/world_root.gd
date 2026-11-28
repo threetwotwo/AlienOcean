@@ -231,6 +231,10 @@ func _process(_dt: float) -> void:
 	var vp := get_viewport()
 	under_mat.set_shader_parameter("god_frame", float(Engine.get_frames_drawn() % 8) if vp and temporal(vp) else 0.0)
 
+func set_eye_wave(h: float) -> void:
+	## the wave's height over the still level at the eye (m): the under-water view treats the surface as there (GameRoot)
+	if under_mat: under_mat.set_shader_parameter("eye_wave", h)
+
 static func temporal(vp: Viewport) -> bool:
 	## frames are averaged on this viewport (TAA, FSR 2 or MetalFX temporal), so per-frame noise may move on each frame
 	var m := vp.scaling_3d_mode
