@@ -293,6 +293,25 @@ func _make_teleports() -> void:
 		{"name": "Snell's window (30 cm under)", "feet": Vector3(24.0, surf - 1.6, 30.0), "yaw": 0.0, "swim": true},
 		{"name": "Reef edge", "feet": kf.call([6.0, 18.0], 2.5), "yaw": 0.6, "swim": true},
 	]
+	_add_reef_teleports(surf)
+
+## The reef drop-off's stress sectors (core/world/bathymetry.gd, water surface thread's spots): per sector one view from the crest
+## out over the drop, and one hanging in the water at 10 m facing the wall; plus the sand pass at 3 m. Only with the reef drawn.
+func _add_reef_teleports(surf: float) -> void:
+	if not game.reef_on or game.world_root.lagoon_radius <= 0.0 or game.pieces_dir == "": return
+	var b: Bathymetry = game.world_root.bathymetry()
+	var face := func(d: Vector2) -> float: return atan2(-d.x, -d.y)   # yaw that looks along d (forward = (-sin yaw, -cos yaw))
+	for k in Bathymetry.SECTOR_WALL_M.size():
+		var th := b.sector_mid(k)
+		var out := Vector2(cos(th), sin(th))
+		var nm: String = Bathymetry.SECTOR_NAMES[k]
+		var c := b.at(th, 27.0)                                        # just past the crest, over the reef flat (1.2 m deep)
+		teleports.append({"name": "Reef %d %s: crest" % [k, nm], "feet": Vector3(c.x, surf - 0.7, c.y), "yaw": face.call(out), "swim": true})
+		var w := b.at(th, 27.0 + b.wall_m(th) * 0.5 + 25.0)           # off the wall, in open water
+		teleports.append({"name": "Reef %d %s: wall at 10 m" % [k, nm], "feet": Vector3(w.x, surf - 10.0, w.y), "yaw": face.call(-out), "swim": true})
+	var tp := b.sector_mid(Bathymetry.PASS_SECTOR)
+	var p := b.at(tp, 7.0)
+	teleports.append({"name": "Reef pass at 3 m", "feet": Vector3(p.x, surf - 3.0, p.y), "yaw": face.call(Vector2(cos(tp), sin(tp))), "swim": true})
 
 ## Move the girl and the camera to a teleport (no swoop: the camera's springs start fresh there).
 func teleport(i: int) -> void:
