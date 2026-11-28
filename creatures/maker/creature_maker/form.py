@@ -23,6 +23,20 @@ JAW_MIN = 0.003    # DEFAULT: least thickness of each jaw at the mouth line (SL)
 JAW_K = 0.002      # DEFAULT: the outline is carried round the mouth line over this height (SL), no crease
 HW_MIN = 0.002    # DEFAULT: least half-width of a cross-section (SL). A traced top view can close to a point at the snout
                   # while the side view still has height there; a zero width is a section with no inside (the loft divided by it)
+# ---- the eye's aim and the tissue round it. Source for the scan numbers: the Species thread's 79 CC0 photogrammetry scans
+# (plans/species_system/gapfill/README.md "Eye aim, round 1"; eye_aim_r1/gaze_report.json meta, skin_targets.json meta).
+RING_R = (1.6, 2.4)          # DEFAULT: the skin ring round the eye (x eye radius) whose best plane is "the skin's facing" (the scans' ring, eyedir.py)
+AIM_BELOW_SKIN = 7.5         # DEFAULT (deg): the eye disc aims this far below the skin ring's plane (scan median, n 48)
+AIM_UP = (-6.0, 12.0)        # DEFAULT (deg above horizontal): the range real eye discs keep to: scan median 2, spread 8-10 (regression error 10.7,
+                             # "noise 10-17 on dead scans"); the skin follows the head's shape, the globe sits in the skull and stays near level
+AIM_FWD = (4.0, 26.0)        # DEFAULT (deg toward the snout): scan median 14.3, IQR 10.2-19.6, error 7.8 -> median +- 1.5 errors
+TISSUE_REACH = 3.0           # DEFAULT (x eye radius): where the tissue has run out into the loft below the eye. It covers the scans' ring (to 2.4 R);
+                             # HP-HEAD-ORBIT-1 found the built skin low at 1.6 and 2.0 R, and the scan skin profile (levels_r1) is read to 2.0 R
+ORBIT_SWELL = 2.0            # DEFAULT: half-length of the dorsal outline's swell over an eye that stands above it, x the eye's radius + margin
+ROOF_N = 6.0                 # DEFAULT: the boxiest section the tissue may make (superellipse exponent). Art direction: the scans' own roofs are
+                             # rounder (gapfill orbit_r1 skeleton.skull.roof_exp 1.25-2.4), a wide forehead is Gary's ask (28 Nov)
+TISSUE_K = 0.04              # DEFAULT: the tissue meets the loft over 4 % of the local half-width, no crease
+LOFT_ITERS = 12      # DEFAULT: false-position steps of loft_point through the tissue; against 40 bisections on the 28 traced fish the worst difference is 4e-7 SL
 PLATE_CHAMFER = 0.004   # DEFAULT: the edge of a plate drawn from below rises to full thickness over two cells of the dense form (0.2 % SL each)
 
 
@@ -80,9 +94,11 @@ class Form:
         # structure rule: the orbit shapes the head profile. Where the record's eye (plus a skin margin for the eye loops)
         # rises above the dorsal outline, the outline is lifted over it (ceiling frame: the alfonsino eye bulges the profile).
         self._CLR = 0.15 * EY['d'] / 2
-        _xs = np.linspace(0, self.XEND, 400); self.ORBIT_LIFT = float(np.max(self._top_orbit(_xs) - self._TOP0(_xs)))
+        _xs = np.linspace(0, self.XEND, 2000); self._swell = None; _l = self._top_orbit(_xs) - self._TOP0(_xs)
+        self.ORBIT_LIFT = float(np.max(_l)); self._swell = (float(_xs[int(np.argmax(_l))]), self.ORBIT_LIFT) if self.ORBIT_LIFT > 1e-5 else None
         _xm = np.linspace(0, self._seam[-1, 0], 60)
         self.JAW_LIFT = float(max(np.max(self.TOP(_xm) - self._top_orbit(_xm)), np.max(self._BOT0(_xm) - self.BOT(_xm))))
+        self._orb = None; self.ORBIT = self._orbit()
         # bone plates: (name, outline, thickness, free (stepped) edge curve or None, buried-side fade width, provenance)
         self.rear, self.preop = smooth_curve(CV['rear']), smooth_curve(CV['preop'])
         self.ring_x = float(np.mean([p[0] for p in smooth_curve(CV['edge_all'])]))      # where the slit's ring goes (see record.py)
@@ -152,9 +168,20 @@ class Form:
 
     # ---- level 0: the loft
     def _top_orbit(self, x):
-        E = self.EY; t0 = self._TOP0(x); rr = E["d"] / 2 + self._CLR; w = rr
-        bump = E['y'] + rr * np.sqrt(np.clip(1 - ((np.asarray(x) - E['x']) / w) ** 2, 0, 1)) - (np.abs(np.asarray(x) - E['x']) >= w) * 1.0
-        return smax(t0, bump, 0.004)
+        """the dorsal outline lifted over the orbit. Where the eye's circle (plus its skin margin) stands above the record
+        outline, the outline clears it, and the lift is carried on as a swell ORBIT_SWELL times as long, as high as the
+        circle stands out and no higher: with the skull roof at the eyes' width (_tissue) a lift as short as the eye,
+        ending square on the outline, stood across the forehead as a bar from eye to eye. An eye under the outline lifts
+        nothing. Toward the snout the swell runs no further than the rictus where the mouth lies under the eye (porcupinefish,
+        blenny: an eye that reaches the snout; a swell over the lips thickened the upper jaw into the mouth cavity)."""
+        E = self.EY; x = np.asarray(x, float); t0 = self._TOP0(x); rr = E["d"] / 2 + self._CLR; dx = x - E['x']
+        bump = E['y'] + rr * np.sqrt(np.clip(1 - (dx / rr) ** 2, 0, 1)) - (np.abs(dx) >= rr) * 1.0
+        lift = smax(t0, bump, 0.004) - t0
+        if self._swell is None: return t0 + lift
+        xp, L = self._swell; d2 = x - xp
+        w = np.where(d2 < 0, np.clip(xp - self._seam[-1, 0], 0.25 * rr, rr * ORBIT_SWELL), rr * ORBIT_SWELL)
+        bell = L * np.clip(1 - (d2 / w) ** 2, 0, 1) ** 2
+        return t0 + smax(lift, bell, 0.2 * L)
 
     def _seam_y(self, x):
         """mouth line height at x, and whether x lies in the mouth (in front of the rictus)."""
@@ -193,6 +220,14 @@ class Form:
 
     def rnorm(self, x, u, v, n=None):
         """how far (u, v) = (dy / a, dz / b) lies out from the section centre, in units of the boundary (1 = on the skin)."""
+        return self._rnorm0(x, u, v / self._tissue(x, u), n)
+
+    def wnorm(self, x, s):
+        """half-width (0..1 of the record half-width) of the section at normalised height s."""
+        return self._wnorm0(x, s) * self._tissue(x, s)
+
+    def _rnorm0(self, x, u, v, n=None):
+        """rnorm of the bare loft (record sections only, no tissue round the eye)."""
         if self.SECT is None:
             n = np.where(u > 0, self.NUP(x), self.NLO(x)) if n is None else n
             return (np.abs(u) ** n + np.abs(v) ** n) ** (1 / n)
@@ -201,8 +236,8 @@ class Form:
         rb = np.take_along_axis(R, i[..., None], -1)[..., 0] * (1 - f) + np.take_along_axis(R, (i + 1)[..., None], -1)[..., 0] * f
         return np.hypot(u, v) / np.maximum(rb, 1e-9)
 
-    def wnorm(self, x, s):
-        """half-width (0..1 of the record half-width) of the section at normalised height s."""
+    def _wnorm0(self, x, s):
+        """wnorm of the bare loft."""
         if self.SECT is None:
             nn = np.where(s > 0, self.NUP(x), self.NLO(x))
             return np.maximum(1 - np.minimum(np.abs(s), 1) ** nn, 1e-6) ** (1 / nn)
@@ -218,8 +253,38 @@ class Form:
     def loft_point(self, x, th):
         """exact point of the record loft at body coords (x, theta)."""
         c, a, b = self.sec(x); dy, dz = np.cos(th), np.sin(th)
-        rho = 1 / self.rnorm(x, dy / a, dz / b)
+        rho = 1 / self._rnorm0(x, dy / a, dz / b)
+        if self._orb is not None:
+            # the tissue round the eye widens the section by a factor that changes with height, so the skin along a ray
+            # from the section centre is found by bisection, between the bare loft less the furrow and the section's own
+            # limits (the outline's height, the half-width plus the bulge)
+            x_, rho = np.broadcast_arrays(np.asarray(x, float), rho); rho = rho.copy()
+            m = (x_ > self.ex - self._orb['front']) & (x_ < self.ex + self._orb['back'])
+            if m.any():
+                bc = lambda v: np.broadcast_to(v, x_.shape)[m]
+                xm, u, v, bm = x_[m], bc(dy / a), bc(dz / b), bc(b)
+                lo = 0.8 * rho[m]; hi = np.minimum(1 / np.maximum(np.abs(u), 1e-9), (1 + self._orb['past'] / bm) / np.maximum(np.abs(v), 1e-9))
+                hi = np.maximum(hi, lo)
+                rho[m] = self._ray_root(lambda t: t * self._rnorm0(xm, u, v / self._tissue(xm, t * u)) - 1, lo, hi)
         return np.stack([x, c + rho * dy, rho * dz], -1)
+
+    @staticmethod
+    def _ray_root(f, lo, hi, n=LOFT_ITERS):
+        """root of f (negative inside the skin, positive outside) between lo and hi: false position with the Illinois
+        halving, which lands within 1e-6 of the bracket in LOFT_ITERS steps where plain bisection took 26 (the cage
+        build asks for some thousands of single points, and the 26 steps were most of its time)."""
+        flo, fhi = f(lo), f(hi); side = np.zeros(np.shape(lo), int)
+        # no crossing inside the bracket: the skin is at the end bisection would have run to
+        lo, hi = np.where(fhi <= 0, hi, lo), np.where(flo >= 0, lo, hi); t = 0.5 * (lo + hi)
+        for _ in range(n):
+            d = fhi - flo; ok = (flo < 0) & (fhi > 0) & (np.abs(d) > 1e-15)
+            t = np.where(ok, (lo * fhi - hi * flo) / np.where(ok, d, 1), 0.5 * (lo + hi))
+            ft = f(t); out = ft > 0
+            # Illinois: an end that stays twice running is halved in weight, so neither end can stall
+            flo, fhi = np.where(out, np.where(side == 1, 0.5 * flo, flo), ft), np.where(out, ft, np.where(side == -1, 0.5 * fhi, fhi))
+            lo, hi, side = np.where(out, lo, t), np.where(out, t, hi), np.where(out, 1, -1)
+            hit = np.abs(ft) < 1e-12; lo, hi = np.where(hit, t, lo), np.where(hit, t, hi)   # found: stay there
+        return t
 
     def theta_of(self, x, y, z):
         c, a, b = self.sec(x); return np.arctan2(z, y - c) % (2 * np.pi)
@@ -256,6 +321,108 @@ class Form:
         s2 = q / np.maximum(r2, 1e-6)
         d = d / np.sqrt(1 + ((s2 - s) / h) ** 2)
         return np.maximum(d, np.maximum(-x, x - XEND))
+
+    # ---- the orbit: the eye's aim, and the tissue that carries the skin out to it.
+    # Structure rule: the globe sits in the skull, so its aim is its own and not the skin's. Real eye discs aim 7.5 deg below
+    # the skin round them and stay near level (AIM_UP, AIM_FWD), while the skin's facing follows the head. Taking the aim
+    # from the eye rim's plane on the loft (0.5.x) pointed every eye up, most on round heads with high eyes, where a
+    # loft section falls away above the eye: the head had no volume round the eye (HP-HEAD-ORBIT-1, Gary 28 Nov).
+    # So the eye's plane is set first, square to the aim and never under the loft at the rim; periorbital tissue then carries
+    # the skin from that plane out into the loft (brow, snout side), and above the brow the section keeps its own shape,
+    # scaled out to meet it (the roof over the orbit). The tissue only widens sections, in z, and never past the record
+    # half-width, so the side and top outlines stay the record's.
+    def skin_ring(self, r=RING_R):
+        """best plane of the skin ring round the left eye, as the scans measure it: (degrees above horizontal, degrees
+        toward the snout, unit normal, eye height in the local body depth)."""
+        ex, eyy, er = self.ex, self.eyy, self.er
+        ph = np.linspace(0, 2 * np.pi, 90, endpoint=False); pts = []
+        for rr in np.linspace(r[0], r[1], 5) * er:
+            qx, qy = ex + rr * np.cos(ph), eyy + rr * np.sin(ph)
+            ok = (qy < self.TOP(qx)) & (qy > self.BOT(qx)) & (qx > 0) & (qx < self.XEND)
+            pts.append(np.stack([qx[ok], qy[ok], self.z_on(qx[ok], qy[ok])], -1))
+        P = np.vstack(pts); n = np.linalg.svd(P - P.mean(0))[2][2]; n = n if n[2] > 0 else -n
+        h = (eyy - float(self.BOT(ex))) / (float(self.TOP(ex)) - float(self.BOT(ex)))
+        return float(np.degrees(np.arcsin(n[1]))), float(np.degrees(np.arctan2(-n[0], n[2]))), n, float(h)
+
+    def _orbit(self):
+        """sets the eye's aim and the tissue round it (self._orb); returns the numbers for the build report."""
+        EY, er = self.EY, self.er
+        up0, fwd0, _, h = self.skin_ring()                                          # the bare loft's skin ring
+        a = EY.get('aim') or {}
+        up = a['up'] if a.get('up') is not None else float(np.clip(up0 - AIM_BELOW_SKIN, *AIM_UP))
+        fwd = a['fwd'] if a.get('fwd') is not None else float(np.clip(fwd0, *AIM_FWD))
+        ph = np.linspace(0, 2 * np.pi, 360, endpoint=False); qx, qy = self.ex + er * np.cos(ph), self.eyy + er * np.sin(ph)
+        z0 = self.z_on(qx, qy); past = EY['bulge'] * er                             # the bulge may show in the top view, no more
+        sink = EY['groove'] * er                                                    # the eye's edge may lie this far under the skin: the furrow
+
+        def plane(up_, fwd_):
+            cu, su, cf, sf = np.cos(np.radians(up_)), np.sin(np.radians(up_)), np.cos(np.radians(fwd_)), np.sin(np.radians(fwd_))
+            n = np.array([-sf * cu, su, cf * cu]); t = (n[0] * (qx - self.ex) + n[1] * (qy - self.eyy)) / n[2]
+            # the plane touches the loft at the rim's outermost point and stands proud of it by the periorbital bulge
+            return n, t, float(np.max(z0 + t)), float(np.min(self.HW(qx) + past + t))
+        n, t, touch, room = plane(up, fwd); lam = 0.0
+        if room + sink < touch:
+            # the eye's plane cannot lie inside the record's top view at this aim (an eye on the round of a blunt snout):
+            # a small misfit is the furrow round the eye; past that the top view is measured and the aim is a rule, so the aim
+            # gives way toward the skin's own facing
+            lo, hi = 0.0, 1.0
+            for _ in range(12):
+                lam = 0.5 * (lo + hi); n, t, touch, room = plane(up + lam * (up0 - up), fwd + lam * (fwd0 - fwd))
+                lo, hi = (lo, lam) if room + sink >= touch else (lam, hi)
+            lam = hi; up, fwd = up + lam * (up0 - up), fwd + lam * (fwd0 - fwd); n, t, touch, room = plane(up, fwd)
+        zd = min(touch + past / n[2], max(room, touch - sink))
+        # the skull roof runs from the snout tip to the head's end (the gill cover's rear edge), never less than the tissue's reach
+        back = max(max(p[0] for p in self.CV['rear']) - self.ex, TISSUE_REACH * er); front = max(self.ex, TISSUE_REACH * er)
+        self._orb = dict(n=n, zd=zd, y_brow=self.eyy + er * (1 + EY['over']), past=past, front=front, back=back)
+        up1, fwd1, _, _ = self.skin_ring(); rim = self.z_on(qx, qy)
+        return dict(aim_up_deg=round(up, 1), aim_fwd_deg=round(fwd, 1), bare_skin_up_deg=round(up0, 1), bare_skin_fwd_deg=round(fwd0, 1),
+                    skin_up_deg=round(up1, 1), skin_fwd_deg=round(fwd1, 1), eye_height=round(h, 3),
+                    tissue_max_R=round(float((rim - z0).max()) / er, 2), aim_gave_way=round(lam, 2),
+                    rim_off_plane_R=round(float(np.abs(rim - (zd - t)).max()) / er, 3),
+                    aim_source=EY.get('aim_source', 'skin ring - AIM_BELOW_SKIN, kept in AIM_UP / AIM_FWD (DEFAULT)'))
+
+    def eye_axis(self, sg=1):
+        """unit aim of the eye on side sg (+1 left)."""
+        n = self._orb['n']; return np.array([n[0], n[1], sg * n[2]])
+
+    def _tissue(self, x, u):
+        """how far the tissue round the eye widens the section at (x, u = normalised height): 1 = the bare loft.
+        Inside the eye's own box (its length, from its lower edge to the brow) the skin lies on the eye's plane. Outside it
+        the section keeps its own shape, widened as at the nearest point of the box at the same depth under the dorsal
+        outline: over the eye that is the skull roof, which runs on at that width behind the eye to the head's end and
+        ahead of it to the snout tip, fading out; below the eye it has run out TISSUE_REACH eye radii down. A tissue that
+        ran out the same distance all round stood on the head as a bar from eye to eye (round 1 of this fix)."""
+        O = self._orb
+        if O is None: return 1.0
+        # beyond the outline's height the widening is that of the outline's edge, so the distance field stays whole over a
+        # wide roof (cut off there, a point a hair over the roof read as far outside a section with no width)
+        x, u = np.broadcast_arrays(np.asarray(x, float), np.clip(np.asarray(u, float), -0.999, 0.999)); k = np.ones(x.shape)
+        er, ex, eyy = self.er, self.ex, self.eyy
+        m = (x > ex - O['front']) & (x < ex + O['back'])
+        if not m.any(): return k
+        xm = x[m]; c, a, b = self.sec(xm); y = c + a * u[m]; n = O['n']
+        xc = np.clip(xm, ex - er, ex + er); cc, ac, bc = self.sec(xc)
+        # the brow stands record eye.over above the eye where the head has the room, and leaves the roof the skin margin
+        # the outline keeps over the eye
+        yc = np.clip(y - (c + a) + (cc + ac), eyy - er, np.minimum(O['y_brow'], cc + ac - self._CLR))
+        K = (O['zd'] - (n[0] * (xc - ex) + n[1] * (yc - eyy)) / n[2]) / (bc * self._wnorm0(xc, (yc - cc) / ac))
+        w0 = self._wnorm0(xm, u[m])
+        # out: inside the half-width + bulge, and no boxier than a ROOF_N superellipse, so the roof closes on the midline
+        # (held at the full half-width it ran flat to the dorsal outline and stopped there: a section with a cliff for a top)
+        box = (1 - np.abs(u[m]) ** ROOF_N) ** (1 / ROOF_N)
+        Ko = np.minimum(smax(np.ones(K.shape), K, TISSUE_K), np.maximum((1 + O['past'] / b) * box / w0, 1))
+        dx = xm - ex; px = np.clip((np.abs(dx) - er) / (np.where(dx < 0, O['front'], O['back']) - er), 0, 1)
+        py = np.clip((eyy - er - y) / ((TISSUE_REACH - 1) * er), 0, 1)
+        s_ = np.clip(1 - np.hypot(px, py), 0, 1); W = s_ * s_ * (3 - 2 * s_)
+        # the tissue is skull and the skin over it: it ends at the upper jaw (above the maxilla, record mouth.maxilla_h over
+        # the mouth line), or the lips and the mouth cavity under them part company (porcupinefish: an eye that reaches the snout)
+        ys, _ = self._seam_y(xm); xr = self._seam[-1, 0]
+        s_ = np.clip((y - ys - self.MO['maxilla_h']) / er, 0, 1); s_ = np.maximum(s_, np.clip((xm - xr) / er, 0, 1))
+        W = W * s_ * s_ * (3 - 2 * s_)
+        # in: only the furrow, where the eye's plane lies under the skin at the rim; it has closed by the skin ring
+        s_ = np.clip((RING_R[0] - np.hypot(dx, y - eyy) / er) / (RING_R[0] - 1), 0, 1); Wi = s_ * s_ * (3 - 2 * s_)
+        k[m] = 1 + W * (Ko - 1) + Wi * (np.minimum(K, 1) - 1)
+        return k
 
     # ---- level 1: bone plates, orbit ring, mouth cleft
     def sd_full(self, P, parts=False, cleft=True):
@@ -303,6 +470,10 @@ class Form:
         return [dict(region=p[0], source=p[5]) for p in self.PLATES] + [dict(region=p[0], source=p[6]) for p in self.VPLATES] + [
             dict(region='orbit ring', source='circumorbital bone ring: record skeleton.eye.orbitR'),
             dict(region='mouth cleft', source='gape between jaws: record mouth.line'),
+            dict(region='eye aim', source=f"{self.ORBIT['aim_source']}: {self.ORBIT['aim_up_deg']} deg up, {self.ORBIT['aim_fwd_deg']} deg forward "
+                                          f"(bare loft skin ring {self.ORBIT['bare_skin_up_deg']} up, {self.ORBIT['bare_skin_fwd_deg']} forward)"),
+            dict(region='periorbital tissue', source=f"eye plane square to the aim, proud by record eye.bulge, brow held to record eye.over, furrow to record eye.groove; skull roof at that width from the snout tip to record cover rear edge; "
+                                                     f"up to {self.ORBIT['tissue_max_R']} eye radii at the rim; skin ring now {self.ORBIT['skin_up_deg']} deg up"),
             dict(region='body mass', source='record outline top/bot/hw/nUp/nLo loft; lifted over the orbit, and carried round the mouth line '
                                             f'(each jaw at least {JAW_MIN * 100:g} % SL thick at record mouth.seam, DEFAULT; moved the outline {self.JAW_LIFT * 100:.2f} % SL)')]
 

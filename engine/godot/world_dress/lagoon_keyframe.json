@@ -1,9 +1,9 @@
 {
- "version": "0.7.0",
+ "version": "1.0.0",
  "name": "lagoon_keyframe",
  "intent": "The approved key frame (15 Nov, Blender) as a place in the open-world lagoon: a weathered head with a gate (focal point, upper left third), warm coral heads leading in from the near sand (table coral as the colour accent), the grown meadow framing the right edge, open sand and a clear blue lane for the fish school. Restrained, Japanese garden: three rock masses (focal arch, one behind, one far), five coral heads, one meadow bed, the rest is sand and water.",
  "frame": "key frame layout metres (Blender: x right, y forward, z up). godot = anchor_yaw * (x, z, -y) + anchor",
- "source": "papers/process/art_bible/style_level/keyframe/src/layout.json (scene.py cam slice) ported 1:1; upgrades are listed per item in 'why'; rocks from layout_arch_g.json (the arch as focal point, coordinator 21 Nov 05:16Z)",
+ "source": "papers/process/art_bible/style_level/keyframe/v7/layout_v7.json (key frame v7c, Gary approved 28 Nov 04:35Z), ported 1:1; earlier rounds (r2-r9) matched the old 15 Nov key frame and are superseded",
  "anchor": {
   "x": 24.0,
   "z": 20.0,
@@ -20,119 +20,161 @@
   {
    "p": "SB_Bommie_0_v18c",
    "at": [
-    -7.58,
-    14.1,
+    -2.9,
+    10.6,
     0.0
    ],
-   "rot": 5.407,
-   "role": "focal head: Rock's heads_v18c (Gary's pick 21 Nov), gate turned to face the key camera",
-   "why": "upgrade: v18c replaces kit v18 b0 (layout_arch_g.json, Style 21 Nov); set back along the key camera's ray from 10.6 to 13.0 m (Fable r2 + measured r3: 10.6 m cut the top, 16.5 m lost it in the haze); r6 (Fable r5 \"hard base line\"): its foot, the gate fall Terrain grows from this head's own fall record (14 blocks at both mouths, roof and wear chips, seabed/tools/gate_fall.py v3) plus the rubble_rule v11 apron round its real outline; r7: its sand skirt from the key frame rig's habitat.bank (0.12 m bank against the foot, arch_set.sh), since v18c has no kit skirt; r7 SILHOUETTE (Gary 27 Nov 18:42Z silhouette before detail): the key frame's massif spans 5-63 % of the frame width with its top 13 % down; r6 ran 18-93 % with the top cut off. So the head turned 13 deg left about the camera and set back to 16 m (r7b at 17 deg / 17.5 m measured 1-50 %, r7c tuned to the key frame's 5-63 %), its yaw turned with it so the gate still faces the camera",
+   "rot": 5.18,
    "with": [
-    "SB_Bommie_0_v18c_apron",
     "SB_Skirt_0_v18c"
-   ]
-  },
-  {
-   "p": "SB_Bommie_0",
-   "at": [
-    -3.4,
-    6.9,
-    -0.4
    ],
-   "rot": 3.52,
-   "role": "mid-ground head in front of the arch's left foot (the key frame's own near head, kit b0)",
-   "with": "SB_Skirt_0",
-   "why": "r9 SILHOUETTE (Gary kept the arch's form 28 Nov 01:30Z; Fable r7c: the massif floats, an empty sand band between its foot and the corals): the key frame's massif was two kit heads stacked in depth (layout.json b0 at 4.7 m in front of b3 at 12.5 m), so its foot overlapped the corals. Same relation here with the kit's own heads in the mid-ground, overlapping the arch's foot in frame, the gate left clear: at ~25 % of the frame width, 10 m; r9b (Fable r9: equal mushrooms bracketing the gate read as kit stamping, and the near layer still unlinked): nearer at 7.6 m, x1.3, stem sunk 0.4 m, turned 70 deg, so its base overlaps the coral group's tops",
-   "s": 1.3
-  },
-  {
-   "p": "SB_Bommie_4",
-   "at": [
-    -0.13,
-    11.0,
-    -0.15
-   ],
-   "rot": 4.0,
-   "role": "low head before the arch's right leg",
-   "with": "SB_Skirt_4",
-   "why": "r9 SILHOUETTE (Gary kept the arch's form 28 Nov 01:30Z; Fable r7c: the massif floats, an empty sand band between its foot and the corals): the key frame's massif was two kit heads stacked in depth (layout.json b0 at 4.7 m in front of b3 at 12.5 m), so its foot overlapped the corals. Same relation here with the kit's own heads in the mid-ground, overlapping the arch's foot in frame, the gate left clear: at ~55 % of the frame width, 11 m, right of the gate; r9b: x0.6 and sunk 0.15 m to a low boulder (lopsided mass, heavy left, as the key frame)",
-   "s": 0.6
+   "role": "focal head: Rock's heads_v18c arch, gate facing the key camera",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): the layout_arch_g place; sand banked 0.12 at its foot (habitat.bank), no gate fall or chips in v7 (chips=0, no seat dir)"
   },
   {
    "p": "SB_Bommie_2",
    "at": [
-    4.33,
-    13.3,
+    3.9,
+    11.5,
     0.0
    ],
    "rot": 0.6,
-   "role": "second mass, behind and right of the focal head",
    "with": "SB_Skirt_2",
-   "why": "Fable r2: three masses only, the right of frame left to open blue; r6 (Fable r5): moved from (7.5, 20) to open a water gap between it and the focal head; r7 SILHOUETTE: the key frame's second head sits at 73-87 % of the width, its top 25 % down, with water between it and the massif; here 14 m out, x1.3 (r7b sat at 65-78 %: 6 deg right)",
-   "s": 1.3
+   "role": "second mass, right of the arch",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args)"
+  },
+  {
+   "p": "SB_Bommie_3",
+   "at": [
+    -9.5,
+    15.5,
+    0.0
+   ],
+   "rot": 2.4,
+   "with": "SB_Skirt_3",
+   "role": "left mass behind",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args)"
+  },
+  {
+   "p": "SB_Bommie_1",
+   "at": [
+    -13.0,
+    21.0,
+    0.0
+   ],
+   "rot": 1.0,
+   "with": "SB_Skirt_1",
+   "role": "far head",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args) rocks_far"
   },
   {
    "p": "SB_Bommie_4",
    "at": [
-    -12.0,
-    24.0,
+    8.5,
+    23.0,
     0.0
    ],
    "rot": 4.0,
-   "role": "the one far head, left",
-   "with": "SB_Skirt_4"
+   "with": "SB_Skirt_4",
+   "role": "far head",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args) rocks_far"
+  },
+  {
+   "p": "SB_Bommie_0_v18c",
+   "at": [
+    -2.5,
+    31.0,
+    0.0
+   ],
+   "rot": 0.4,
+   "s": 1.3,
+   "role": "far head",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args) rocks_far (the v7 rig maps every SB_Bommie_0 to the v18c head)"
+  },
+  {
+   "p": "SB_Bommie_4",
+   "at": [
+    -0.8,
+    3.4,
+    -0.5
+   ],
+   "rot": 4.0,
+   "s": 0.9,
+   "bank": 0.12,
+   "with": "SB_Skirt_4_bank",
+   "role": "patch rock: low reef pavement under the table and boulder colonies, 0.28 m above the sand",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args) patch_rocks (blind critique r1: corals anchored on rock, not props on sand); sunk 0.5 as the rig; its foot under sand banked against it (habitat.bank h 0.12, the rig's bank arg) as SB_Skirt_4_bank, as the rig's drawn floor did (r10 without the bank showed the wide foot as a pancake)"
   },
   {
    "p": "kf_table_5",
    "at": [
     -0.5,
     2.9,
-    0.0
+    -0.04
    ],
    "rot": 0.0,
+   "seat": "hard",
    "role": "colour accent, warm table coral",
-   "why": "meadow bed where the key frame had it; the gate stands in clear sand now that the head sits at 13 m"
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): ray-seated on whatever hard ground lies under it (rock or sand), sunk 4 cm"
   },
   {
    "p": "kf_brain_2",
    "at": [
     -2.45,
     3.1,
-    0.0
+    -0.04
    ],
    "rot": 0.0,
-   "role": "near left coral head"
+   "seat": "hard",
+   "role": "near left coral head",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): ray-seated on whatever hard ground lies under it (rock or sand), sunk 4 cm"
   },
   {
    "p": "kf_boulder_1",
    "at": [
     -1.0,
     4.05,
-    0.0
+    -0.04
    ],
    "rot": 0.0,
-   "role": "boulder coral behind the table"
+   "seat": "hard",
+   "role": "boulder coral behind the table",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): ray-seated on whatever hard ground lies under it (rock or sand), sunk 4 cm"
   },
   {
    "p": "kf_staghorn_3",
    "at": [
-    0.45,
-    5.6,
-    0.0
+    0.6,
+    5.4,
+    -0.04
    ],
    "rot": 0.0,
+   "seat": "hard",
    "role": "branching coral, mid",
-   "why": "; r6 (Fable r5): 0.6 m right, out of the boulder's silhouette"
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): ray-seated on whatever hard ground lies under it (rock or sand), sunk 4 cm"
   },
   {
    "p": "kf_finger_4",
    "at": [
     -3.5,
     4.1,
+    -0.04
+   ],
+   "rot": 0.0,
+   "seat": "hard",
+   "role": "finger coral, left",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): ray-seated on whatever hard ground lies under it (rock or sand), sunk 4 cm"
+  },
+  {
+   "p": "kf_coral_rubble",
+   "at": [
+    0.0,
+    0.0,
     0.0
    ],
    "rot": 0.0,
-   "role": "finger coral, left"
+   "role": "coral rubble aprons",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): Debris Maker coral_apron.py v2 aprons from coral_rubble_kit_v3, each piece resting on rock top or sand, baked in key-frame metres (place origin)"
   },
   {
    "p": "kf_LG_seagrass_m2_0_1",
@@ -141,10 +183,10 @@
     -1.2,
     0.0
    ],
-   "rot": 0.0,
+   "rot": 0,
    "keep": 1,
-   "role": "meadow bed (colony maker's grown tiles moved as one)",
-   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
+   "role": "grown meadow tile",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): seated by its own footprint (habitat.seat_blades)"
   },
   {
    "p": "kf_LG_seagrass_m2_1_1",
@@ -153,9 +195,10 @@
     -1.2,
     0.0
    ],
-   "rot": 0.0,
+   "rot": 0,
    "keep": 1,
-   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
+   "role": "grown meadow tile",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): seated by its own footprint (habitat.seat_blades)"
   },
   {
    "p": "kf_LG_seagrass_m2_1_2",
@@ -164,9 +207,10 @@
     -1.2,
     0.0
    ],
-   "rot": 0.0,
+   "rot": 0,
    "keep": 1,
-   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
+   "role": "grown meadow tile",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): seated by its own footprint (habitat.seat_blades)"
   },
   {
    "p": "kf_LG_seagrass_m2_2_0",
@@ -175,9 +219,10 @@
     -1.2,
     0.0
    ],
-   "rot": 0.0,
+   "rot": 0,
    "keep": 1,
-   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
+   "role": "grown meadow tile",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): seated by its own footprint (habitat.seat_blades)"
   },
   {
    "p": "kf_LG_seagrass_m2_2_1",
@@ -186,26 +231,71 @@
     -1.2,
     0.0
    ],
-   "rot": 0.0,
+   "rot": 0,
    "keep": 1,
-   "cull": "habitat.field (keyframe/src/habitat.py: grazing halo round every head and coral, upstream scour, open lanes) applied at export for this layout (r6, Fable r5: meadow crowded the gate)"
+   "role": "grown meadow tile",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): seated by its own footprint (habitat.seat_blades)"
+  },
+  {
+   "p": "kf_LG_seagrass_m2_1_2_r",
+   "at": [
+    1.8,
+    7.5,
+    0.0
+   ],
+   "rot": 0.7,
+   "role": "placed seagrass tile, recentred on its place (v7 add_glb recentre=True)",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): seated by its own footprint (habitat.seat_blades)"
+  },
+  {
+   "p": "kf_LG_seagrass_m2_2_1_L1_r",
+   "at": [
+    -1.0,
+    13.0,
+    0.0
+   ],
+   "rot": 2.1,
+   "role": "placed seagrass tile, recentred on its place (v7 add_glb recentre=True)",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): seated by its own footprint (habitat.seat_blades)"
+  },
+  {
+   "p": "kf_LG_seagrass_m1_1_0_r",
+   "at": [
+    -7.3,
+    6.5,
+    0.0
+   ],
+   "rot": 1.3,
+   "role": "placed seagrass tile, recentred on its place (v7 add_glb recentre=True)",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): seated by its own footprint (habitat.seat_blades)"
+  },
+  {
+   "p": "kf_LG_seagrass_m2_1_1_L1_r",
+   "at": [
+    5.5,
+    15.5,
+    0.0
+   ],
+   "rot": 4.0,
+   "role": "placed seagrass tile, recentred on its place (v7 add_glb recentre=True)",
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args): seated by its own footprint (habitat.seat_blades)"
   }
  ],
  "keep_clear": [
   {
-   "what": "fish school volume (Build the fish school system)",
+   "what": "fish school volume (v7 school_v7: 40 juvenile trevally)",
    "at": [
-    -1.4,
-    4.2,
-    1.6
+    0.7,
+    4.6,
+    1.45
    ],
    "size": [
-    1.2,
-    0.7,
-    0.45
+    1.1,
+    0.55,
+    0.28
    ],
-   "heading": 0.4,
-   "why": "the key frame's small school sat here (layout smallschool -1.4, 3.7, 1.25), raised over the coral heads"
+   "heading": 0.35,
+   "why": "key frame v7c (Gary approved 28 Nov 04:35Z 'Approve, keep A brightness'; papers/process/art_bible/style_level/keyframe/v7/layout_v7.json, scene_v7.py v7c_args) school_v7, against open water above the sand lane"
   },
   {
    "what": "swim lane / sight line",
@@ -214,20 +304,20 @@
     0.5
    ],
    "to": [
-    -7.93,
-    8.27
+    -5.2,
+    7.4
    ],
    "w": 1.6
   },
   {
    "what": "swim lane through the gate side",
    "from": [
-    -8.07,
-    8.44
+    -5.3,
+    7.6
    ],
    "to": [
-    -9.37,
-    13.17
+    -5.5,
+    12.5
    ],
    "w": 1.4
   }
@@ -262,8 +352,8 @@
     1.05
    ],
    "look": [
-    -2.76,
-    8.54,
+    -0.1,
+    6.5,
     0.85
    ],
    "vfov": 44,
@@ -271,17 +361,17 @@
   },
   "gate": {
    "at": [
-    -1.96,
-    7.92,
+    1.19,
+    3.32,
     0.95
    ],
    "look": [
-    -1.96,
-    15.82,
+    1.57,
+    11.2,
     1.05
    ],
    "vfov": 50,
-   "note": "through the turned gate"
+   "note": "through the gate (pre-r7 gate camera moved with the head to its v7 place; r11 turned 10 deg left: r10 framed the hole left of centre)"
   },
   "wide": {
    "at": [
