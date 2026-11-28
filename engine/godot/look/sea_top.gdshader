@@ -26,7 +26,7 @@ global uniform vec3 water_sun_air;
 global uniform float water_sun_lux;
 #include "res://look/sea_foam_shade.gdshaderinc"   // the whitecaps' look (after the lines above: it uses them)
 global uniform float water_sky_nits;   // the clear sky as a uniform dome, nits (sky lux / pi)
-uniform sampler2D screen_tex : hint_screen_texture, filter_linear;   // read at mip 0 only: no mip chain (sea speed thread: Godot builds the screen copy's mips only when a shader asks for them)
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 // The water's own colour, seen through the surface (28 Nov, Gary: "unify them, for seamless transitions"): the
 // shallow-water reflectance model (Maritorena et al. 1994, Lee et al. 1998): what comes up through the surface is the
 // floor, dimmed by the water on the way, plus the deep water's own light, Rrs x Ed, in the share the floor no longer
@@ -71,11 +71,12 @@ float fresnel_air(float ci) {          // unpolarised, air -> water, n 1.333
 
 void fragment() {
 	vec3 cam = sea_isl(CAMERA_POSITION_WORLD);
-	vec3 S = sea_slope(wi.xy, still, wi, cam, 0.0);
+	vec3 sj0, sj1; vec2 sjl;
+	vec3 S = sea_slope_j(wi.xy, still, wi, cam, 0.0, sj0, sj1, sjl);   // + cascades 0-1's squeeze for the foam (sea speed thread)
 	vec3 V = normalize(cam - wi);                          // toward the eye (island)
 	vec3 N = normalize(vec3(-S.x, -S.y, 1.0));
 	// the whitecaps (tank v374 foam look): the foam map drawn as lace and streaks; its 2 cm relief tilts the normal
-	SeaFoam fo = sea_foam_read(still, wi, cam, nq, TIME);
+	SeaFoam fo = sea_foam_read_j(still, wi, cam, nq, TIME, sj0, sj1, sjl);
 	N = sea_foam_bump(N, fo.foam, still);
 	N = normalize(N + vec3(0.0, 0.0, 2.0 * clamp((0.05 - dot(N, V)) / 0.05, 0.0, 1.0)));   // open water v144
 	float ci = clamp(dot(N, V), 1e-3, 1.0);

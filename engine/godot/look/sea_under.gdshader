@@ -41,7 +41,8 @@ void vertex() {
 
 void fragment() {
 	vec3 cam = sea_isl(CAMERA_POSITION_WORLD);
-	vec3 S = sea_slope(wi.xy, still, wi, cam, fine3);
+	vec3 sj0, sj1; vec2 sjl;
+	vec3 S = sea_slope_j(wi.xy, still, wi, cam, fine3, sj0, sj1, sjl);   // + cascades 0-1's squeeze for the foam (sea speed thread)
 	vec3 I = normalize(wi - cam);                          // eye -> surface, upward (island)
 	vec3 Ls = sea_isl(normalize(water_sun_air));
 	vec3 Nm = normalize(vec3(S.x, S.y, -1.0));            // the mean wave normal, down at the diver
@@ -82,7 +83,7 @@ void fragment() {
 		acc += up * tok * tr * vec3(1.0, 0.97, 0.9) * (1.7689 * water_sun_lux / (6.2831853 * s2_i)) * exp(-0.5 * ang_i * ang_i / s2_i);
 	}
 	// the whitecaps from below (tank v374): foam lets dull daylight through in place of the window's sky and sun
-	SeaFoam fo = sea_foam_read(still, wi, cam, nq, TIME);
+	SeaFoam fo = sea_foam_read_j(still, wi, cam, nq, TIME, sj0, sj1, sjl);
 	acc = sea_foam_under_window(fo, acc);
 	// the mirror (v67 UnderPhys): the water's glow along the reflected ray + the floor where it lands. v73 (S-B): where the
 	// ray really lands, marched over the floor map (6 steps, then the crossing interpolated), within 30 m and where the

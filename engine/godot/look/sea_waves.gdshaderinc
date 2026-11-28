@@ -26,8 +26,8 @@ const float SEA_CURVE_M = 2.0e5;    // v6: the open water's planet radius
 const float SEA_CHOP = 1.0;
 const float SEA_MOD = 2.0;          // the tank's RipplesOnSwell
 const float SEA_SHARP = 1.0;        // v96: the true value for 4 taps
-const float SEA_TAP1 = 1.0;         // 0.2.0: 1 tap under this many mip texels of stretch along the view
-const float SEA_TAP2 = 2.0;         // 0.2.0: 2 taps under this many, else 4 (sea_taps)
+const float SEA_TAP1 = 0.5;         // 0.2.0: 1 tap under this many mip texels of stretch along the view (sea_taps)
+const float SEA_TAP2 = 2.0;         // 0.2.0: the v98 4-tap box from this many (2 taps slide into 4 over the half texel below)
 
 vec3 sea_isl(vec3 g) { return vec3(g.x, -g.z, g.y); }
 vec3 sea_gdt(vec3 i) { return vec3(i.x, i.z, -i.y); }
@@ -81,19 +81,29 @@ vec3 sea_vertex_world(vec2 lp, vec3 cam, float surf, float nq, out vec2 still) {
 	return world;
 }
 
-// 0.2.0 (sea speed thread, 28 Nov): how many of the 4 taps along the view a cascade needs. The taps stand in for the
-// footprint's stretch along the view (the mip already covers it across). Where that stretch is under two texels of the
-// mip being read, 4 taps read the same texels again: then 2 taps (under 2 texels) or 1 (under 1). 4 taps stay wherever
-// the stretch is 2 texels or more, so the grazing sea is drawn exactly as before. along = the stretch (m), fpa = the
-// footprint across the view (m): the read's mip texel is max(fpa, L / 256).
-int sea_taps(float along, float fpa, float L) {
-	float r = along / max(fpa, L / 256.0);
-	return r < SEA_TAP1 ? 1 : (r < SEA_TAP2 ? 2 : 4);
+// 0.2.0 (sea speed thread, 28 Nov): how many of the 4 taps along the view a cascade read needs. The taps stand in for
+// the footprint's stretch along the view (the mip already covers it across). r = that stretch in texels of the mip being
+// read (along = the stretch m, fpa = the footprint across the view m; the read's texel is max(fpa, L / 256)). 4 taps
+// (the v98 box) wherever r >= 2: the grazing sea is drawn exactly as before. Under that the waves (8+ texels long,
+// band-limited by sea_ring_hi) barely change over the stretch, so 2 taps, then 1 under r = 0.5. No seams: the taps
+// slide together as r falls, so at each switch the fewer taps sit exactly where the pairs met (independent review,
+// 28 Nov: the 2 taps at +-0.2795 of the stretch hold the 4-tap box's spread).
+float sea_tap_r(float along, float fpa, float L) { return along / max(fpa, L / 256.0); }
+int sea_taps(float r) { return r < SEA_TAP1 ? 1 : (r < SEA_TAP2 - 0.5 ? 2 : 4); }
+float sea_tap_off(int k, int n, float r) {          // tap k's place along the stretch (-0.5 .. 0.5)
+	if (n == 1) return 0.0;
+	if (n == 2) { float o = 0.2795 * smoothstep(SEA_TAP1, 2.0 * SEA_TAP1, r); return k == 0 ? -o : o; }
+	float sm = smoothstep(SEA_TAP2 - 0.5, SEA_TAP2, r);
+	float o = (k == 0 || k == 3) ? mix(0.2795, 0.375, sm) : mix(0.2795, 0.125, sm);
+	return k < 2 ? -o : o;
 }
 
 // the drawn slope at a pixel: (dh/dx, dh/dy) island, and the slope variance the pixel does not draw.
 // x = the pixel's island xy, Xl = its still-water point, cam = island camera, P = island pixel point.
-vec3 sea_slope(vec2 x, vec2 Xl, vec3 P, vec3 cam, float fine3) {
+// 0.2.0: sea_slope_j also hands back cascades 0-1's squeeze sums (jxx, jyy, jxy) where it read them at mip 0 (jl = 1),
+// the very reads sea_foam_read's fold takes, so the foam reuses them (sea_foam_read_j) instead of reading them again.
+vec3 sea_slope_j(vec2 x, vec2 Xl, vec3 P, vec3 cam, float fine3, out vec3 jc0, out vec3 jc1, out vec2 jl) {
+	jc0 = vec3(0.0); jc1 = vec3(0.0); jl = vec2(0.0);
 	if (sea_on < 0.5) return vec3(0.0, 0.0, 0.0047);
 	vec3 vr = P - cam;
 	float vl = max(length(vr), 1e-3);
@@ -119,10 +129,12 @@ vec3 sea_slope(vec2 x, vec2 Xl, vec3 P, vec3 cam, float fine3) {
 		}
 		float gm = c >= 2 ? md * (c == 3 ? clamp(fine3, 0.0, 1.0) : 1.0) : 1.0;
 		float lod = max(log2(max(fpa, 1e-5) * 256.0 / L), 0.0);
-		int nk = sea_taps(alongl, fpa, L);
+		float tr = sea_tap_r(alongl, fpa, L);
+		int nk = sea_taps(tr);
 		float fk = 1.0 / float(nk);
 		vec3 a = vec3(0.0), b = vec3(0.0);
-		if (w > 0.0 || c < 2) {
+		// 0.2.0: the finest cascade adds nothing where fine3 is 0 (the top side): its reads are skipped
+		if ((w > 0.0 || c < 2) && !(c == 3 && fine3 <= 0.0)) {
 			for (int v = 0; v < 3; v++) {
 				float wv = (c < 2) ? (v == 0 ? 1.0 : 0.0) : tbw[v];
 				if (wv > 0.001) {
@@ -130,7 +142,7 @@ vec3 sea_slope(vec2 x, vec2 Xl, vec3 P, vec3 cam, float fine3) {
 					vec3 av = vec3(0.0), bv = vec3(0.0);
 					for (int k = 0; k < 4; k++) {
 						if (k >= nk) break;
-						vec2 xk = Xl + alongv * ((float(k) + 0.5) * fk - 0.5);
+						vec2 xk = Xl + alongv * sea_tap_off(k, nk, tr);
 						vec2 xv = (c < 2 || v == 0) ? xk : (v == 1 ? caus_tb_x1(xk) : caus_tb_x2(xk));
 						vec3 uk = vec3(xv / L, float(c));
 						vec4 g4 = textureLod(sea_deriv, uk, lod);
@@ -160,7 +172,10 @@ vec3 sea_slope(vec2 x, vec2 Xl, vec3 P, vec3 cam, float fine3) {
 		float un = (1.0 - w * w) * gm * gm;
 		vxx += un * sea_c_sel(sea_mom_x, c);
 		vyy += un * sea_c_sel(sea_mom_y, c);
-		if (c < 2) { j0xx += a.z; j0yy += b.x; j0xy += b.y; }
+		if (c < 2) {
+			j0xx += a.z; j0yy += b.x; j0xy += b.y;
+			if (lod <= 0.0) { if (c == 0) { jc0 = vec3(a.z, b.x, b.y); jl.x = 1.0; } else { jc1 = vec3(a.z, b.x, b.y); jl.y = 1.0; } }
+		}
 	}
 	vxx += sea_mom_r.x * md * md;
 	vyy += sea_mom_r.y * md * md;
@@ -168,4 +183,8 @@ vec3 sea_slope(vec2 x, vec2 Xl, vec3 P, vec3 cam, float fine3) {
 	nn.z = max(nn.z, 0.05 * length(nn.xy) + 1e-4);
 	vec2 g = -nn.xy / nn.z;            // the slope of the surface as drawn (the crests' squeeze in it)
 	return vec3(g, vxx + vyy);
+}
+vec3 sea_slope(vec2 x, vec2 Xl, vec3 P, vec3 cam, float fine3) {
+	vec3 j0, j1; vec2 jl;
+	return sea_slope_j(x, Xl, P, cam, fine3, j0, j1, jl);
 }

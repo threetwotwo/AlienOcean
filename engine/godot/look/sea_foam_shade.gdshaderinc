@@ -114,7 +114,9 @@ float sf_hole(vec2 p, float rlo, float rhi) {   // v6: distance to the nearest h
 
 // Xl = the pixel's island still-water point, P = its island world point, cam = island camera, nq = the mesh's quads
 // per ring, clock = seconds (TIME)
-SeaFoam sea_foam_read(vec2 Xl, vec3 P, vec3 cam, float nq, float clock) {
+// jc0, jc1, jl: cascades 0-1's squeeze sums from sea_slope_j where it read them at mip 0 (jl = 1), the same reads this
+// fold takes (sea speed thread, 28 Nov); jl = 0 reads them here
+SeaFoam sea_foam_read_j(vec2 Xl, vec3 P, vec3 cam, float nq, float clock, vec3 jc0, vec3 jc1, vec2 jl) {
 	SeaFoam o = SeaFoam(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 	// the pixel's footprint on the sea (m), as sea_slope() and the tank take it
 	vec3 vr = P - cam;
@@ -166,11 +168,17 @@ SeaFoam sea_foam_read(vec2 Xl, vec3 P, vec3 cam, float nq, float clock) {
 			float L = c == 0 ? sea_patch.x : sea_patch.y;
 			// sea speed thread 28 Nov: only the taps that reach new texels of mip 0 (sea_taps; 4 wherever the view's stretch
 			// spans 2 texels or more, as before)
-			int nk = sea_taps(length(along), 0.0, L);
+			if ((c == 0 ? jl.x : jl.y) > 0.5) {
+				vec3 jc = c == 0 ? jc0 : jc1;
+				jxx += jc.x; jyy += jc.y; jxy += jc.z;
+				continue;
+			}
+			float tr = sea_tap_r(length(along), 0.0, L);
+			int nk = sea_taps(tr);
 			float fk = 1.0 / float(nk);
 			for (int k = 0; k < 4; k++) {
 				if (k >= nk) break;
-				vec3 uk = vec3((Xl + along * ((float(k) + 0.5) * fk - 0.5)) / L, float(c));
+				vec3 uk = vec3((Xl + along * sea_tap_off(k, nk, tr)) / L, float(c));
 				vec4 g = textureLod(sea_deriv, uk, 0.0);
 				jxx += fk * g.z; jyy += fk * g.w; jxy += fk * textureLod(sea_disp, uk, 0.0).w;
 			}
@@ -375,4 +383,7 @@ vec3 sea_foam_under_window(SeaFoam f, vec3 Lin) {
 vec3 sea_foam_under_haze(SeaFoam f, vec3 Ls) {
 	if (f.plume <= 0.0) return Ls;
 	return Ls * (1.0 - 0.6 * f.plume) + sf_daylight() * exp(-water_kd * 0.5) * 0.11 * f.plume;
+}
+SeaFoam sea_foam_read(vec2 Xl, vec3 P, vec3 cam, float nq, float clock) {
+	return sea_foam_read_j(Xl, P, cam, nq, clock, vec3(0.0), vec3(0.0), vec2(0.0));
 }
