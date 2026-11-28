@@ -119,7 +119,7 @@ def deepest(O):
     return float(u[i]), float(yt[i]), float(yb[i])
 
 
-def apply(D, sil, top_r=None, front_r=None, src=None):
+def apply(D, sil, top_r=None, front_r=None, src=None, front_proj=None):
     """write a top and/or front trace into a record (outline.hw, outline.sections) and its silhouette file (top, front).
     top_r: views.top(...) result; front_r: views.front(...) result taken at the record's deepest station (see deepest()).
     When both exist the front's widths are rescaled so its greatest half-width equals the top view's half-width at that
@@ -141,9 +141,23 @@ def apply(D, sil, top_r=None, front_r=None, src=None):
             scale = want / max(front_r['half_width_max'], 1e-9); F[:, 0] *= scale
             notes.append(f'front widths x{scale:.2f} to the top view half-width {want:.4f} SL at u {u / SL:.3f} SL')
         sil['front'] = [[round(float(z), 4), round(float(y), 4)] for z, y in F]
+        sil['front_kind'] = front_r.get('front_kind', 'projection')                # a head-on photo sees the whole body: a projection
+        if sil['front_kind'] == 'section': sil['front_u'] = round(u / SL, 4)
+        else: sil.pop('front_u', None)
         secs = [s for s in O.get('sections', []) if abs(s['u'] - u) > 0.01 * SL]
         O['sections'] = sorted(secs + [dict(u=round(u, 2), w=front_r['w'])], key=lambda s: s['u'])
         O['_origin_sections'] = dict(src.get('front', {}), method='species_tracer.views.front', width_scale=round(scale, 3),
                                      label='MEASURED shape (off-axis angle ESTIMATE, see angle_deg)', notes=notes)
-    sil['views_note'] = 'top: body only, fins removed, SL units, snout x 0; front: head-on, body + median fins, paired fins removed, z to the fish left, y as the record outline (SL units)'
+    if front_proj:     # a head-on projection of the body (scan union over its length): placed on the record's own extremes
+        T, B = np.array(O['top'], float), np.array(O['bot'], float); body = lambda P: P[(P[:, 0] > 0.02 * SL) & (P[:, 0] < 0.98 * SL), 1]
+        yt, yb = body(T).max() / SL, body(B).min() / SL; P = np.array(front_proj['front'], float)
+        hw_rec = (np.array(O['hw'], float)[:, 1].max() / SL) if O.get('hw') else front_proj['half_width_max']
+        P[:, 1] = yb + (P[:, 1] - front_proj['y_bot']) * (yt - yb) / (front_proj['y_top'] - front_proj['y_bot'])
+        P[:, 0] *= hw_rec / max(front_proj['half_width_max'], 1e-9)
+        sil['front'] = [[round(float(z), 4), round(float(y), 4)] for z, y in P]; sil['front_kind'] = 'projection'; sil.pop('front_u', None)
+        O.setdefault('_origin_sections', {})['front'] = ('silhouettes front = head-on projection of the scan body (union over its length), height '
+                                                        'placed on the record outline extremes, width scaled to the record hw maximum')
+    sil['views_note'] = ('top: body only, fins removed, SL units, snout x 0. front: head-on, body only (fins removed), z to the fish left, '
+                         'y as the record outline (SL units); front_kind projection = the whole body seen from in front, section = one '
+                         'slice at front_u (share of SL)')
     return D, sil

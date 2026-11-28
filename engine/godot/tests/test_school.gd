@@ -364,6 +364,7 @@ func _run() -> void:
 			var nd := FishSchool.new(); nd.asset = a; nd._draw_dt = 1.0 / 60.0
 			nd._d_s = PackedFloat64Array([0.0, 0.0]); nd._swim_ph = PackedFloat64Array([0.0, 0.0])
 			nd._bc_t = PackedFloat64Array([0.0, 0.0]); nd._bc_k = PackedFloat64Array([1.0, 1.0]); nd.look_coast = PackedByteArray([0, 0])
+			nd.vary_look = false; nd._vary_setup(2); nd._swim_setup(); nd._frame_consts(1.0 / 60.0)
 			var um: float = CM.u_min(sw)
 			var glide := [0, 0]; var ub := [0.0, 0.0]; var steps := 600
 			for t in steps:
@@ -447,6 +448,51 @@ func _run() -> void:
 		var sm: Dictionary = res.smooth; var rw: Dictionary = res.raw
 		var ok: bool = sm.turn_jerk_p95 <= JERK_MAX and sm.bend_step_p95 <= BEND_STEP_MAX and sm.mode_flips_per_fish_min <= FLIPS_MAX and sm.heading_lag_deg_p95 <= LAG_MAX
 		_add("S16", "no twitching: drawn turn jerk p95 <= %.0f rad/s^2, bend step p95 <= %.3f, <= %.0f mode flips per fish-minute, drawn heading within %.0f deg of the sim (p95)" % [JERK_MAX, BEND_STEP_MAX, FLIPS_MAX, LAG_MAX], ok, res)
+	# S17: no clones (Fable critique 28 Nov: "the school is clones: same size, pose, phase"). 120 trevally (export when
+	# present), 6 s at 60 fps, then 30 frames sampled: across the school, drawn size spread (CV), tail-beat phase spread
+	# (resultant length of the phases: 1 = all in step, ~0.09 = random for 120 fish), body-bend spread, and how many fish
+	# glide at once among those swimming phrases (all or none = in sync). Each fish's own variation on vs off.
+	if _want("S17"):
+		var res := {}
+		for vary in [false, true]:
+			_new_world(); await _settle_physics()
+			var s := FishSchool.new()
+			s.species_id = "trevally"; s.count = 120; s.seed_ = 9; s.home = Vector3(0, -8, 0); s.tethered = true; s.threaded = true
+			s.process_mode = Node.PROCESS_MODE_DISABLED; s.vary_look = vary
+			world.add_child(s)
+			var dt := 1.0 / 60.0
+			for fr in 360:
+				s.advance(dt)
+				if s.threaded: s.sync()
+			var n: int = s.sim.N
+			var cv_sum := 0.0; var rl_sum := 0.0; var bend_sd_sum := 0.0; var glide_fr := []
+			for fr in 30:
+				s.advance(dt)
+				if s.threaded: s.sync()
+				var m := 0.0; var m2 := 0.0; var cx := 0.0; var cy := 0.0; var bm := 0.0; var bm2 := 0.0
+				var coasting := 0; var gliding := 0
+				for i in n:
+					var sz: float = s.sim.L[i] * s._p_size[i]
+					m += sz; m2 += sz * sz
+					cx += cos(s._swim_ph[i]); cy += sin(s._swim_ph[i])
+					bm += s.look_bend[i]; bm2 += s.look_bend[i] * s.look_bend[i]
+					if s.look_coast[i] == 1:
+						coasting += 1
+						if s._bc_k[i] < 0.3: gliding += 1
+				m /= n; m2 /= n; bm /= n; bm2 /= n
+				cv_sum += sqrt(maxf(m2 - m * m, 0.0)) / m
+				rl_sum += Vector2(cx, cy).length() / n
+				bend_sd_sum += sqrt(maxf(bm2 - bm * bm, 0.0))
+				if coasting >= 10: glide_fr.append(float(gliding) / coasting)
+			glide_fr.sort()
+			res["vary" if vary else "same"] = {"size_cv": snappedf(cv_sum / 30.0, 0.001), "phase_resultant": snappedf(rl_sum / 30.0, 0.001),
+				"bend_sd": snappedf(bend_sd_sum / 30.0, 0.001), "glide_share_min_max": [snappedf(glide_fr[0], 0.01), snappedf(glide_fr[-1], 0.01)] if glide_fr.size() > 0 else [],
+				"export": not s.asset.is_empty()}
+			s.queue_free(); await process_frame
+		var v: Dictionary = res.vary
+		var gl: Array = v.glide_share_min_max
+		var sync_ok: bool = gl.is_empty() or gl[1] < 0.9
+		_add("S17", "no clones: drawn size CV >= 0.10, tail-beat phases spread (resultant <= 0.3), body bend spread >= 0.2, never 90 % of phrase-swimming fish gliding at once", v.size_cv >= 0.10 and v.phase_resultant <= 0.3 and v.bend_sd >= 0.2 and sync_ok, res)
 	if _want("S10"):
 		_new_world(); await _settle_physics()
 		var s := _school("lagoon_baitfish", 120, 2, Vector3(0, -6, 0), true, true)

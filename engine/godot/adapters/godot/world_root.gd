@@ -38,11 +38,15 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 ## (Unreal GlowK, Gary's clarity pick 2.5). Under water only, so the sky above the sea keeps its exposure.
 @export var under_exposure_art := 1.0     # Gary picked "Brighter" 27 Nov 17:06Z
 @export var fill_occluded := true          # the water's fill light goes through Godot's ambient, so SSAO / SSIL occlude it (false = as before, unoccluded)
-@export var cdom := 0.05                   # art lever (a real condition): yellow substance in the water; key frame look 0.05 (Gary card 28 Nov; Unreal LOOK_SET 0.03); less = bluer haze
+@export var cdom := 0.015                  # art lever (a real condition): yellow substance in the water. 0.015 = clear lagoon water: blue outlasts green,
+                                           # so distance fades to blue (Gary card 28 Nov 03:03Z; was 0.05, the old key frame; Unreal 0.03)
 @export var scat_k := 0.40                 # art lever (a real condition): particles in the water, Unreal LOOK_SET 0.40; less = clearer
 @export var sky_fill_k := 0.8              # art lever: share of the sky's light that enters the water (1 = physical: 11 % of the light on the
                                            # 4 m sand at noon). The key frame (Blender, 28 Nov passes) has 7 %: 0.6 here. Feeds the fill, the GI's
                                            # water light field and the haze alike. Gary picked 0.8, between the two (card, 28 Nov 02:02Z).
+## the sea's RMS slope for the sun's spread under water (calm lagoon ~0.06, as the key frame rig; surface thread may feed the FFT's own)
+@export var sea_rms_slope := 0.06
+const SUN_DISC_DEG := 0.53
 @export var under_white := Vector3.ZERO      # look check: the under-water camera balance (zero = the place's UNDER_WHITE)
 @export var water_type := 0.0              # 0 = the lagoon's water, 1 = the open ocean's (WaterOptics.optics); between = a blend (shelf)
 @export var gi_k := 1.0                    # art lever: GI strength (SDFGI energy). 1 = physical (the water's fill + the sand's real bounce)
@@ -273,6 +277,9 @@ func apply(cam_y: float) -> Dictionary:
 		light.light_intensity_lux = beam_h * WaterOptics.FRESNEL_SUN / tr.y
 		light.light_color = (tint * att)
 		light.light_indirect_energy = 1.0
+		# the sun as seen from under a wavy surface: its disc refracted (0.53 / 1.333 deg) widened by the waves' slope, each
+		# facet bending the beam by (1 - 1/1.333) x its slope: so shadows are crisp at contact and soften with height
+		light.light_angular_distance = SUN_DISC_DEG / WaterOptics.N_WATER + 2.0 * (1.0 - 1.0 / WaterOptics.N_WATER) * sea_rms_slope * 57.2958
 		# Without GI, the ambient stays one colour (the field's mean); Godot's sky-sourced ambient read black in the 28 Nov
 		# check (cubemap ambient path, open question), and SDFGI replaces the ambient anyway.
 		var amb: Vector3 = (ek + eu) * 0.5 / PI * exposure            # ambient is in buffer units (measured 27 Nov)
@@ -291,6 +298,7 @@ func apply(cam_y: float) -> Dictionary:
 		light.look_at_from_position(Vector3.ZERO, -up_air, Vector3.FORWARD if absf(up_air.y) > 0.99 else Vector3.UP)
 		light.light_intensity_lux = beam_h / maxf(up_air.y, 0.02)
 		light.light_color = tint
+		light.light_angular_distance = SUN_DISC_DEG
 		# the GI's sand is under water: its bounce sees the sun as it arrives at z_ref (through the surface, refracted, attenuated),
 		# not the air's full beam (Godot's indirect energy is one scalar: the luminance of that loss)
 		var lum_att := att.r * 0.2126 + att.g * 0.7152 + att.b * 0.0722

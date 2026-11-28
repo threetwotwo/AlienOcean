@@ -34,12 +34,12 @@ def build_fins(form, rec, out):
         fs = [[r * Mb + i, r * Mb + i + 1, (r + 1) * Mb + i + 1, (r + 1) * Mb + i] for r in range(rows) for i in range(Mb - 1)]
         fins[name] = dict(V=np.array(vs), F=fs, UV=np.array(uv), rays=nrays, lens=lens, T=[t for _, t in uv])
 
-    def edge_card(base, edge_sl, rows, name, nrays):
+    def edge_card(base, edge_sl, rows, name, nrays, top_z=None):
         """a traced fin: the card spans its root row and its free outline (the photo's outline from where the leading edge
         leaves the body to where the rear margin meets it). Root and outline are resampled to one column count by length;
         the rows between are relaxed (each point the mean of its neighbours, root and outline held), so rays curve with a
         swept lobe or a filament instead of cutting straight across the gap beside it."""
-        Mb = len(base); top = resample(np.asarray(edge_sl, float), Mb); top = np.c_[top, np.zeros(Mb)]
+        Mb = len(base); top = resample(np.asarray(edge_sl, float), Mb); top = np.c_[top, np.zeros(Mb) if top_z is None else top_z(top)]
         t = np.linspace(0, 1, rows + 1)[:, None, None]; G = (1 - t) * base[None] + t * top[None]
         for _ in range(RELAX_IT):
             G[1:-1, 1:-1] = 0.25 * (G[:-2, 1:-1] + G[2:, 1:-1] + G[1:-1, :-2] + G[1:-1, 2:])
@@ -72,6 +72,19 @@ def build_fins(form, rec, out):
     for name in ('pectoral', 'pelvic'):
         if name not in F: continue          # fins the record does not have are not made
         f = F[name]
+        if f.get('edge') and f.get('base_line'):
+            # traced paired fin: its side-view outline (the photo pose, root round the tip to the other root) is the free
+            # edge, its base line on the body is the root row; the fin stands off the flank by its out angle, so each edge
+            # point rises from the body by its distance from the root times tan(out)
+            BL = np.asarray(f['base_line'], float); Mb = EDGE_RAYS; out_ = np.tan(np.radians(f['out']))
+            for sg in (1, -1):
+                bxy = resample(BL, Mb); bz = sg * (np.abs(form.z_on(bxy[:, 0], bxy[:, 1])) - 0.004)
+                base = np.c_[bxy, bz]
+                def top_z(T, base=base, sg=sg):
+                    r = np.linalg.norm(T[:, None, :2] - base[None, :, :2], axis=-1); j = r.argmin(1)
+                    return base[j, 2] + sg * out_ * r[np.arange(len(T)), j]
+                edge_card(base, f['edge'], EDGE_ROWS, f'{name}_{"L" if sg > 0 else "R"}', f['rays'], top_z)
+            continue
         for sg in (1, -1):
             Mb = 9; tt = np.linspace(0, 1, Mb)
             prof = np.interp(tt, np.array(f['prof'])[:, 0], np.array(f['prof'])[:, 1])

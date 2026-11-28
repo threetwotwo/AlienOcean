@@ -53,7 +53,9 @@ def iou(a, b): return float((a & b).sum() / max(1, (a | b).sum()))
 
 
 def score(C, V, rec, ref):
-    """IoU whole and head; the head is everything in front of the cover's rear edge."""
+    """IoU whole and head; the head is everything in front of the cover's rear edge. A reference with views but no traced
+    side yet (a draft record) has no SIL1 score."""
+    if not ref.get('side'): return dict(SIL1_pass=False, SIL1_note='reference has no traced side outline yet')
     A, B = built_mask(C, V), poly_mask(ref['side'])
     x0, x1 = BOX[0], BOX[1]; xh = max(p[0] for p in rec['cover']['rear'])
     cut = int((xh - x0) / (x1 - x0) * A.shape[1])
@@ -118,7 +120,29 @@ def front_has_fins(ref):
     return not (v is False or (isinstance(v, str) and v.strip().lower().startswith('body only')))
 
 
-def _faces2(C, V, view, fins=True):
+def section_u(ref):
+    """x (SL) of a "front" reference that is one cross-section (sliced from a 3D scan at one station: "front_kind":
+    "section", "front_u"), or None for a head-on projection (a photo: the whole body's outline seen from ahead)."""
+    if ref.get('front_kind') == 'section': return float(ref.get('front_u', ref.get('u')))
+    return None
+
+
+def _slice(C, V, u):
+    """the body cage cut by the plane x = u, as one polygon [(z, y)] (segments ordered by angle round their centre; a fish
+    cross-section is star-shaped about its centre)."""
+    P = []
+    for f, t in zip(C['faces'], C['ftag']):
+        if t not in ('body', 'eye', 'mouth', 'cap'): continue
+        Q = V[f]; d = Q[:, 0] - u
+        for a in range(len(f)):
+            b = (a + 1) % len(f)
+            if (d[a] < 0) != (d[b] < 0):
+                w = d[a] / (d[a] - d[b]); q = Q[a] + w * (Q[b] - Q[a]); P.append((q[2], q[1]))
+    P = np.array(P); c = P.mean(0); return P[np.argsort(np.arctan2(P[:, 1] - c[1], P[:, 0] - c[0]))]
+
+
+def _faces2(C, V, view, fins=True, u=None):
+    if view == 'front' and u is not None: return [_slice(C, V, u)]
     F = [V[f] for f, t in zip(C['faces'], C['ftag']) if t in ('body', 'eye', 'mouth', 'cap')]
     if view == 'front' and fins:
         for k, fn in C.get('fins', {}).items():
@@ -141,7 +165,7 @@ def score2(C, V, ref):
     R = {}
     for view in ('front', 'top'):
         if not ref.get(view): continue
-        P = np.asarray(ref[view], float); F = _faces2(C, V, view, front_has_fins(ref)); box = _box2(np.vstack([P] + F))
+        P = np.asarray(ref[view], float); F = _faces2(C, V, view, front_has_fins(ref), section_u(ref) if view == 'front' else None); box = _box2(np.vstack([P] + F))
         R[f'SIL2_{view}_iou'] = round(iou(mask2(F, box), mask2([P], box)), 3)
     if R: R['SIL2_pass'] = all(v >= SIL2_MIN for v in R.values())
     return R
@@ -156,7 +180,7 @@ def outline2(C, V, view, res=500):
 
 
 def overlay2(C, V, ref, view, out_png):
-    P = np.asarray(ref[view], float); F = _faces2(C, V, view, front_has_fins(ref)); box = _box2(np.vstack([P] + F))
+    P = np.asarray(ref[view], float); F = _faces2(C, V, view, front_has_fins(ref), section_u(ref) if view == 'front' else None); box = _box2(np.vstack([P] + F))
     A, B = mask2(F, box), mask2([P], box)
     img = np.full(A.shape + (3,), 245, np.uint8); img[B & ~A] = (90, 130, 255); img[A & ~B] = (255, 90, 90); img[A & B] = (150, 110, 190)
     Image.fromarray(img).save(out_png)
@@ -249,7 +273,7 @@ def board(outroot, record_dirs, names=()):
         if ref is None: return n, dict(SIL1_pass=False, SIL1_note='no traced reference silhouette yet')
         C = json.load(open(os.path.join(d, 'cage.json'))); V = np.load(os.path.join(d, 'cage.npz'))['V']
         rec = adapt(rp, C.get('style')); RF = json.load(open(ref)); R = score(C, V, rec, RF); R.update(score2(C, V, RF))
-        overlay(C, V, RF, os.path.join(d, 'silhouette.png')); R['png'] = os.path.join(d, 'silhouette.png')
+        if RF.get('side'): overlay(C, V, RF, os.path.join(d, 'silhouette.png')); R['png'] = os.path.join(d, 'silhouette.png')
         for view in ('front', 'top'):
             if RF.get(view): overlay2(C, V, RF, view, os.path.join(d, f'silhouette_{view}.png'))
         return n, R
