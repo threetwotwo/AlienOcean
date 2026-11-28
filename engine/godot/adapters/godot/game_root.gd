@@ -41,6 +41,7 @@ const Packet := preload("res://core/m01_input/input_packet.gd")
 @export var worldtex_dir := ""                 # the shared ground material's textures (AO_WORLDTEX)
 @export var dress_manifest := ""               # an authored place (world_dress/<name>.json) and its pieces
 @export var dress_pieces := ""
+@export var reef_on := true                    # with the pieces: the reef drop-off round the lagoon (adapters/godot/reef_terrain.gd)
 @export var spawn_feet := Vector3(0, 1.6, 18)  # the girl's feet at start (the lagoon: sand at y 0, surface at 4 m)
 @export var spawn_swim := true
 @export var schools: Array = []                # [{species, home: Vector3, count, seed, tethered}]
@@ -259,6 +260,9 @@ func _build_lagoon() -> void:
 		_flat_floor()
 	else:
 		_load_pieces()
+		if reef_on and world_root.lagoon_radius > 0.0:   # the drawn seabed past the tiles: the reef and its drop-off to the deep
+			var reef := ReefTerrain.new(); reef.name = "Reef"; lagoon.add_child(reef)
+			reef.build(world_root.bathymetry(), LagoonWaterField.SURFACE_Y)   # the mean level (the seabed does not follow the tide)
 	if dress_manifest != "":
 		var dress := DressCell.new(); dress.setup(dress_manifest, dress_pieces)
 		dress.ground_material = _ground
