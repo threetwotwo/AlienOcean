@@ -11,6 +11,7 @@ render_mode blend_mix, cull_disabled, diffuse_lambert, specular_schlick_ggx;
 
 uniform float roughness_base : hint_range(0.0, 1.0) = 0.6;
 uniform float caustic_strength : hint_range(0.0, 3.0) = 1.0;
+uniform float net_wrap = 0.35;   // art lever (0.8.2): how far round toward the shade the light net reaches on a body under water
 varying vec3 wpos;
 varying vec3 wnorm;
 
@@ -38,5 +39,10 @@ void light() {
 	float caus = caustic_sun(wpos, water_y - wpos.y, water_sun_w, px, TIME, caustic_strength);
 	vec3 fr = vec3(1.0);
 	if (water_fill_ao > 0.5) fr = w_fill_ratio(z, 0.5 + 0.5 * normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz).y);
-	DIFFUSE_LIGHT += clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * ATTENUATION * LIGHT_COLOR / PI * corr * caus / fr;
+	float ndl = clamp(dot(NORMAL, LIGHT), 0.0, 1.0);
+	DIFFUSE_LIGHT += ndl * ATTENUATION * LIGHT_COLOR / PI * corr * caus / fr;
+	// 0.8.2 (Gary 28 Nov, bodies under the surface read dry): the light net only rode on N.L, so flanks upright under a high
+	// sun showed none of the dappling the sand has. Sides near the terminator take the net's swing too (its mean is 1, so
+	// the brightness is unchanged), never below zero
+	DIFFUSE_LIGHT = max(DIFFUSE_LIGHT + max(net_wrap - ndl, 0.0) * ATTENUATION * LIGHT_COLOR / PI * corr * (caus - 1.0) / fr, vec3(0.0));
 }
