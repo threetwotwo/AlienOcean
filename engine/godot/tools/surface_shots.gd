@@ -121,6 +121,10 @@ func _setup():
 			["o3_above_high", Vector3(0, y + 30.0 + 3.0 * hs, 40.0 + 4.0 * hs), Vector3(0, y, 0), 60.0],
 			["o4_under_up", Vector3(0, dn, 0), Vector3(0, dn, 0) + (away + Vector3(0, tan(deg_to_rad(35.0)), 0)) * 10.0, 75.0],
 			["o5_under_window", Vector3(0, dn, 0), Vector3(0, dn, 0) + Vector3(0.05, 10.0, -0.3), 90.0],
+			# the lens half in the waves (Gary 28 Nov, transitions; the Unreal tank's per-pixel waterline): on the still level,
+			# level and tilted down a little, so the waterline runs across the picture along the real wave
+			["o6_lens_level", Vector3(0, y, 0), Vector3(0, y, 0) + away * 20.0, 75.0],
+			["o7_lens_down", Vector3(0, y + 0.1, 0), Vector3(0, y + 0.1, 0) + away * 20.0 + Vector3(0, -6.0, 0), 75.0],
 		]
 		print("SEA ", sea_env, " ", SeaSpectrum.BEAUFORT[force][2], " Hs ", hs)
 	if OS.get_environment("AO_REFR") != "":         # refraction check (Gary 28 Nov: the body doubled from above): a body
@@ -161,6 +165,54 @@ func _setup():
 			["f6_refr_stand_low", base + Vector3(6.2, 0.7, 2.6), base + Vector3(6.4, -0.2, -2.0), 60.0],
 			["f7_movers_top", base + Vector3(-6.0, 4.5, 0.4), base + Vector3(-6.0, -0.3, 0), 70.0],
 			["f8_movers_behind", base + Vector3(-6.0, 1.2, 4.0), base + Vector3(-6.0, -0.3, -1.0), 70.0],
+		]
+	if OS.get_environment("AO_BREACH") != "":       # Gary 28 Nov playtest 3: "from underwater, body turns invisible when
+		# breached". A body standing half out (hips at the surface, head 0.9 m up), one leaping clear (0.3..1.7 m up) and a
+		# post, seen from under the water: the chase camera behind and below, from the side, and from right under
+		var base := Vector3(0.0, y, 10.0)
+		var mk := func(m: Mesh, at: Vector3, rot: Vector3, c: Color) -> MeshInstance3D:
+			var mi := MeshInstance3D.new(); mi.mesh = m; mi.position = at; mi.rotation = rot
+			var sm := StandardMaterial3D.new(); sm.albedo_color = c; sm.roughness = 0.6; mi.material_override = sm
+			root.add_child(mi); SeaFloorMap.mark_mover(mi)
+			return mi
+		var cap := CapsuleMesh.new(); cap.radius = 0.2; cap.height = 1.7
+		mk.call(cap, base + Vector3(0.0, 0.05, 0.0), Vector3(0.25, 0, 0), Color(0.88, 0.8, 0.72))           # half out
+		var cap2 := CapsuleMesh.new(); cap2.radius = 0.18; cap2.height = 1.5
+		mk.call(cap2, base + Vector3(-2.5, 1.0, -0.5), Vector3(0.6, 0, 0.2), Color(0.85, 0.7, 0.55))         # clear of the water
+		var post := CylinderMesh.new(); post.top_radius = 0.1; post.bottom_radius = 0.1; post.height = 2.6
+		mk.call(post, base + Vector3(1.8, -0.3, -0.8), Vector3.ZERO, Color(0.9, 0.35, 0.2))                   # floor to 1 m up
+		shots = [
+			["b1_chase_behind", base + Vector3(0.3, -0.9, 3.6), base + Vector3(-0.8, 0.3, 0.0), 70.0],
+			["b2_side_level", base + Vector3(3.5, -0.7, 0.4), base + Vector3(-0.5, 0.2, -0.3), 70.0],
+			["b3_under_up", base + Vector3(-0.6, -2.0, 1.6), base + Vector3(-0.9, 0.5, -0.2), 80.0],
+			["b4_deep_up", base + Vector3(-0.5, -2.2, 4.0), base + Vector3(-1.0, 0.4, -0.2), 75.0],
+		]
+	if OS.get_environment("AO_SHADE") != "":        # Gary 28 Nov: "fish and ships should cast their shadows on player.
+		# check." A fish (0.8 m, 0.7 m over a swimmer) and a hull (4 m, floating) over a second swimmer, seen under water
+		# from the side and from above the surface. The shadows fall along the sun: the casters stand up-sun of the swimmers
+		var base := Vector3(0.0, y, 10.0)
+		var sd: Vector3 = wr.light.global_transform.basis.z.normalized() if wr.light != null else Vector3.UP   # toward the sun
+		if sd.y < 0.3: sd = Vector3.UP
+		var mk := func(m: Mesh, at: Vector3, sc: Vector3, c: Color) -> MeshInstance3D:
+			var mi := MeshInstance3D.new(); mi.mesh = m; mi.position = at; mi.scale = sc
+			var sm := StandardMaterial3D.new(); sm.albedo_color = c; sm.roughness = 0.6; mi.material_override = sm
+			root.add_child(mi); SeaFloorMap.mark_mover(mi)
+			return mi
+		var cap := CapsuleMesh.new(); cap.radius = 0.2; cap.height = 1.6
+		var sw1 := base + Vector3(0.0, -1.3, 0.0); var sw2 := base + Vector3(-4.0, -1.5, -1.0)
+		mk.call(cap, sw1, Vector3.ONE, Color(0.88, 0.82, 0.76)).rotation = Vector3(0, 0, PI * 0.5)
+		mk.call(cap, sw2, Vector3.ONE, Color(0.88, 0.82, 0.76)).rotation = Vector3(0, 0, PI * 0.5)
+		var fish := SphereMesh.new(); fish.radius = 0.5; fish.height = 1.0
+		mk.call(fish, sw1 + sd * (0.7 / maxf(sd.y, 0.2)), Vector3(0.8, 0.35, 0.3), Color(0.6, 0.6, 0.65))
+		var hull := BoxMesh.new(); hull.size = Vector3(4.0, 0.6, 1.4)
+		mk.call(hull, sw2 + sd * (1.4 / maxf(sd.y, 0.2)), Vector3.ONE, Color(0.45, 0.3, 0.22))
+		print("SHADE sun ", sd)
+		shots = [
+			["k1_shade_side", base + Vector3(-1.5, -1.6, 4.0), base + Vector3(-1.8, -1.4, 0.0), 70.0],
+			["k2_shade_under", base + Vector3(-2.0, -2.2, 2.5), base + Vector3(-2.0, -1.3, -0.4), 75.0],
+			["k3_shade_above", base + Vector3(-2.0, 3.5, 4.5), base + Vector3(-2.0, -1.3, -0.4), 60.0],
+			["k4_fish_on_back", sw1 + Vector3(1.3, 0.35, 1.5), sw1, 60.0],
+			["k5_hull_on_back", sw2 + Vector3(1.6, 0.4, 1.8), sw2, 60.0],
 		]
 	if OS.get_environment("AO_WL") != "":           # the waterline (Gary 28 Nov: "a cardboard effect of the horizon fog" as
 		# the eye cuts the water line): level views at the dressed lagoon's arch, the eye 2 cm and 15 cm above, 3 cm under,

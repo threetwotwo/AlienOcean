@@ -48,6 +48,29 @@
   pelvis speed); the head's clocks take the whole frame. No lower-lid motion, brows or speech; the eyes are pinned at
   their limit (riding the head) for targets behind her until the head turns, by design.
 
+## 0.6.0-dev (28 Nov 2026, water surface: the waterline per pixel at the lens, from the Unreal tank)
+- Gary 28 Nov: "under water to over water transitions ... not great/responsive", "cant you check ue5 open water code?".
+  The tank's eye test matched ours (the live wave at the camera); its per-pixel waterline (M_PP_OO_Waterline,
+  WATERLINE_HLSL) was missing. look/underwater_view 0.5.0: each pixel's point on the lens is under or over the wave there
+  (FFT height, sideways push undone), so the water's haze splits along the real wave line (main drew the floor dry under
+  a crest while the eye counted as over). NEW look/waterline_post.glsl + adapters/godot/waterline_effect.gd (compositor,
+  after the transparent pass, before AgX): the film along the line (drag, blur across, wobble, dark foot, pale rim), only
+  within 2 Hs + 1 m of the still level. Stress shots: surface_shots AO_SEA=Bn o6/o7 (the lens half in the waves).
+
+## 0.6.0-dev (28 Nov 2026, water surface: refraction as one bent-ray march; bodies above the water seen from below)
+- Gary 28 Nov: "water surface refraction wobble. it should be a root fix, physically correct for all object underwater.
+  not just a patch fix for player model." look/sea_top 0.9.0: the refracted ray is marched through the screen's depth
+  (NEW look/sea_march.gdshaderinc: affine clip-space ray, jittered steps scaled by screen span, crossing halved, a hit
+  only where the gap closes) to whatever it meets, every object alike. Replaces 0.7.0's straight-depth shift, 0.8.1's
+  nearer-sample refusal and 0.8.2's movers-only wiggle. Misses: the floor map marched as a heightfield (the damped fixed
+  point collapsed at walls), or the hidden side of a static rock. sea_body_veil default 1 (the true path).
+- Gary 28 Nov playtest 3: "from underwater, body turns invisible when breached." look/sea_under 0.4.0 reads the scene
+  behind it: inside Snell's window the same march finds what stands above the water. Now in the transparent pass after
+  the underwater view (render_priority 1), adding the eye's water path + god rays itself (globals sea_eye_wave, sea_god
+  from WorldRoot; keep in step with underwater_view's ray-on-geometry branch). sea_under_ghost art lever, 0 = physical.
+- Stress shots: tools/surface_shots.gd AO_BREACH (b1-b4, bodies breaking the surface from below), AO_SHADE (k1-k5,
+  fish and hull shadows on swimmers under water: they cast).
+
 ## 0.6.0-dev (28 Nov 2026, M34 bubbles 0.1): air bubbles under water, Thalassa's sources with the Unreal bubbles v4 look
 - Gary 28 Nov: "bubbles: port thalassa's bubbles code, improve as you see fit. for the look, use pre-godot ue5 existing
   work." Sources PORTED from Thalassa v20.19 (style/particles.js, style/runtime.js spawnBubble sites) as a GameRoot plug
