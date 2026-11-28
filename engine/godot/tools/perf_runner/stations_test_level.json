@@ -198,7 +198,9 @@
   "floor_look_down",
   "openwater_look_down",
   "keyframe_view",
-  "open_ocean_look_down"
+  "open_ocean_look_down",
+  "surface",
+  "snell_window_up"
  ],
  "skip_toggles": [
   "collider"
