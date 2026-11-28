@@ -1,5 +1,12 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026): lagoon dressing round 9, the layers linked
+- World: Gary kept the arch's form (28 Nov 01:30Z), so the empty sand band under it is closed by composition. The key frame's
+  massif was two kit heads stacked in depth (layout.json b0 at 4.7 m in front of b3 at 12.5 m), its foot overlapping the corals.
+  Same relation here with the kit's own heads: SB_Bommie_0 at 7.6 m before the arch's left foot (x1.3, stem sunk 0.4 m, turned
+  70 deg) and SB_Bommie_4 as a low boulder right of the gate (x0.6, sunk 0.15 m): mass heavy left, open right, gate clear.
+  Fable r9 then r9b (equal mushrooms bracketing the gate read as kit stamping; fixed by unequal scale, sink and turn). Manifest 0.7.0.
+
 ## 0.6.0-dev (28 Nov 2026): the shared game root (M32)
 - Game root thread: GameRoot (`adapters/godot/game_root.gd`, scene `scenes/game.tscn`) builds the world and its services and
   runs one tick order: clock, input, player, actors, fauna, plugs, camera, world. Ported from Thalassa v20.19
