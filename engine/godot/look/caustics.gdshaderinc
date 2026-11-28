@@ -14,7 +14,7 @@
 // Frame: the island's (x east, y north), metres. Godot (x, y, z) -> island (x, -z).
 #include "res://look/caustic_waves.gdshaderinc"
 global uniform sampler2D water_caus_map : repeat_enable, filter_linear;
-global uniform vec4 water_caus_k;      // x: 1 = read the map, 0 = per pixel; y: the net's time in s when >= 0 (stills, checks), else TIME
+global uniform vec4 water_caus_k;      // x: 1 = read the map, 0 = per pixel; y: the net's time in s when >= 0 (stills, checks), else TIME; z: 1 = net off
 const float CAUS_S = 0.90;             // live Unreal strength: CausticStrength 0.70 + CausticPerStop 0.10 x ExposureBias 2.0
 const float CAUS_HEADROOM = 2.0;       // live Unreal CausticHeadroom: the light function's ceiling, x plain sun
 const float CAUS_MASK_M = 0.30;        // the light function fades in over the first 30 cm under the still surface
@@ -99,7 +99,7 @@ float caus_time(float time_s) { return (water_caus_k.y >= 0.0 ? water_caus_k.y :
 // The net at a lit point (v98 FFT_NET_HLSL): wpos Godot world m, depth m under the still surface, sun_w the refracted
 // sun (toward the sun, Godot frame), pixel_m the pixel's size on the ground. Returns x plain sun, mean ~1.
 float caustic_net(vec3 wpos, float depth, vec3 sun_w, float pixel_m, float time_s) {
-	if (depth <= 0.0) return 1.0;
+	if (depth <= 0.0 || water_caus_k.z > 0.5) return 1.0;
 	vec2 e = wpos.xz + sun_w.xz * (depth / max(sun_w.y, 0.2));   // where this point's sunlight came through the surface
 	vec2 X = vec2(e.x, -e.y);
 	float nw = clamp(log2(max(depth, 1e-3) / CAUS_D0) / CAUS_DSTEP, 0.0, 2.0);

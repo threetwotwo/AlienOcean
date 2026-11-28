@@ -16,6 +16,8 @@ const SLOPE_PX := [128, 64, 32]       # v98 CAUS_MIPS[1..3]: 2, 4 and 8 cm texel
 var slope_vps: Array[SubViewport] = []
 var focus_vp: SubViewport
 var map_vp: SubViewport
+var enabled := true:                   # false: no light net at all (test level switch; the sun lights plain)
+	set(v): enabled = v; _push()
 var per_pixel := false:
 	set(v):
 		per_pixel = v; _push()
@@ -63,7 +65,7 @@ func _exit_tree() -> void:
 
 func _push() -> void:
 	if not is_inside_tree(): return
-	RenderingServer.global_shader_parameter_set("water_caus_k", Vector4(0.0 if per_pixel else 1.0, frozen_time, 0.0, 0.0))
-	var mode := SubViewport.UPDATE_DISABLED if per_pixel else SubViewport.UPDATE_ALWAYS
+	RenderingServer.global_shader_parameter_set("water_caus_k", Vector4(0.0 if per_pixel else 1.0, frozen_time, 0.0 if enabled else 1.0, 0.0))
+	var mode := SubViewport.UPDATE_DISABLED if (per_pixel or not enabled) else SubViewport.UPDATE_ALWAYS
 	for vp: SubViewport in slope_vps: vp.render_target_update_mode = mode
 	focus_vp.render_target_update_mode = mode; map_vp.render_target_update_mode = mode
