@@ -162,7 +162,7 @@ def optics(EY, r):
 
 def shells(B, V):
     """eye shell placement (iris dome + cornea are made in the exporter), seated on each rim ring and aimed down the eye's
-    own axis. The rim lies in the plane square to that axis (the form's periorbital tissue carries the skin out to it), so
+    own axis. The rim lies in the plane square to that axis (the form's swelling round the rim carries the skin out to it), so
     the shells sit true in the opening. Up to 0.5.x the aim was the normal of three rim points: the skin's facing at the
     eye, further up than the skin round it, where real eyes aim below it."""
     eyes = []

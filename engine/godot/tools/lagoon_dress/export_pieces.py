@@ -28,6 +28,9 @@ os.environ.setdefault('RUBBLE_PIECE', 'fracture')   # Terrain's v11 rule as the 
 sys.path.insert(0, P + 'seabed/tools'); import rubble_rule as rr
 sys.path.insert(0, P + 'papers/process/art_bible/style_level/keyframe/src')   # habitat.py: the key frame rig's habitat rules
 import random
+# skirt edge (AO thread 28 Nov: CORTAO showed the bank skirts' 5 cm-grid outer edge as a stair-step line on the sand): past the bank
+# (habitat.bank is 0 beyond w = 0.45 m) the skirt ramps down EDGE_DROP to its 0.6 m edge, so the drawn sand covers the edge
+EDGE_DROP = float(os.environ.get('SKIRT_EDGE_DROP', 0.04))
 CORAL_R = {}    # coral piece -> half its plan extent (the v7 rig's colony radius from the bound box)
 ROCK_MESH = {}  # rock piece -> (V, F) in its piece frame, for seating loose pieces on rock tops
 OUTLINES = {}   # piece -> ground outline (centre, 72 bin radii) in the piece frame, for the habitat rules
@@ -206,7 +209,7 @@ for kit_f, HF in json.load(open(HEADS_FIT)).items():
     d = np.hypot(GX - c[0], GY - c[1]) - np.array([hr(a) for a in np.arctan2(GY - c[1], GX - c[0]).ravel()]).reshape(GX.shape)
     live = (d > -0.3) & (d < 0.6)
     idx = -np.ones(GX.shape, int); idx[live] = np.arange(live.sum())
-    Vk = np.stack([GX[live], GY[live], Hb[live] - 0.005], 1); Fk = []
+    Vk = np.stack([GX[live], GY[live], Hb[live] - 0.005 - EDGE_DROP * np.clip((d[live] - 0.45) / 0.15, 0, 1)], 1); Fk = []
     for r_ in range(GX.shape[0] - 1):
         for c2 in range(GX.shape[1] - 1):
             a, b, e, f = idx[r_, c2], idx[r_, c2 + 1], idx[r_ + 1, c2], idx[r_ + 1, c2 + 1]
@@ -266,7 +269,7 @@ if MANIFEST:
         d = np.hypot(GX - c[0], GY - c[1]) - np.array([hr(a) for a in np.arctan2(GY - c[1], GX - c[0]).ravel()]).reshape(GX.shape)
         live = (d > -0.3) & (d < 0.6)
         idx = -np.ones(GX.shape, int); idx[live] = np.arange(live.sum())
-        Vk = np.stack([GX[live], GY[live], Hb[live] - 0.005], 1); Fk = []
+        Vk = np.stack([GX[live], GY[live], Hb[live] - 0.005 - EDGE_DROP * np.clip((d[live] - 0.45) / 0.15, 0, 1)], 1); Fk = []
         for r_ in range(GX.shape[0] - 1):
             for c2 in range(GX.shape[1] - 1):
                 a, b, e, f = idx[r_, c2], idx[r_, c2 + 1], idx[r_ + 1, c2], idx[r_ + 1, c2 + 1]
