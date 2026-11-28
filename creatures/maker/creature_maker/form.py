@@ -24,6 +24,8 @@ JAW_MIN = 0.003    # DEFAULT: least thickness of each jaw at the mouth line (SL)
 JAW_K = 0.002      # DEFAULT: the outline is carried round the mouth line over this height (SL), no crease
 HW_MIN = 0.002    # DEFAULT: least half-width of a cross-section (SL). A traced top view can close to a point at the snout
                   # while the side view still has height there; a zero width is a section with no inside (the loft divided by it)
+NOSE_ROUND = 1.0   # DEFAULT: radius of the snout tip seen from above, x half the snout's height at x = 0 (as round from above as it is blunt from the side)
+NOSE_CAP = 0.5     # DEFAULT: length of the snout's round front seen from the side, x half the height of the traced front at x = 0
 # ---- the eye's aim, the swelling round its rim and the head's facing round it. Source for the scan numbers: the Species thread's 79 CC0 photogrammetry scans
 # (plans/species_system/gapfill/README.md "Eye aim, round 1"; eye_aim_r1/gaze_report.json meta, skin_targets.json meta).
 RING_R = (1.6, 2.4)          # DEFAULT: the skin ring round the eye (x eye radius) whose best plane is "the skin's facing" (the scans' ring, eyedir.py)
@@ -171,10 +173,33 @@ class Form:
 
     def __init__(self, rec):
         self.rec = rec; O = self.O = rec['outline']
-        self._TOP0, self._BOT0, self.NUP, self.NLO = (pch(O[k]) for k in ('top', 'bot', 'nUp', 'nLo'))
+        _top, _bot, self.NUP, self.NLO = (pch(O[k]) for k in ('top', 'bot', 'nUp', 'nLo'))
+        # structure rule: the snout closes. A traced side outline has one top and one bottom height per x, so a blunt snout
+        # arrives as a front cut off square at x = 0, as tall as the lips (trevally 4.8 % SL): a flat front with a corner
+        # above the upper lip and under the lower one, a horn and a box step once the jaw opens (export r7). The real front
+        # is round: over the first NOSE_CAP of the front's half-height the outline closes on the mouth tip's height as an
+        # ellipse arc (the jaws keep their JAW_MIN there: TOP, BOT). A snout that comes to a point keeps it.
+        _ml0 = np.array(rec['mouth']['line'], float); _ml0 = _ml0[np.argmin(_ml0[:, 0])]; _t0, _b0 = float(_top(0.0)), float(_bot(0.0))
+        self.NOSE_H = _h0 = 0.5 * (_t0 - _b0); self.NOSE_L = _L = NOSE_CAP * _h0; _yt = float(np.clip(_ml0[1], _b0, _t0)) if _ml0[0] < _L else 0.5 * (_t0 + _b0)
+        _cap = lambda x: np.sqrt(np.clip(1 - (1 - np.clip(np.asarray(x, float) / max(_L, 1e-9), 0, 1)) ** 2, 0, 1))
+        self._TOP0 = (lambda x: _yt + (_top(x) - _yt) * _cap(x)) if _L > 1e-4 else _top
+        self._BOT0 = (lambda x: _yt + (_bot(x) - _yt) * _cap(x)) if _L > 1e-4 else _bot
         _hw0 = np.array(O['hw'], float); _hw = pch_fair(O['hw'], HW_FAIR_TOL, HW_FAIR_LEN)
         self.HW_FAIRED = float(np.max(np.abs(_hw(_hw0[:, 0]) - _hw0[:, 1])))       # how far the fairing moved a knot (SL)
-        self.HW = lambda x: np.maximum(_hw(x), HW_MIN)
+        # structure rule: the snout is round seen from above where it is blunt seen from the side. A side outline that starts
+        # with height at x = 0 (a blunt snout: the tracer's first column) over a top view that starts at zero width and
+        # runs straight to its first knot is a wedge with a knife edge down the front of the head, as tall as the snout:
+        # baked, a ridge from the snout through both lips into the chin, and a nipple on the nose from above (export r7).
+        # The nose's radius seen from above is half the snout's height at the tip, and no more than keeps the round inside
+        # the top view at every traced knot; a snout that closes to a point in the side view keeps its point.
+        _k = _hw0[_hw0[:, 0] > 1e-6]
+        self.NOSE_R = _R = max(min(NOSE_ROUND * _h0, float(np.min((_k[:, 1] ** 2 + _k[:, 0] ** 2) / (2 * _k[:, 0])))), 0.0)
+        # the round joins the traced width with no step and no crease: half-width^2 = traced^2 + 2 R x (1 - x / R)^3, the
+        # circle's own rise at the tip, run out (C2) one radius behind it. (A circle carried to its full radius and cut off
+        # there stood proud of a narrow snout's traced width at its end: a step across the snout, a wall in the plates on
+        # it and crossings in the mouth, 3 of 14 records.)
+        _nose2 = lambda x: 2 * _R * x * (1 - np.clip(x / max(_R, 1e-9), 0, 1)) ** 3
+        self.HW = lambda x: np.maximum(np.sqrt(_hw(x) ** 2 + _nose2(np.clip(np.asarray(x, float), 0, None))) if _R > 2 * HW_MIN else _hw(x), HW_MIN)
         self.XEND = O['top'][-1][0]
         self.SECT = self._sections(O.get('sections'))
         self.EY = EY = rec['eye']; self.CV = CV = rec['cover']; self.MO = MO = rec['mouth']
@@ -189,7 +214,7 @@ class Form:
         _xs = np.linspace(0, self.XEND, 2000); self._swell = None; _l = self._top_orbit(_xs) - self._TOP0(_xs)
         self.ORBIT_LIFT = float(np.max(_l)); self._swell = (float(_xs[int(np.argmax(_l))]), self.ORBIT_LIFT) if self.ORBIT_LIFT > 1e-5 else None
         _xm = np.linspace(0, self._seam[-1, 0], 60)
-        self.JAW_LIFT = float(max(np.max(self.TOP(_xm) - self._top_orbit(_xm)), np.max(self._BOT0(_xm) - self.BOT(_xm))))
+        self.JAW_LIFT = float(max(np.max(self.TOP(_xm) - np.maximum(self._top_orbit(_xm), _top(_xm))), np.max(np.minimum(self._BOT0(_xm), _bot(_xm)) - self.BOT(_xm)), 0.0))    # past the record's own outline (the round front lies inside it)
         self._orb = None; self.ORBIT = self._orbit()
         self.rear, self.preop = smooth_curve(CV['rear']), smooth_curve(CV['preop'])
         self.ring_x = float(np.mean([p[0] for p in smooth_curve(CV['edge_all'])]))      # where the slit's ring goes (see record.py)
@@ -298,8 +323,17 @@ class Form:
             xs = np.linspace(d_[0, 0], d_[-1, 0], 16); up = np.c_[xs, self.th_side(xs, np.minimum(np.interp(xs, d_[:, 0], d_[:, 1]), lip(xs)))]
             xl = np.linspace(l_[0, 0], l_[-1, 0], 16); low = np.c_[xl, np.maximum(self.th_below(xl, np.interp(xl, l_[:, 0], l_[:, 2])), np.interp(xl, xs, up[:, 1]))]
             half = 0.5 * np.linalg.norm(self.loft_point(up[:, 0], up[:, 1]) - self.loft_point(low[:, 0], low[:, 1]), axis=1)
-            plate('mandible', step * 0.6, [], [(0, np.r_[up, low[::-1], up[:1]])], 'lower jaw rami: record jaw.dentary + jaw.mandibleLow (to the jaw joint), a round ridge between the two lines',
-                  ridge=max(float(np.median(half)), PLATE_CHAMFER))
+            ridge = max(float(np.median(half)), PLATE_CHAMFER)
+            # bone runs on under bone: behind the joint the jaw's end lies under the cover's front (the angular under the
+            # interopercle), so the ridge runs out one ridge-width behind the joint, under the membrane's own rise. Ended on
+            # the joint, ridge and membrane both faded to nothing on one line: a dent across the throat with the jaw's end
+            # standing in front of it as a ball, and a step in the throat's outline (export r7).
+            if not getattr(self, '_jaw_ends_on_joint', False):
+                xo = np.minimum(xs[-1] + ridge * np.array([0.5, 1.0]), self.XEND); yo = min(float(d_[-1, 1]), float(lip(xs[-1])))
+                up = np.r_[up, np.c_[xo, self.th_side(xo, np.full(2, yo))]]
+                low = np.r_[low, np.c_[xo, np.maximum(self.th_below(xo, np.full(2, l_[-1, 2])), up[-2:, 1])]]
+            plate('mandible', step * 0.6, [], [(0, np.r_[up, low[::-1], up[:1]])], 'lower jaw rami: record jaw.dentary + jaw.mandibleLow (to the jaw joint, running out one ridge-width behind it), a round ridge between the two lines',
+                  ridge=ridge)
         return out
 
     def isthmus_th(self, x, room=0.012):
