@@ -16,13 +16,15 @@ var max_slope_comp := 4.0
 var backface_threshold := 0.5
 var backface_boost := 0.0
 var filter_depth := 512.0
-var filter_normal := 128.0
+var filter_normal := 16.0           # CORTAO default 128; 16 with shape normals: key frame grain 3.70 -> 3.35 (SSAO 3.05)
 var animate := false              # new seed every frame (only with a temporal filter: TAA / FSR2); constant otherwise, no flicker
 var invert_flip := false          # checks only: the planted fault (AO lands mirrored)
+var depth_normals := true         # the shape's normal from depth, not the materials' detail normal (see cortao_prepass.glsl)
 var samples := int(OS.get_environment("CORTAO_SAMPLES")) if OS.get_environment("CORTAO_SAMPLES") != "" else 16
 var filter_passes := 3            # the filter 3 times: our renders have no temporal filter (TAA off, FSR 1 is spatial). cortao_check C5: grain 0.030 (1 pass) -> 0.016
 var capture_next := false         # checks: copy the next result into `captured` (stalls the GPU; tests only)
 var captured: Image
+var gpu_ms := 0.0                 # the three passes' GPU time, last frame read back (RD timestamps; 0 until measured)
 
 var rd: RenderingDevice
 var sh_pre: RID
@@ -42,6 +44,8 @@ var packed: RID
 var packed_mips: Array[RID] = []
 var raw: RID
 var raw2: RID
+var shape_n: RID
+var ubo: RID
 var out: RID
 var tex := Texture2DRD.new()      # main thread side of `out`
 var frame := 0
@@ -56,7 +60,7 @@ func _init() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and rd:
-		for r in packed_mips + [packed, raw, raw2, out, lut, smp_border, smp_clamp, pl_pre, pl_main, pl_filt, pl_filt2, sh_pre, sh_main, sh_filt, sh_filt2]:
+		for r in packed_mips + [packed, raw, raw2, shape_n, out, ubo, lut, smp_border, smp_clamp, pl_pre, pl_main, pl_filt, pl_filt2, sh_pre, sh_main, sh_filt, sh_filt2]:
 			if r.is_valid(): rd.free_rid(r)
 
 ## CORTAO's shaders #include its headers; Godot's GLSL compiler has no include path, so the headers are inlined here
@@ -116,15 +120,16 @@ func _init_compute() -> void:
 	tf.width = 24; tf.height = 24; tf.depth = 16
 	tf.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
 	lut = rd.texture_create(tf, RDTextureView.new(), [FileAccess.get_file_as_bytes(DIR + "occluder_24x24x16_r16ui.bin")])
+	ubo = rd.uniform_buffer_create(48)
 	ok = lut.is_valid()
 
 func _free_targets() -> void:
 	for r in packed_mips:
 		if r.is_valid(): rd.free_rid(r)
 	packed_mips.clear()
-	for r in [packed, raw, raw2, out]:
+	for r in [packed, raw, raw2, shape_n, out]:
 		if r.is_valid(): rd.free_rid(r)
-	packed = RID(); raw = RID(); raw2 = RID(); out = RID()
+	packed = RID(); raw = RID(); raw2 = RID(); shape_n = RID(); out = RID()
 
 func _make_targets(sz: Vector2i) -> void:
 	_free_targets()
@@ -139,6 +144,8 @@ func _make_targets(sz: Vector2i) -> void:
 	f.mipmaps = 1
 	raw = rd.texture_create(f, RDTextureView.new())
 	raw2 = rd.texture_create(f, RDTextureView.new())
+	f.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+	shape_n = rd.texture_create(f, RDTextureView.new())
 	f.format = RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM
 	f.usage_bits |= RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	out = rd.texture_create(f, RDTextureView.new())
@@ -147,6 +154,15 @@ func _make_targets(sz: Vector2i) -> void:
 func _publish(r: RID) -> void:
 	tex.texture_rd_rid = r
 	RenderingServer.global_shader_parameter_set("cortao_ao", tex)
+
+func _read_time() -> void:
+	## timestamps come back a frame or more later: take the newest begin/end pair Godot reports
+	var t0 := -1; var t1 := -1
+	for i in rd.get_captured_timestamps_count():
+		var n := rd.get_captured_timestamp_name(i)
+		if n == "CORTAO begin": t0 = rd.get_captured_timestamp_gpu_time(i)
+		elif n == "CORTAO end": t1 = rd.get_captured_timestamp_gpu_time(i)
+	if t0 >= 0 and t1 > t0: gpu_ms = float(t1 - t0) / 1.0e6   # Godot reports these in nanoseconds (cloud check 28 Nov: 63.7 ms on llvmpipe at 960x540)
 
 static func _u(type: int, binding: int, ids: Array) -> RDUniform:
 	var u := RDUniform.new(); u.uniform_type = type; u.binding = binding
@@ -197,20 +213,27 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	var fp := PackedByteArray(); fp.resize(16)
 	fp.encode_u32(0, res); fp.encode_float(4, filter_depth); fp.encode_float(8, filter_normal)
 
+	var ub := PackedFloat32Array([mp.decode_float(16), mp.decode_float(20), mp.decode_float(24), mp.decode_float(28),
+		1.0 / sz.x, 1.0 / sz.y, 0.0, 0.0, 1.0 if depth_normals else 0.0, 0.0, 0.0, 0.0]).to_byte_array()
+	rd.buffer_update(ubo, 0, ub.size(), ub)
+	_read_time()
+	rd.capture_timestamp("CORTAO begin")
 	var U := RenderingDevice
 	var cl := rd.compute_list_begin()
 	rd.compute_list_bind_compute_pipeline(cl, pl_pre)
 	rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_pre, 0, [
 		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_clamp, depth]),
 		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_clamp, normal]),
-		_u(U.UNIFORM_TYPE_IMAGE, 2, packed_mips)]), 0)
+		_u(U.UNIFORM_TYPE_IMAGE, 2, packed_mips),
+		_u(U.UNIFORM_TYPE_UNIFORM_BUFFER, 3, [ubo]),
+		_u(U.UNIFORM_TYPE_IMAGE, 4, [shape_n])]), 0)
 	rd.compute_list_set_push_constant(cl, pre, pre.size())
 	rd.compute_list_dispatch(cl, (sz.x + 7) / 8, (sz.y + 7) / 8, 1)
 	rd.compute_list_add_barrier(cl)
 	rd.compute_list_bind_compute_pipeline(cl, pl_main)
 	rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_main, 0, [
 		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_border, packed]),
-		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_clamp, normal]),
+		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_clamp, shape_n]),
 		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [smp_clamp, lut]),
 		_u(U.UNIFORM_TYPE_IMAGE, 3, [raw])]), 0)
 	rd.compute_list_set_push_constant(cl, mp, mp.size())
@@ -236,6 +259,7 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	rd.compute_list_set_push_constant(cl, fp, fp.size())
 	rd.compute_list_dispatch(cl, (sz.x / 2 + 8) / 8, (sz.y / 2 + 8) / 8, 1)
 	rd.compute_list_end()
+	rd.capture_timestamp("CORTAO end")
 	if capture_next:
 		capture_next = false
 		var bytes := rd.texture_get_data(out, 0)

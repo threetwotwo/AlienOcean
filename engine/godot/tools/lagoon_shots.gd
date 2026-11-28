@@ -98,6 +98,9 @@ func _setup():
 	world.add_child(wr)
 	if OS.get_environment("AO_AO") != "": wr.set_ao(OS.get_environment("AO_AO"))   # ssao (default) | cortao | off (ao thread 28 Nov)
 	if OS.get_environment("AO_CORTAO_R") != "": wr.cortao_fx.radius = float(OS.get_environment("AO_CORTAO_R"))
+	if OS.get_environment("AO_CORTAO_FN") != "": wr.cortao_fx.filter_normal = float(OS.get_environment("AO_CORTAO_FN"))   # filter normal sensitivity
+	if OS.get_environment("AO_TAA") == "1": wr.cortao_fx.animate = true   # a new CORTAO seed each frame for TAA to average
+	if OS.get_environment("AO_CORTAO_PASSES") != "": wr.cortao_fx.filter_passes = int(OS.get_environment("AO_CORTAO_PASSES"))
 	if OS.get_environment("AO_AGX") == "0": wr.set_agx(false)   # Godot's built-in AgX, for before/after
 	if OS.get_environment("AO_AGX_MODE") != "": wr.agx_fx.mode = int(OS.get_environment("AO_AGX_MODE"))
 	if OS.get_environment("AO_SKY_BLUE") != "": wr.agx_fx.sky_blue = float(OS.get_environment("AO_SKY_BLUE"))   # AgX SkyBlue, for checks
@@ -199,5 +202,5 @@ func _process(_d):
 			var cm: Image = wr.caustics.map_vp.get_texture().get_image(); cm.convert(Image.FORMAT_RGBAF)
 			var cf := FileAccess.open(_caus_dump, FileAccess.WRITE); cf.store_buffer(cm.get_data()); cf.close()
 			print("CAUS_DUMP ", _caus_dump, " ", cm.get_width(), " x ", cm.get_height(), " RGBAF")
-		var p: String = args[2].path_join(shots[i][0] + ".png"); root.get_texture().get_image().save_png(p); print("SHOT ", p, " frame ms ", snappedf((Time.get_ticks_usec() - _t8) / 16000.0, 0.1)); _next()
+		var p: String = args[2].path_join(shots[i][0] + ".png"); root.get_texture().get_image().save_png(p); print("SHOT ", p, " frame ms ", snappedf((Time.get_ticks_usec() - _t8) / 16000.0, 0.1), " cortao gpu ms ", snappedf(wr.cortao_fx.gpu_ms, 0.01)); _next()
 	return false

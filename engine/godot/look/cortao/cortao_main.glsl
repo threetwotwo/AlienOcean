@@ -14,7 +14,7 @@
 
 layout(push_constant, std430) uniform CORTAOMainPassPushUniforms { CORTAOMainPassParameters parameters; };
 layout(set = 0, binding = 0) uniform usampler2D packedDataBuffer;      // NEAREST, clamp to border (int transparent black = sky)
-layout(set = 0, binding = 1) uniform sampler2D normalBuffer;
+layout(set = 0, binding = 1) uniform sampler2D normalBuffer;            // the prepass's shape normal (n * 0.5 + 0.5)
 layout(set = 0, binding = 2) uniform usampler3D occluderLookupTable;   // NEAREST, clamp to edge
 layout(r32ui, set = 0, binding = 3) uniform restrict writeonly uimage2D outputBuffer;
 

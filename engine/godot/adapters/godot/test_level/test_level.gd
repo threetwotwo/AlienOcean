@@ -298,7 +298,8 @@ func _bench_measure(secs: float) -> Dictionary:
 	return {"frame_ms": snappedf(mean.call(fr), 0.01), "gpu_ms": snappedf(mean.call(gpu), 0.01), "cpu_render_ms": snappedf(mean.call(cpu), 0.01),
 		"p95_frame_ms": snappedf(srt[int(srt.size() * 0.95)] if srt.size() > 0 else 0.0, 0.01), "frames": fr.size(),
 		"tick_ms": snappedf(game.stats.tick_ms, 0.01), "draw_calls": P.get_monitor(P.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
-		"triangles": P.get_monitor(P.RENDER_TOTAL_PRIMITIVES_IN_FRAME)}
+		"triangles": P.get_monitor(P.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
+		"cortao_gpu_ms": snappedf(game.world_root.cortao_fx.gpu_ms, 0.001) if game.world_root.ao_mode == "cortao" else 0.0}
 
 ## Stand at the key-frame view; measure everything on, then each system off in turn (back on after), then all of them off.
 ## Writes playtest_reports/bench_<utc>.json (IssueReport.root_dir) and returns its path.

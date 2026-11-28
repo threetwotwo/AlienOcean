@@ -85,5 +85,6 @@ void fragment() { ALBEDO = vec3(0.7); ROUGHNESS = 1.0; AO = min(AO, screen_ao(SC
 	var all := true
 	for r in rows:
 		print("%s %s  (%.3f)" % ["PASS" if r[1] else "FAIL", r[0], r[2]]); all = all and r[1]
+	print("CORTAO gpu ms %.2f at %s" % [fx.gpu_ms, str(lit.get_size())])
 	print("CORTAO_CHECK ", "ALL GREEN" if all else "FAILURES", " fault=", fault)
 	quit(0 if all else 1)
