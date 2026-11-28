@@ -19,7 +19,8 @@ school lab schoollab v1-v87 (schools/). Run: `tests/run_school.sh` (all) or the 
 | S11 | Calm-diver circling (Thalassa) | girl hovering 6 m from a trevally school, 25 s: mill about her, share in the 2.6-12.5 m band, startles, closest fish | mill >= 0.5; >= 70 % in band; <= 5 % startled; closest >= 0.6 m | S11 |
 | S12 | Silent observation ring (Thalassa) | observer kind, ring 4.8 m, 30 s: share of fish within 0.6-1.4 x ring | >= 70 %, S4-S5 hold | S12 |
 | S13 | Ride escort (Thalassa) | ridden manta (kind ride, 1.2 m/s) past a trevally school, 20 s: share within 14.5 m, heading along with it, startles, closest | >= 70 % near; heading >= 0.7; <= 5 % startled; closest >= 1.2 m | S13 |
-| S14 | Maker export in the school | when assets/creatures/<asset>/ is present: 3 LOD meshes, body length = extras body_length_m, body spans s 0..1 in the school frame, beat law f(U_rec) = f_rec | all hold (SKIP when the gitignored glbs are absent) | S14 |
+| S14 | Maker export in the school | when assets/creatures/<asset>/ is present: 3 LOD meshes, body length = extras body_length_m, body spans s 0..1 in the school frame, beat at each envelopes_by_speed U = its beat_Hz and at steady.U_rec = record f; below U_min a slow fish (U_min/2) beats then glides (glide 25-60 % of the time), a cruising fish never glides | all hold (SKIP when the gitignored glbs are absent) | S14 |
+| S15 | Drawn upright | FishSchool.fish_basis for 24 headings x pitch -50..50 deg: back up (up . world up = cos pitch), heading kept, right-handed, positive bank rolls the back toward the fish's left | all hold (added 28 Nov: schools were drawn upside down) | S15 |
 | Planted fault | swept guard and rock push off | S3 must FAIL | caught | --fault |
 | Monkeys | random reefs, species, sizes, actor paths, 30/60/120 fps, threaded or not | S3-S5 every step | all pass | --monkey N |
 

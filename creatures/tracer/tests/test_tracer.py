@@ -78,3 +78,23 @@ def test_adult_size_and_swim_timing():
     D2, rep = write.apply(D, T, 'trevally_trace', 'test'); S = D2['record']['size']; M = D2['body']['motion']
     assert S['TL_mm'] == D['body']['L'] and 1.05 < S['TL_over_SL'] < 1.4 and abs(S['SL_mm'] - S['mm_per_unit'] * SL) < 0.5
     assert M['U'] < 1.5 and abs(M['f'] - 0.3 * M['U'] / (2 * M['A'])) < 0.01      # a 60 cm fish cruises at fewer BL/s than the 25 cm reference
+
+
+def test_views_top_and_apply():
+    """a synthetic top view: an ellipse body with a caudal fin swung to one side; the tail rise must be dropped, and apply()
+    must write hw in record units and rescale a front section to the top view's width."""
+    import numpy as np
+    from species_tracer import views
+    H, W = 400, 200; yy, xx = np.mgrid[:H, :W]
+    m = ((xx - 100) / 30.0) ** 2 + ((yy - 170) / 150.0) ** 2 <= 1          # body: snout y 20, SL 300 px (tail at 320)
+    m |= (yy > 300) & (yy < 340) & (xx > 100) & (xx < 100 + (yy - 300) * 1.5)   # caudal fin swung to the right
+    r = views.top(None, (100, 20), (100, 20 + 300 * 1.15), 1.15, m=m)
+    hw = np.array(r['hw'])[:, 1]; i = int(np.argmax(hw))
+    assert abs(hw.max() - 0.1) < 0.01 and (np.diff(hw[i:]) <= 1e-9).all()
+    D = {'record': {'outline': {'end': 170.0, 'top': [[0, 0], [85, 30], [170, 2]], 'bot': [[0, 0], [85, -30], [170, -2]],
+                                'hw': [[0, 0], [170, 2], [180, 1]]}}}
+    front = dict(front=[[0.05, 0.1], [-0.05, -0.1]], w=[[-1, 0], [0, 1], [1, 0]], half_width_max=0.05)
+    D, sil = views.apply(D, {}, r, front, {})
+    O = D['record']['outline']
+    assert abs(max(w for u, w in O['hw']) - 17.0) < 2 and O['hw'][-1][0] == 180
+    assert len(O['sections']) == 1 and abs(sil['front'][0][0] - 0.1) < 0.012

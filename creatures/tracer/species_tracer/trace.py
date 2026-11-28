@@ -127,10 +127,16 @@ def body_edge(T, fr, side, SL):
         F = (T.get('fins') or {}).get(k) or {}
         if not (F.get('silhouette') and F.get('base')): continue
         bq = fr.to_rec([F['base']])[0]
-        if abs(bq[1] - np.interp(bq[0], allp[:, 0], allp[:, 1])) > ROOT_NEAR * SL: continue
+        if np.hypot(*(allp - bq).T).min() > ROOT_NEAR * SL: continue    # base not on this edge (2D: the piece may dive down the fin there)
         Q = fr.to_rec(F['silhouette']); ey = np.interp(Q[:, 0], allp[:, 0], allp[:, 1])
         on = (sg * (Q[:, 1] - ey) > -ROOT_NEAR * SL) & (np.abs(Q[:, 0] - bq[0]) < ROOT_SPAN * SL)   # the root, not a fin folded along the belly
-        if on.sum() >= 2: runs.append((Q[on, 0].min() - 0.005 * SL, Q[on, 0].max() + 0.005 * SL))
+        lo, hi = (Q[on, 0].min(), Q[on, 0].max()) if on.sum() >= 2 else (bq[0], bq[0])
+        if F.get('tip'):     # a fin hanging past the edge (tip outside the body): the traced piece may run down it to the tip
+            tq = fr.to_rec([F['tip']])[0]
+            if sg * (tq[1] - bq[1]) > ROOT_NEAR * SL:          # tip beyond its own root: cut to where the piece is back at root level
+                back = allp[(allp[:, 0] > tq[0]) & (sg * (allp[:, 1] - bq[1]) <= ROOT_NEAR * SL)]
+                lo, hi = min(lo, tq[0]), max(hi, back[0, 0] if len(back) else tq[0])
+        if hi > lo: runs.append((lo - 0.005 * SL, hi + 0.005 * SL))
     if runs:
         cut = []
         for P in pieces:
