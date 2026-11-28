@@ -121,6 +121,10 @@ func _setup():
 			["o3_above_high", Vector3(0, y + 30.0 + 3.0 * hs, 40.0 + 4.0 * hs), Vector3(0, y, 0), 60.0],
 			["o4_under_up", Vector3(0, dn, 0), Vector3(0, dn, 0) + (away + Vector3(0, tan(deg_to_rad(35.0)), 0)) * 10.0, 75.0],
 			["o5_under_window", Vector3(0, dn, 0), Vector3(0, dn, 0) + Vector3(0.05, 10.0, -0.3), 90.0],
+			# the lens half in the waves (Gary 28 Nov, transitions; the Unreal tank's per-pixel waterline): on the still level,
+			# level and tilted down a little, so the waterline runs across the picture along the real wave
+			["o6_lens_level", Vector3(0, y, 0), Vector3(0, y, 0) + away * 20.0, 75.0],
+			["o7_lens_down", Vector3(0, y + 0.1, 0), Vector3(0, y + 0.1, 0) + away * 20.0 + Vector3(0, -6.0, 0), 75.0],
 		]
 		print("SEA ", sea_env, " ", SeaSpectrum.BEAUFORT[force][2], " Hs ", hs)
 	if OS.get_environment("AO_REFR") != "":         # refraction check (Gary 28 Nov: the body doubled from above): a body

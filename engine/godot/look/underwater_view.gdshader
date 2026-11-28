@@ -1,4 +1,4 @@
-// Underwater view 0.4.0 (0.4.0, look thread: the open ocean's abyss, Unreal M_OO_Abyss DEEP, where no floor lies under the ray; 0.3.0: the floor plane past the drawn floor; the glow's floor never above the ray) (engine thread): the water between the eye and every pixel, from the ported lagoon
+// Underwater view 0.5.0 (0.5.0, water surface thread: the waterline per pixel at the lens, Unreal M_PP_OO_Waterline; 0.4.0, look thread: the open ocean's abyss, Unreal M_OO_Abyss DEEP, where no floor lies under the ray; 0.3.0: the floor plane past the drawn floor; the glow's floor never above the ray) (engine thread): the water between the eye and every pixel, from the ported lagoon
 // physics (under_model.py glow(), lagoonwater PHYS_CODE): scene x exp(-c L) + in-scattered glow, per band.
 // Glow = b ( Es HG(cos) G(c - Kd dz, L) + (Ek G(c - Ku dz, L) Wk + Eu G(c + Ku dz, L) Wd) / pi ) x GlowK.
 // Drawn as a full-screen quad after the opaque pass. Only when the eye is under the water (above: later step).
@@ -11,6 +11,7 @@ render_mode unshaded, cull_disabled, depth_draw_never, depth_test_disabled, fog_
 #include "res://look/caustics.gdshaderinc"
 #include "res://look/god_rays.gdshaderinc"
 #include "res://look/sea_bathy.gdshaderinc"
+#include "res://look/sea_waves.gdshaderinc"
 
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
@@ -26,8 +27,30 @@ void vertex() { POSITION = vec4(VERTEX.xy * 2.0, 1.0, 1.0); }
 void fragment() {
 	vec3 cam = (INV_VIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz - vec3(0.0, eye_wave, 0.0);   // the eye's height over the wave above or below it, as if the sea were still there
 	vec3 scene = textureLod(screen_tex, SCREEN_UV, 0.0).rgb;
-	if (cam.y >= water_y) { ALBEDO = scene; }
+	// 0.5.0 (water surface thread; Gary 28 Nov: "under water to over water transitions ... not great/responsive", "cant
+	// you check ue5 open water code?"): the waterline at the lens, per pixel, ported from the Unreal tank's M_PP_OO_Waterline
+	// (WATERLINE_HLSL). Each pixel's own point on the near plane is under or over the wave there (the FFT sea's height with
+	// its sideways push undone, three fixed-point steps), so when the lens is half in a wave the picture splits along the
+	// real wave line instead of the whole screen flipping at once (the film along the line: look/waterline_post.glsl, after
+	// the sea is drawn). Away from the surface (more than 2 Hs + 1 m
+	// from the still level) every pixel is the eye's side, as before.
+	vec2 ndc = SCREEN_UV * 2.0 - 1.0;
+	vec4 nv = INV_PROJECTION_MATRIX * vec4(ndc, 1.0, 1.0);     // reversed z: 1 = the near plane
+	vec3 pn = (INV_VIEW_MATRIX * vec4(nv.xyz / nv.w, 1.0)).xyz;   // this pixel's point on the lens (Godot)
+	vec3 cam0 = (INV_VIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+	bool near_line = sea_on > 0.5 && abs(cam0.y - water_y) < 2.0 * sea_mom_r.w + 1.0;
+	float dl = cam.y - water_y;                                  // m above the water at the lens (far from it: the eye's)
+	if (near_line) {
+		vec2 xi = sea_isl(pn).xy;
+		vec2 X = xi;
+		vec3 D = vec3(0.0);
+		for (int it = 0; it < 3; it++) { D = sea_disp_at(X, 0.05); X = xi - D.xy; }
+		dl = pn.y - (water_y + D.z);
+	}
+	bool under_px = near_line ? dl < 0.0 : cam.y < water_y;
+	if (!under_px) { ALBEDO = scene; }
 	else {
+		if (cam.y >= water_y) cam.y = water_y - 0.01;          // the lens is under here though the eye is over the wave
 		float depth = texture(depth_tex, SCREEN_UV).r;
 		vec4 vp = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, depth, 1.0);
 		vp.xyz /= vp.w;

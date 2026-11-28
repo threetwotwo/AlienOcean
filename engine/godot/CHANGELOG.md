@@ -1,5 +1,14 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, water surface: the waterline per pixel at the lens, from the Unreal tank)
+- Gary 28 Nov: "under water to over water transitions ... not great/responsive", "cant you check ue5 open water code?".
+  The tank's eye test matched ours (the live wave at the camera); its per-pixel waterline (M_PP_OO_Waterline,
+  WATERLINE_HLSL) was missing. look/underwater_view 0.5.0: each pixel's point on the lens is under or over the wave there
+  (FFT height, sideways push undone), so the water's haze splits along the real wave line (main drew the floor dry under
+  a crest while the eye counted as over). NEW look/waterline_post.glsl + adapters/godot/waterline_effect.gd (compositor,
+  after the transparent pass, before AgX): the film along the line (drag, blur across, wobble, dark foot, pale rim), only
+  within 2 Hs + 1 m of the still level. Stress shots: surface_shots AO_SEA=Bn o6/o7 (the lens half in the waves).
+
 ## 0.6.0-dev (28 Nov 2026, water surface: refraction as one bent-ray march; bodies above the water seen from below)
 - Gary 28 Nov: "water surface refraction wobble. it should be a root fix, physically correct for all object underwater.
   not just a patch fix for player model." look/sea_top 0.9.0: the refracted ray is marched through the screen's depth
