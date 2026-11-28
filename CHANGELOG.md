@@ -16,6 +16,8 @@ day the milestone was reached.
   Schools draw the maker's export (trevally caranx_melampygus: LOD meshes, materials, swim wave from glTF extras,
   check S14). Export r2 adopted: three swim envelopes (1.45, 2.175, 2.9 BL/s) blended by each fish's speed in the
   shader, beat from the envelopes' measured rates, and burst-and-coast (2 beats then a glide) below steady.U_min.
+  Fix (28 Nov): school fish were drawn upside down since the first build (the drawn up axis pointed down);
+  FishSchool.fish_basis now builds the frame, check S15 guards it.
 - Creature maker moves into the repo as stage modules (creatures/maker/, tool version 0.3.0-dev): record, form, chart,
   cage features (template, eye, mouth, gill, finish), UV, maps, fins, Blender export, checks, board. Output is
   byte-identical to the last fish-restart proof script. Real openings: mouth, throat and both gill passages are topology
