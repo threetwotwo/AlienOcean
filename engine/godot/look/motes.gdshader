@@ -14,7 +14,7 @@ render_mode unshaded, blend_add, depth_draw_never, cull_disabled, fog_disabled, 
 #include "res://look/water_physics.gdshaderinc"
 #include "res://look/caustics.gdshaderinc"
 
-uniform float box_m = 6.0;            // the box around the eye, m (particles beyond ~0.4 x box fade out)
+uniform float box_m = 4.0;            // the box around the eye, m (particles beyond ~0.4 x box fade out)
 uniform float mote_alb = 0.5;         // the particles' albedo (detritus aggregates, pale)
 uniform float near_m = 0.12;          // closer than this they fade (they would fill the lens)
 uniform vec3 drift = vec3(0.004, -0.0015, 0.002);   // m/s: a slow current and settling (marine snow sinks 1-3 mm/s .. 100 m/day)

@@ -22,7 +22,9 @@ vec3 w_G(vec3 k, float L) {
 // in-scattered light (nits) along a ray from depth z0 (m under the surface), direction d (y up), length L
 vec3 w_glow(vec3 d, float z0, float L) {
 	vec3 c = water_a + water_b;
-	float H = max(water_y - water_floor_y, z0 + 0.05);
+	// the floor the sand's bounce comes from is never above the ray's deepest point: past the lagoon floor (open water, a drop-off)
+	// a downward ray would otherwise integrate an upwelling that grows exp(+Ku) without end: the white void (test level, 28 Nov)
+	float H = max(water_y - water_floor_y, z0 + max(-d.y, 0.0) * L + 0.05);
 	float muw = max(water_sun_w.y, 0.05);
 	vec3 Es = water_es0 * exp(-water_kd * z0) / muw;
 	vec3 Ek = water_ek0 * exp(-water_ku * z0);
@@ -34,6 +36,16 @@ vec3 w_glow(vec3 d, float z0, float L) {
 	float Wd = clamp(0.5 + pw * (-d.y) / (abs(d.y) + 0.118), 0.0, 1.0);
 	return water_glow_k * water_b * (Es * ph * w_G(c - water_kd * d.y, L)
 		+ (Ek * w_G(c - water_ku * d.y, L) * (1.0 - Wd) + Eu * w_G(c + water_ku * d.y, L) * Wd) / PI);
+}
+// the floor plane seen along a downward ray that meets no geometry (past the drawn floor): the distance to it (m, or -1 when the ray
+// does not go down) and its radiance in nits (sand lit by the water's light at that depth, as the drawn sand is)
+float w_floor_dist(vec3 d, float z0) {
+	float H = max(water_y - water_floor_y, z0 + 0.05);
+	return d.y < -1e-3 ? (H - z0) / (-d.y) : -1.0;
+}
+vec3 w_floor_nits() {
+	float H = max(water_y - water_floor_y, 0.05);
+	return (water_es0 * exp(-water_kd * H) + water_ek0 * exp(-water_ku * H)) * water_sand.rgb / PI;
 }
 // irradiance on the flat sand (lux per band)
 vec3 w_EH() {

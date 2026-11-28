@@ -44,8 +44,9 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 @export var sky_fill_k := 0.8              # art lever: share of the sky's light that enters the water (1 = physical: 11 % of the light on the
                                            # 4 m sand at noon). The key frame (Blender, 28 Nov passes) has 7 %: 0.6 here. Feeds the fill, the GI's
                                            # water light field and the haze alike. Gary picked 0.8, between the two (card, 28 Nov 02:02Z).
-## the sea's RMS slope for the sun's spread under water (calm lagoon ~0.06, as the key frame rig; surface thread may feed the FFT's own)
-@export var sea_rms_slope := 0.06
+## the sea's RMS slope for the sun's spread under water: 0.09 = the approved key frame v7c's waves (lmin 0.15 m, wind 2.5 m/s; its 8
+## sun lenses spread p50 1.1 deg, a disc of 3.1 deg diameter has that median; this gives 3.0). Was 0.06 (old key frame A).
+@export var sea_rms_slope := 0.09
 const SUN_DISC_DEG := 0.53
 const SDFGI_RESET_STOPS := 3.0
 @export var under_white := Vector3.ZERO      # look check: the under-water camera balance (zero = the place's UNDER_WHITE)

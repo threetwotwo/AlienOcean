@@ -1,15 +1,15 @@
 ## Motes (look thread, 28 Nov 2026): marine snow around the eye under water (look/motes.gdshader). One MultiMesh of tiny
 ## billboards; their seed positions fill a box that the shader wraps around the camera, so nothing here follows the eye.
 ## density: particles per cubic metre big enough to see (> 0.5 mm). Real clear tropical lagoon water holds roughly 1-10 such
-## aggregates per litre near reefs (Alldredge & Silver 1988; far more in turbid water); we draw far fewer, the ones near
-## enough to resolve. AO_MOTES=0 in the shot tool turns them off.
+## aggregates per litre near reefs (Alldredge & Silver 1988; far more in turbid water); we draw 300 per m3 in a 4 m box (the ones near
+## enough to resolve; beyond ~1.8 m a 0.5 mm speck is a fraction of a pixel). AO_MOTES=0 in the shot tool turns them off.
 class_name Motes
 extends MultiMeshInstance3D
 
-@export var density := 40.0
-@export var box_m := 6.0
+@export var density := 300.0
+@export var box_m := 4.0
 
-func _init(dens := 40.0, box := 6.0) -> void:
+func _init(dens := 300.0, box := 4.0) -> void:
 	name = "Motes"; density = dens; box_m = box
 	var qm := QuadMesh.new(); qm.size = Vector2(1, 1)
 	var mm := MultiMesh.new()

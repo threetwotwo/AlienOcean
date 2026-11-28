@@ -82,6 +82,7 @@ void vertex() {
 	float c = cos(ang), sn = sin(ang);
 	NORMAL = normalize(vec3(NORMAL.x * c - NORMAL.z * sn, NORMAL.y, NORMAL.x * sn + NORMAL.z * c));
 	TANGENT = normalize(vec3(TANGENT.x * c - TANGENT.z * sn, TANGENT.y, TANGENT.x * sn + TANGENT.z * c));
+	cl_wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;   // the swum position (look/creature_light.gdshaderinc)
 }
 
 void fragment() {
@@ -93,7 +94,7 @@ void fragment() {
 	METALLIC = m;
 	ROUGHNESS = r;
 	if (use_normal_tex > 0.5) { NORMAL_MAP = texture(normal_tex, UV).rgb; NORMAL_MAP_DEPTH = normal_scale; }
-	cl_wpos = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	cl_fill = creature_fill(cl_wpos, (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	ALBEDO *= cl_fill;
+	ALBEDO = creature_debug_albedo(ALBEDO, TIME, INV_VIEW_MATRIX, PROJECTION_MATRIX, VIEWPORT_SIZE);
 }
