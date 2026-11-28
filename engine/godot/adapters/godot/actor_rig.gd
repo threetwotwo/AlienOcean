@@ -30,6 +30,8 @@ func _init() -> void:
 
 func _ready() -> void:
 	add_child(body)
+	# treading floats her with the head out of the water (eye 8 cm above the waterline, chin at it), not Thalassa's eye 14 cm under
+	body.motor.swimmer.config["tread_eye"] = 0.08
 	if with_mannequin:
 		mq = Mannequin.new(); mq.name = "Mannequin"
 		add_child(mq)    # the mannequin poses in world space (global transforms), so where it hangs doesn't matter
