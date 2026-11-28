@@ -3,6 +3,7 @@
 // edge reads against the wall under it. Used by the kit's own meshes and by grey mode (blockout/grey_mode.gd).
 shader_type spatial;
 render_mode cull_back;
+#include "res://look/screen_ao.gdshaderinc"
 
 uniform vec3 base : source_color = vec3(0.55, 0.55, 0.55);
 uniform vec3 line_col : source_color = vec3(0.30, 0.30, 0.30);
@@ -41,5 +42,6 @@ void fragment() {
 	c = mix(c, line_col, max(major, minor));
 	ALBEDO = c;
 	ROUGHNESS = 0.9;
+	AO = min(AO, screen_ao(SCREEN_UV));   // CORTAO (default AO): Godot's SSAO is off, so the screen AO comes in here
 	SPECULAR = 0.2;
 }

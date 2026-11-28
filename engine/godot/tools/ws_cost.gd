@@ -31,6 +31,9 @@ func _cost_shader() -> Shader:
 
 func _run(lvl) -> void:
 	while not lvl.ready_done: await process_frame
+	if OS.get_environment("AO_SAND_BAKE") != "0":   # counts with the sand bake in (AO_SAND_BAKE=0: all procedural)
+		var w0 := Time.get_ticks_msec()
+		while lvl.game.sand_bake == null and Time.get_ticks_msec() - w0 < 900000: await process_frame
 	var sh := _cost_shader()
 	# a separate world (no tonemapper, water view or fog to bend the counts): the ground surfaces only, drawn with the counter
 	var vp := SubViewport.new(); vp.own_world_3d = true; vp.size = Vector2i(960, 540); vp.transparent_bg = true
