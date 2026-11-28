@@ -30,7 +30,7 @@ func _run(lvl: TestLevel) -> void:
 	var c: Vector3 = (best.aabb as AABB).get_center()
 	var views := [{"name": "keyframe", "tp": 1}, {"name": "meadow", "feet": c + Vector3(0, 0.3, 1.6), "yaw": 0.0, "pitch": -0.35}]
 	for v in views:
-		for on in [false, true]:
+		for on in ([true] if OS.get_environment("AO_GRASS_ONLY") == "1" else [false, true]):
 			lvl.set_toggle("grass_v2", on)
 			if v.has("tp"): lvl.teleport(v.tp)
 			else:

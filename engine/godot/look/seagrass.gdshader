@@ -18,14 +18,14 @@ render_mode blend_mix, cull_disabled, diffuse_lambert, specular_schlick_ggx, wor
 uniform vec4 pushers[PUSHERS];        // xyz world, w = radius x strength (0 = unused); written by GrassField each frame
 uniform float sway_amp = 0.045;       // metres at the tip (Thalassa aMat.y scale for short grass)
 uniform vec2 current_dir = vec2(0.8, 0.6);
-uniform float current_lean = 0.05;    // metres of tip lean down the current
+uniform float current_lean = 0.07;    // metres of tip lean down the current
 uniform float thin_start = 6.0;       // metres: beyond this, blades thin out
 uniform float thin_end = 40.0;        // metres: at this distance one blade in 8 is kept
 uniform float min_px = 1.5;           // survivors never narrower than this many pixels
-uniform vec3 col_root : source_color = vec3(0.16, 0.20, 0.07);
-uniform vec3 col_mid : source_color = vec3(0.33, 0.47, 0.14);
-uniform vec3 col_tip : source_color = vec3(0.58, 0.60, 0.25);
-uniform vec3 col_old : source_color = vec3(0.52, 0.43, 0.20);    // aged, epiphyte-dusted tips
+uniform vec3 col_root : source_color = vec3(0.30, 0.40, 0.14);
+uniform vec3 col_mid : source_color = vec3(0.45, 0.64, 0.22);
+uniform vec3 col_tip : source_color = vec3(0.68, 0.74, 0.34);
+uniform vec3 col_old : source_color = vec3(0.66, 0.60, 0.36);    // aged, epiphyte-dusted tips
 uniform float caustic_strength : hint_range(0.0, 3.0) = 1.0;
 
 varying vec3 wpos;
@@ -89,7 +89,7 @@ void fragment() {
 	ROUGHNESS = 0.55;
 	SPECULAR = 0.25;
 	BACKLIGHT = c * vec3(0.55, 0.75, 0.30) * (0.3 + 0.7 * h01);   // light through the blade
-	AO = mix(0.35, 1.0, smoothstep(0.0, 0.8, h01));                 // the meadow's own shade at the roots
+	AO = mix(0.6, 1.0, smoothstep(0.0, 0.7, h01));                 // the meadow's own shade at the roots
 	AO_LIGHT_AFFECT = 0.6;
 	float z = max(water_y - wpos.y, 0.0);
 	if (water_fill_ao > 0.5) {

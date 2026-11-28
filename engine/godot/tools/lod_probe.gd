@@ -3,8 +3,7 @@
 ## Run: xvfb-run -a godot --path . --resolution 960x540 --script res://tools/lod_probe.gd -- <out.json>
 extends SceneTree
 
-const VIEWS := [{"name": "key-frame", "tp": 1, "pitch": null}, {"name": "school", "tp": 3, "pitch": null},
-	{"name": "reef edge", "tp": 6, "pitch": null}, {"name": "floor", "tp": 1, "pitch": -1.1}]
+const VIEWS := [{"name": "key-frame", "tp": 1, "pitch": null}, {"name": "floor", "tp": 1, "pitch": -1.1}]
 
 func _initialize() -> void:
 	var main = load("res://scenes/test_level.tscn").instantiate(); root.add_child(main)
@@ -26,6 +25,16 @@ func _run(main) -> void:
 			"draws": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 			"objects": Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)})
 		print("LODPROBE ", JSON.stringify(rows[-1]))
+	# what the key-frame view's triangles are made of: each switch off on its own
+	lvl.teleport(1)
+	for sw in ["sea", "schools", "shadows", "grass_v2", "lagoon", "sdfgi"]:
+		lvl.set_toggle(sw, not lvl.get_toggle(sw))
+		for i in 4: await process_frame
+		await RenderingServer.frame_post_draw
+		rows.append({"view": "key-frame, %s flipped" % sw, "tris": Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
+			"draws": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)})
+		print("LODPROBE ", JSON.stringify(rows[-1]))
+		lvl.set_toggle(sw, not lvl.get_toggle(sw))
 	var a := OS.get_cmdline_user_args()
 	var res := {"lods": GlbLoader.lods, "glb": GlbLoader.stats, "rows": rows}
 	if a.size() > 0:

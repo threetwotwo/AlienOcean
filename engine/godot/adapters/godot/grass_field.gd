@@ -33,7 +33,7 @@ static func blade_mesh(segments := 4) -> ArrayMesh:
 	for i in segments + 1:
 		var h := float(i) / segments
 		var w := 0.008 * (1.0 - 0.35 * h) * (1.0 if i < segments else 0.0)
-		rows.append([h, w, 0.08 * h * h])
+		rows.append([h, w, 0.16 * h * h])
 	for i in segments:
 		var a: Array = rows[i]; var b: Array = rows[i + 1]
 		var p0 := Vector3(-a[1] * 0.5, a[0], a[2]); var p1 := Vector3(a[1] * 0.5, a[0], a[2])
@@ -59,14 +59,14 @@ func adopt(root: Node) -> void:
 		var leaves := []
 		for r in roots:
 			var p: Vector3 = r[0] + Vector3(_rng.randf_range(-0.015, 0.015), 0.0, _rng.randf_range(-0.015, 0.015))
-			var L0: float = r[1] * _rng.randf_range(0.8, 1.25)
+			var L0: float = r[1] * (0.3 + 0.65 * pow(_rng.randf(), 0.6))  # skewed: many mid blades, few long, some short
 			var yaw0 := _rng.randf() * TAU
 			var hue := clampf(0.5 + 0.35 * sin(p.x * 1.7 + 2.0 * sin(p.z * 1.3)) * cos(p.z * 1.1) + _rng.randf_range(-0.12, 0.12), 0.0, 1.0)
-			var n := _rng.randi_range(2, 4)
+			var n := _rng.randi_range(1, 2)
 			for k in n:
 				var side := float(k) - (n - 1) * 0.5
 				var L := L0 * (1.0 - 0.18 * absf(side)) * _rng.randf_range(0.9, 1.1)
-				var b := Basis(Vector3.UP, yaw0 + side * 0.35 + _rng.randf_range(-0.15, 0.15)) * Basis(Vector3.RIGHT, -side * 0.12 + _rng.randf_range(-0.08, 0.08))
+				var b := Basis(Vector3.UP, yaw0 + side * 0.25 + _rng.randf_range(-0.1, 0.1)) * Basis(Vector3.RIGHT, -side * 0.10 + _rng.randf_range(0.10, 0.35))
 				leaves.append([Transform3D(b.scaled(Vector3(1.0, L, 1.0)), p + b.x * side * 0.004), Color(_rng.randf() * TAU, _rng.randf_range(0.7, 1.4), clampf(hue + _rng.randf_range(-0.05, 0.05), 0.0, 1.0), L)])
 		var mm := MultiMesh.new()
 		mm.transform_format = MultiMesh.TRANSFORM_3D; mm.use_custom_data = true; mm.mesh = blade
@@ -78,6 +78,8 @@ func adopt(root: Node) -> void:
 			lo = lo.min(o); hi = hi.max(o + Vector3(0, (leaves[i][1] as Color).a, 0))
 		var mmi := MultiMeshInstance3D.new(); mmi.name = String(mi.name) + "_blades"; mmi.multimesh = mm
 		mmi.material_override = material
+		mmi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED   # SDFGI must not voxelize the meadow as a solid (darkened the girl)
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF   # self-shade from the root AO; saves every shadow pass
 		mmi.custom_aabb = AABB(lo - Vector3(0.5, 0.2, 0.5), hi - lo + Vector3(1.0, 0.4, 1.0))
 		add_child(mmi)
 		mi.visible = false
@@ -87,28 +89,44 @@ func adopt(root: Node) -> void:
 	stats.build_ms = (Time.get_ticks_usec() - t0) / 1000.0
 	print("GRASS ", stats)
 
-## The tile's blades: consecutive vertices further than 3 cm apart start a new blade (the tiles are written blade by blade);
-## a blade's root is its lowest vertex, its length the reach from the root to its furthest vertex. Returns [[root, length]].
+## The tile's shoots: consecutive vertices further than 3 cm apart start a new piece (the tiles are written blade by blade);
+## a piece's lowest vertex is a root, deduplicated on a 2.5 cm grid (a blade is often written as several pieces).
+## Blade length comes from the tile as a whole (its 5th to 95th percentile height), since pieces are often only part of a blade.
+## Returns [[root, length]].
 func _roots(mi: MeshInstance3D) -> Array:
 	var out := []
 	var xf := mi.global_transform
+	var seen := {}
 	for s in mi.mesh.get_surface_count():
 		var v: PackedVector3Array = mi.mesh.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]
 		var n := v.size()
 		if n == 0: continue
+		var ys := PackedFloat32Array()
+		for i in range(0, n, 7): ys.append(v[i].y)
+		ys.sort()
+		var tile_h := clampf((ys[int(ys.size() * 0.95)] - ys[int(ys.size() * 0.05)]) * xf.basis.get_scale().y, 0.15, 0.6)
 		var start := 0
 		for i in range(1, n + 1):
 			if i < n and v[i].distance_squared_to(v[i - 1]) < 0.0009: continue
-			# blade [start, i)
 			var lo := v[start]
 			for k in range(start, i):
 				if v[k].y < lo.y: lo = v[k]
-			var reach := 0.0
-			for k in range(start, i, 2):
-				reach = maxf(reach, v[k].distance_to(lo))
-			if reach > 0.04:
-				out.append([xf * lo, reach * xf.basis.get_scale().y])
 			start = i
+			var w := xf * lo
+			var key := Vector2i(int(floor(w.x / 0.025)), int(floor(w.z / 0.025)))
+			if seen.has(key): continue
+			seen[key] = true
+			out.append([w, tile_h])
+	# local density on a 20 cm grid: blade length follows it (meadow edges short and sparse, the core tall), no flat hedge top
+	var cnt := {}
+	for r in out:
+		var c := Vector2i(int(floor(r[0].x / 0.2)), int(floor(r[0].z / 0.2)))
+		cnt[c] = cnt.get(c, 0) + 1
+	var vals := cnt.values(); vals.sort()
+	var med: float = max(1.0, float(vals[int(vals.size() * 0.75)])) if vals.size() > 0 else 1.0
+	for r in out:
+		var c := Vector2i(int(floor(r[0].x / 0.2)), int(floor(r[0].z / 0.2)))
+		r[1] = r[1] * clampf(0.3 + 0.75 * float(cnt[c]) / med, 0.3, 1.05)
 	return out
 
 func set_enabled(on: bool) -> void:
