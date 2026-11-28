@@ -2,6 +2,8 @@
 global uniform float water_y;
 global uniform float water_floor_y;
 global uniform vec3 water_rrs;      // the deep water's Rrs (/sr, above the surface; WaterOptics.optics)
+global uniform float sea_open_gain;  // open water art levers (FftSea adds both: 2, 0.5 = the lifted Abzu blue Gary picked 28 Nov; 1, 0 = physical)
+global uniform float sea_open_teal;
 global uniform vec3 water_a;
 global uniform vec3 water_b;
 global uniform vec3 water_kd;
@@ -54,7 +56,9 @@ vec3 w_deep(vec3 d, float z0, float L) {
 	vec3 k = max(c - water_kd * d.y, 0.2 * c);
 	vec3 fade = 1.0 - exp(-k * min(L, 1e4));
 	vec3 Ed = water_es0 * exp(-water_kd * z0) + water_ek0 * exp(-water_ku * z0);
-	vec3 inf = Ed * 1.8 * water_rrs * (c + water_kd) / k * shape;
+	// the open sea's art levers, as the sea seen from above (sea_top): the same deep water from both sides
+	vec3 rrs = mix(water_rrs, water_rrs.z * vec3(0.03, 0.55, 1.0), sea_open_teal) * sea_open_gain;
+	vec3 inf = Ed * 1.8 * rrs * (c + water_kd) / k * shape;
 	vec3 ch = water_a + water_b * mix(1.0, 1.0 - W_G, water_glow_ms);
 	float muw = max(water_sun_w.y, 0.05);
 	vec3 Es = water_es0 * exp(-water_kd * z0) / muw;
