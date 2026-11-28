@@ -38,7 +38,8 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 ## (Unreal GlowK, Gary's clarity pick 2.5). Under water only, so the sky above the sea keeps its exposure.
 @export var under_exposure_art := 1.0     # Gary picked "Brighter" 27 Nov 17:06Z
 @export var fill_occluded := true          # the water's fill light goes through Godot's ambient, so SSAO / SSIL occlude it (false = as before, unoccluded)
-@export var cdom := 0.05                   # art lever (a real condition): yellow substance in the water; key frame look 0.05 (Gary card 28 Nov; Unreal LOOK_SET 0.03); less = bluer haze
+@export var cdom := 0.015                  # art lever (a real condition): yellow substance in the water. 0.015 = clear lagoon water: blue outlasts green,
+                                           # so distance fades to blue (Gary card 28 Nov 03:03Z; was 0.05, the old key frame; Unreal 0.03)
 @export var scat_k := 0.40                 # art lever (a real condition): particles in the water, Unreal LOOK_SET 0.40; less = clearer
 @export var sky_fill_k := 0.8              # art lever: share of the sky's light that enters the water (1 = physical: 11 % of the light on the
                                            # 4 m sand at noon). The key frame (Blender, 28 Nov passes) has 7 %: 0.6 here. Feeds the fill, the GI's
