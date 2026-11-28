@@ -369,6 +369,8 @@ static func _moon_view(d: Vector3, drawn_deg: float) -> Vector4:
 
 static func declare_globals() -> void:
 	## global uniforms must exist before shaders compile (headless scripts can't rely on project.godot entries)
+	FftSea.declare_globals()        # sea_open_gain / sea_open_teal (the abyss, water_physics w_deep)
+	SeaFloorMap.declare_globals()   # the underwater view reads the floor map (is there a floor under this ray: lagoon or abyss)
 	if Engine.has_meta("water_globals"): return
 	var F := RenderingServer.GLOBAL_VAR_TYPE_FLOAT; var V := RenderingServer.GLOBAL_VAR_TYPE_VEC3
 	var defs := {"water_y": [F, LagoonWaterField.SURFACE_Y], "water_floor_y": [F, 0.0],

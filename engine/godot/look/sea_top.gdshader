@@ -33,11 +33,9 @@ uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 // floor leads; past the shelf H grows and the colour runs smoothly into the open sea's (the tank v374 SEA_SHADE's
 // "light coming out of the water", Rrs x Ed (1 - F) / 0.98); with no floor at all it is the open sea's colour. The
 // water's Rrs is WorldRoot's water_rrs (WaterOptics.optics: the lagoon's from its own optics, the ocean's the tank's).
-global uniform vec3 water_rrs;
 // art levers on the deep water's colour (1, 0 = physical; FftSea sets 2, 0.5): x brightness, and a share pulled toward
 // a turquoise of the same blue (Abzu's lighter sea; art direction over the physical ink-navy)
-global uniform float sea_open_gain;     // FftSea adds both
-global uniform float sea_open_teal;
+// sea_open_gain / sea_open_teal: declared in water_physics.gdshaderinc (the abyss under water uses them too)
 global uniform float sea_crest_sd;      // the crests' height spread, m (cascades 1-2; the tank's SeaK.x; FftSea)
 global uniform float sea_sparkle;       // 1 = the sparkling glitter (0.5.0), 0 = one smooth lobe as before (FftSea, AO_SPARKLE)
 global uniform float sea_crest_glow;    // art lever on the light through the crests (1 = the tank's; FftSea)
