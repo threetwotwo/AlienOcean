@@ -31,6 +31,7 @@ var _vp_h: SubViewport
 var _cams := []
 var _pending := 0
 var _env: Environment
+var frozen := false            # no more captures (tools/perf_runner/teleport_stress.gd isolates the hang with it)
 var _dirty := false            # the light changed (WorldRoot.apply): capture again where we are
 
 func _init() -> void:
@@ -116,6 +117,7 @@ func refresh() -> void:
 
 func follow(eye: Vector3) -> void:
 	## call each frame (or when the eye moves) with the eye
+	if frozen: return
 	var c := Vector2(eye.x, eye.z)
 	if c.distance_to(centre) < recentre_m and _pending == 0 and not _dirty: return
 	if _pending == 0:
@@ -132,17 +134,39 @@ func follow(eye: Vector3) -> void:
 		RenderingServer.global_shader_parameter_set("water_floor_org", Vector4(centre.x, centre.y, size_m, 1.0))
 		_floor_mean()
 
+var _mean_pending := false
+
 func _floor_mean() -> void:
 	## the floor's mean radiance in the map (nits; 32 x 32 samples, where something is drawn): the floor beyond the drawn
 	## floor (look/sea_bathy.gdshaderinc) takes its brightness from it, so the drawn floor and the floor beyond meet without
 	## a seam (0.1.3, 28 Nov). One read back per capture (the eye moving 12 m, or the light changing).
-	var img: Image = _vp_alb.get_texture().get_image()
-	if img == null: return
-	var w := img.get_width(); var h := img.get_height()
+	## 0.1.4 (test level thread, 28 Nov): read back WITHOUT a stall (texture_get_data_async, one in flight; as fft_sea). The old
+	## get_image() made the CPU wait for the GPU on every teleport and every light change, right where the Mac's Metal
+	## "timeout waiting for fence" hangs came (4 of 11 bench runs, each just after a camera teleport).
+	if _mean_pending: return
+	var tex := RenderingServer.texture_get_rd_texture(_vp_alb.get_texture().get_rid())
+	if not tex.is_valid(): return
+	_mean_pending = true
+	var w := _vp_alb.size.x; var h := _vp_alb.size.y
+	RenderingServer.call_on_render_thread(func():
+		var rd := RenderingServer.get_rendering_device()
+		if rd == null: _mean_pending = false; return
+		var fmt: RDTextureFormat = rd.texture_get_format(tex)
+		rd.texture_get_data_async(tex, 0, func(data: PackedByteArray): _got_mean.call_deferred(data, w, h, fmt.format)))
+
+func _got_mean(data: PackedByteArray, w: int, h: int, f: int) -> void:
+	_mean_pending = false
+	var half := f == RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+	var bpp := 8 if half else 16 if f == RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT else 4
+	if data.size() < w * h * bpp: return
 	var sum := Vector3.ZERO; var n := 0
 	for y in range(w / 64, h, maxi(h / 32, 1)):
 		for x in range(w / 64, w, maxi(w / 32, 1)):
-			var c := img.get_pixel(x, y)
+			var i := (y * w + x) * bpp
+			var c: Color
+			if half: c = Color(data.decode_half(i), data.decode_half(i + 2), data.decode_half(i + 4), data.decode_half(i + 6))
+			elif bpp == 16: c = Color(data.decode_float(i), data.decode_float(i + 4), data.decode_float(i + 8), data.decode_float(i + 12))
+			else: c = Color(data[i] / 255.0, data[i + 1] / 255.0, data[i + 2] / 255.0, data[i + 3] / 255.0)
 			if c.a > 0.5: sum += Vector3(c.r, c.g, c.b); n += 1
 	var m := sum / maxf(float(n), 1.0)
 	RenderingServer.global_shader_parameter_set("water_floor_mean", Vector4(m.x, m.y, m.z, 1.0 if n > 64 else 0.0))
