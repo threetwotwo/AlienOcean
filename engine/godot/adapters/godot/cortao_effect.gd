@@ -46,8 +46,17 @@ var vbao_thickness := 0.4         # m: how deep an occluder is assumed to be (bi
 # by default): the occlusion pass and its filter run on a quarter of the pixels, then cortao_upsample.glsl brings the result back
 # with depth-aware weights. Chosen when the shaders compile: env CORTAO_HALF=0 keeps full resolution.
 var half_res_ao := OS.get_environment("CORTAO_HALF") != "0"
+# Own temporal accumulation (look/cortao/cortao_temporal.glsl): each pixel blends with its reprojected history, so the per-frame
+# noise averages out in the world. Under FSR 2 at half res (game default from 28 Nov) CORTAO's own flicker under a sliding
+# camera was 1.5 levels vs SSAO 0.8 (tools/ao_motion_check.gd). Env CORTAO_TEMPORAL=0 turns it off.
+var ao_temporal := OS.get_environment("CORTAO_TEMPORAL") != "0"
+var temporal_alpha := 0.1         # weight of the new frame (~10 frames of history)
+var temporal_depth_tol := 0.05    # relative depth mismatch that drops the history (disocclusion, moving things)
+var temporal_clamp_pad := 0.05 if OS.get_environment("CORTAO_FAULT_GHOST") == "" else 2.0   # history may sit this far outside the
+                                  # neighbourhood's occlusion range (env CORTAO_FAULT_GHOST: no clamp, cortao_check --fault ghost must fail C9)
 var capture_next := false         # checks: copy the next result into `captured` (stalls the GPU; tests only)
 var captured: Image
+var captured_shape_n: Image       # the prepass's shape normal (n * 0.5 + 0.5, view space), same capture
 var gpu_ms := 0.0                 # the three passes' GPU time, last frame read back (RD timestamps; 0 until measured)
 
 var rd: RenderingDevice
@@ -69,6 +78,16 @@ var pl_gtao: RID
 var pl_vbao: RID
 var smp_border: RID
 var smp_clamp: RID
+var smp_linear: RID
+var sh_temp: RID
+var pl_temp: RID
+var pre_out: RID                  # ao_temporal: the filtered frame before the history blend
+var hist: Array[RID] = [RID(), RID()]     # rgba16f ao + bent normal, ping-pong
+var hdepth: Array[RID] = [RID(), RID()]   # r32f linear depth, ping-pong
+var hist_i := 0
+var hist_valid := false
+var prev_cam := Transform3D()
+var prev_unproj := Vector4.ZERO
 var lut: RID
 var size := Vector2i.ZERO
 var mips := 1
@@ -82,6 +101,11 @@ var ubo: RID
 var ubo_main: RID
 var out: RID
 var tex := Texture2DRD.new()      # main thread side of `out`
+# A resize (fullscreen at start, FSR scale changes) remakes the targets. The materials sample `out` through `tex` until the new one
+# is published on the main thread, so the old `out` lives until then plus a few frames: freed at once, every lit material's
+# uniform set died with it ("Uniforms were never supplied for set (3)" for each draw, Mac 28 Nov, and Godot freeing dead sets).
+var retired: Array = []           # [rid, frames left (-1 = not yet replaced in tex)]
+var published := RID()
 var frame := 0
 var ok := false
 
@@ -94,7 +118,9 @@ func _init() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and rd:
-		for r in packed_mips + [packed, raw, raw2, half_packed, shape_n, out, ubo, ubo_main, lut, smp_border, smp_clamp, pl_pre, pl_main, pl_filt, pl_filt2, pl_gtao, pl_vbao, pl_filt3, pl_up, sh_pre, sh_main, sh_filt, sh_filt2, sh_gtao, sh_vbao, sh_filt3, sh_up]:
+		for e in retired:
+			if e[0].is_valid(): rd.free_rid(e[0])
+		for r in packed_mips + hist + hdepth + [pre_out, pl_temp, sh_temp, smp_linear, packed, raw, raw2, half_packed, shape_n, out, ubo, ubo_main, lut, smp_border, smp_clamp, pl_pre, pl_main, pl_filt, pl_filt2, pl_gtao, pl_vbao, pl_filt3, pl_up, sh_pre, sh_main, sh_filt, sh_filt2, sh_gtao, sh_vbao, sh_filt3, sh_up]:
 			if r.is_valid(): rd.free_rid(r)
 
 ## CORTAO's shaders #include its headers; Godot's GLSL compiler has no include path, so the headers are inlined here
@@ -140,7 +166,8 @@ func _compile(path: String, defines := "", fine := false) -> RID:
 func _init_compute() -> void:
 	rd = RenderingServer.get_rendering_device()
 	if rd == null: return
-	sh_pre = _compile("res://look/cortao/cortao_prepass.glsl")
+	# checks only: env CORTAO_FAULT_EDGE=1 plants the old edge-normal bug (cortao_check --fault edge must fail C7)
+	sh_pre = _compile("res://look/cortao/cortao_prepass.glsl", "#define CORTAO_FAULT_EDGE 1\n" if OS.get_environment("CORTAO_FAULT_EDGE") != "" else "")
 	var hd := "#define CORTAO_HALF 1\n" if half_res_ao else ""
 	sh_main = _compile("res://look/cortao/cortao_main.glsl", "#define CORTAO_SAMPLES %d\n#define CORTAO_RAYS %d\n" % [samples, rays] + hd)
 	sh_filt = _compile("res://look/cortao/cortao_filter.glsl", "", fine_last)   # the last pass: fine taps
@@ -149,6 +176,9 @@ func _init_compute() -> void:
 	sh_vbao = _compile("res://look/cortao/gtao_main.glsl", "#define GTAO_BITMASK 1\n" + hd)
 	sh_filt3 = _compile("res://look/cortao/cortao_filter.glsl", "#define CORTAO_OUT_PACKED 1\n", fine_last)   # half res: the last pass, packed
 	sh_up = _compile("res://look/cortao/cortao_upsample.glsl")
+	sh_temp = _compile("res://look/cortao/cortao_temporal.glsl")
+	if not sh_temp.is_valid(): return
+	pl_temp = rd.compute_pipeline_create(sh_temp)
 	if not (sh_pre.is_valid() and sh_main.is_valid() and sh_filt.is_valid() and sh_filt2.is_valid() and sh_gtao.is_valid() and sh_vbao.is_valid() and sh_filt3.is_valid() and sh_up.is_valid()): return
 	pl_filt3 = rd.compute_pipeline_create(sh_filt3)
 	pl_up = rd.compute_pipeline_create(sh_up)
@@ -169,6 +199,8 @@ func _init_compute() -> void:
 	sc.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE; sc.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
 	sc.repeat_w = RenderingDevice.SAMPLER_REPEAT_MODE_CLAMP_TO_EDGE
 	smp_clamp = rd.sampler_create(sc)
+	sc.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR; sc.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	smp_linear = rd.sampler_create(sc)
 	# occluder lookup table: 24 x 24 x 16 texels, one bit per ray (R16_UINT for 16 rays, R32_UINT for 32), from CORTAO's tables/occluder
 	var tf := RDTextureFormat.new()
 	tf.texture_type = RenderingDevice.TEXTURE_TYPE_3D
@@ -184,9 +216,21 @@ func _free_targets() -> void:
 	for r in packed_mips:
 		if r.is_valid(): rd.free_rid(r)
 	packed_mips.clear()
-	for r in [packed, raw, raw2, half_packed, shape_n, out]:
+	for r in [packed, raw, raw2, half_packed, shape_n, pre_out] + hist + hdepth:
 		if r.is_valid(): rd.free_rid(r)
+	pre_out = RID(); hist = [RID(), RID()]; hdepth = [RID(), RID()]; hist_valid = false
+	if out.is_valid():   # still bound in the materials: freed after the new one is published
+		if OS.get_environment("CORTAO_FAULT_FREE") != "": rd.free_rid(out)   # checks only: plants the old bug (run_cortao.sh C8)
+		else: retired.append([out, -1])
 	packed = RID(); raw = RID(); raw2 = RID(); half_packed = RID(); shape_n = RID(); out = RID()
+
+func _free_retired() -> void:
+	## render thread, each frame: an old `out` is freed 3 frames after `tex` points at its replacement
+	for e in retired.duplicate():
+		if e[1] < 0 and published == out: e[1] = 3
+		elif e[1] > 0: e[1] -= 1
+		if e[1] == 0:
+			rd.free_rid(e[0]); retired.erase(e)
 
 func _make_targets(sz: Vector2i) -> void:
 	_free_targets()
@@ -206,10 +250,15 @@ func _make_targets(sz: Vector2i) -> void:
 	half_packed = rd.texture_create(f, RDTextureView.new())
 	f.width = sz.x; f.height = sz.y
 	f.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+	f.usage_bits |= RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT   # cortao_check reads the shape normal back (C7)
 	shape_n = rd.texture_create(f, RDTextureView.new())
 	f.format = RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM
-	f.usage_bits |= RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	out = rd.texture_create(f, RDTextureView.new())
+	pre_out = rd.texture_create(f, RDTextureView.new())
+	f.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+	hist = [rd.texture_create(f, RDTextureView.new()), rd.texture_create(f, RDTextureView.new())]
+	f.format = RenderingDevice.DATA_FORMAT_R32_SFLOAT
+	hdepth = [rd.texture_create(f, RDTextureView.new()), rd.texture_create(f, RDTextureView.new())]
 	_publish.call_deferred(out)
 
 func _work_size(sz: Vector2i) -> Vector2i:
@@ -219,6 +268,7 @@ func _work_size(sz: Vector2i) -> Vector2i:
 func _publish(r: RID) -> void:
 	tex.texture_rd_rid = r
 	RenderingServer.global_shader_parameter_set("cortao_ao", tex)
+	published = r
 
 func _read_time() -> void:
 	## timestamps come back a frame or more later: take the newest begin/end pair Godot reports
@@ -247,6 +297,7 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	var sz := rsb.get_internal_size()
 	if sz.x == 0 or sz.y == 0: return
 	if sz != size: _make_targets(sz)
+	if not retired.is_empty(): _free_retired()
 	if rsb.get_view_count() != 1: return   # mono only (no XR)
 	if not rsb.has_texture(&"forward_clustered", &"normal_roughness"): return
 	var depth := rsb.get_depth_layer(0)
@@ -255,7 +306,7 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	var P := rsd.get_view_projection(0)
 	var I := P.inverse()
 	if frame == 5 and OS.get_environment("CORTAO_DEBUG") != "": print("CORTAO P ", P, " size ", sz, " mips ", mips)
-	var seed := (frame * 2654435761) & 0xFFFFFFFF if (animate or _temporal(rsb)) else 0x9E3779B9
+	var seed := (frame * 2654435761) & 0xFFFFFFFF if (animate or ao_temporal or _temporal(rsb)) else 0x9E3779B9
 	frame += 1
 	var res := sz.x | (sz.y << 16)
 	var ws := _work_size(sz)
@@ -332,6 +383,7 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 		rd.compute_list_dispatch(cl, (ws.x + 15) / 16, (ws.y + 15) / 16, 1)
 	rd.compute_list_add_barrier(cl)
 	var fpk: RID = half_packed if half_res_ao else packed   # the filter's depth / normal at the resolution it runs at
+	var fin: RID = pre_out if ao_temporal else out          # where the last filter pass / upsample writes
 	var src := raw
 	var tmp := _temporal(rsb)
 	for k in (filter_passes_temporal if tmp else filter_passes) - 1:   # extra passes ping-pong raw <-> raw2
@@ -359,7 +411,7 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 		rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_up, 0, [
 			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_clamp, packed]),
 			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_clamp, dst2]),
-			_u(U.UNIFORM_TYPE_IMAGE, 2, [out])]), 0)
+			_u(U.UNIFORM_TYPE_IMAGE, 2, [fin])]), 0)
 		var up := PackedByteArray(); up.resize(32)
 		up.encode_s32(0, sz.x); up.encode_s32(4, sz.y); up.encode_s32(8, ws.x); up.encode_s32(12, ws.y); up.encode_float(16, 64.0)
 		rd.compute_list_set_push_constant(cl, up, up.size())
@@ -369,12 +421,35 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 		rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_filt, 0, [
 			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_border, packed]),
 			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_border, src]),
-			_u(U.UNIFORM_TYPE_IMAGE, 2, [out])]), 0)
+			_u(U.UNIFORM_TYPE_IMAGE, 2, [fin])]), 0)
 		rd.compute_list_set_push_constant(cl, fp, fp.size())
 		rd.compute_list_dispatch(cl, (sz.x / 2 + 8) / 8, (sz.y / 2 + 8) / 8, 1)
+	if ao_temporal:   # blend with the reprojected history (look/cortao/cortao_temporal.glsl) into `out`
+		rd.compute_list_add_barrier(cl)
+		var cam := rsd.get_cam_transform()
+		var unp := Vector4(mp.decode_float(16), mp.decode_float(20), mp.decode_float(24), mp.decode_float(28))
+		var m := prev_cam.affine_inverse() * cam   # this frame's view -> last frame's view
+		var nxt := 1 - hist_i
+		rd.compute_list_bind_compute_pipeline(cl, pl_temp)
+		rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_temp, 0, [
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_clamp, packed]),
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_clamp, pre_out]),
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [smp_linear, hist[hist_i]]),
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, [smp_clamp, hdepth[hist_i]]),
+			_u(U.UNIFORM_TYPE_IMAGE, 4, [out]),
+			_u(U.UNIFORM_TYPE_IMAGE, 5, [hist[nxt]]),
+			_u(U.UNIFORM_TYPE_IMAGE, 6, [hdepth[nxt]])]), 0)
+		var tp := PackedFloat32Array([unp.x, unp.y, unp.z, unp.w, prev_unproj.x, prev_unproj.y, prev_unproj.z, prev_unproj.w])
+		for r in 3: tp.append_array([m.basis.x[r], m.basis.y[r], m.basis.z[r], m.origin[r]])
+		tp.append_array([1.0 / sz.x, 1.0 / sz.y, temporal_alpha if hist_valid else 1.0, temporal_depth_tol, temporal_clamp_pad, 0.0, 0.0, 0.0])
+		var tb := tp.to_byte_array()
+		rd.compute_list_set_push_constant(cl, tb, tb.size())
+		rd.compute_list_dispatch(cl, (sz.x + 7) / 8, (sz.y + 7) / 8, 1)
+		hist_i = nxt; hist_valid = true; prev_cam = cam; prev_unproj = unp
 	rd.compute_list_end()
 	rd.capture_timestamp("CORTAO end")
 	if capture_next:
 		capture_next = false
 		var bytes := rd.texture_get_data(out, 0)
 		captured = Image.create_from_data(sz.x, sz.y, false, Image.FORMAT_RGBA8, bytes)
+		captured_shape_n = Image.create_from_data(sz.x, sz.y, false, Image.FORMAT_RGBAH, rd.texture_get_data(shape_n, 0))

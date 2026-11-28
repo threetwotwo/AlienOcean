@@ -41,6 +41,7 @@ uniform float fine3 = 1.0;              // v89: the finest cascade, underside on
 uniform float sun_size = 1.0;           // x the real sun's disc (0.533 deg)
 uniform float mirror_k = 1.0;
 #include "res://look/sea_floor_map.gdshaderinc"
+#include "res://look/hot_probe.gdshaderinc"
 varying vec2 still;
 varying vec3 wi;                        // island world point
 
@@ -180,5 +181,6 @@ void fragment() {
 		vec3 god = sea_god.x > 0.5 ? god_rays(eye, d, L, FRAGCOORD.xy, sea_god.y) : vec3(0.0);
 		col = max(col * exp(-(water_a + water_b) * L) + (glow + god) * water_exposure, vec3(0.0));
 	}
-	ALBEDO = min(col, vec3(30000.0));
+	ALBEDO = hot_probe_paint(col, vec3(1.0, 0.0, 0.0));   // stress-shot switch (look/hot_probe), off in play
+	if (hot_probe <= 0.0) ALBEDO = min(ALBEDO, vec3(30000.0));
 }

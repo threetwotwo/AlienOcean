@@ -88,6 +88,7 @@ var shore_bob_phase := 0.0
 var last_bump := 0.0
 var breach_armed := true    # a breach launch needs a dive below BREACH_ARM_DEPTH since the last one (see _update_swim)
 const BREACH_ARM_DEPTH := 0.9
+var act = null     # the motor's body activity (core/m02_motor/body_act.gd): read by the body rig, never used here
 
 func _init(cfg: Dictionary = {}) -> void:
 	for k in cfg:

@@ -9,9 +9,9 @@ also a level of detail (a far fish needs only the first):
                     bone), the two gill-cover plates (on the opercle bones), the eyeballs
   tier 3  surgical  cutters: the mouth cavity, the gill slits, the eye sockets
 
-A cutter is an ellipsoid (the same measure as every block, blockout._f) subtracted from the blocks of the bones it touches. A bone
-with a cutter is meshed from its field (max(blocks, -cutters)) by marching cubes instead of from its block meshes; every other bone
-keeps its plain block meshes, so a blockout without cutters is unchanged. All positions come from the record: mouth line and jaw joint
+A cutter is an ellipsoid (the same measure as every block, blockout._f) subtracted from the blocks of the bones it touches. This module
+places the blocks and cutters from the record (numpy, checked here: CT1-CT3); blender/clean_mesh.py cuts the meshes with exact
+booleans on finely faceted blocks (marching cubes, round 1, left lumps and a saw-toothed mouth rim: Gary, "not clean enough"). All positions come from the record: mouth line and jaw joint
 (mouth), gill cover rear and preopercle lines and opercle hinge (gills), skeleton.eye (eyes).
 
   mouth   the lower jaw is the half lozenge under the line from the mouth tip to the jaw joint, a block on the jaw bone with the mouth
@@ -25,24 +25,17 @@ keeps its plain block meshes, so a blockout without cutters is unchanged. All po
 """
 import numpy as np
 from PIL import Image, ImageDraw
-from skimage.measure import marching_cubes
-from scipy.ndimage import distance_transform_edt
 from .blockout import _f, _ellipsoid
 
-CUT_VOX = 0.006          # DEFAULT: marching-cubes voxel of a carved bone, SL (a 0.6 % SL step: finer than the slit and the socket rim)
 JAW_PAD = 1.03           # DEFAULT: the head's jaw cut stands this much outside the jaw block (a hairline seam at rest)
 JAW_TOP = 0.05           # DEFAULT: the jaw block's lens above the jaw line, share of its depth (the jaw line is the block's flat top)
 JAW_DEPTH = 0.85         # DEFAULT: the lower jaw's depth under the jaw line at its middle, share of the head blocks' depth there
 CAVITY_W, CAVITY_H = 0.70, 0.70   # DEFAULT: the mouth cavity in the jaw block: share of the jaw's half-width and of its depth
 CAVITY_BACK = 0.12       # DEFAULT: the cavity starts this share of the jaw's length behind the tip (the chin stays solid)
 SLIT_W = 0.012           # DEFAULT: gill slit width behind the cover's rear line, SL
+SLIT_STEP, SLIT_LAP = 0.75, 2.0   # DEFAULT: slit blades every 0.75 slit widths, each twice its spacing long
 SLIT_DEPTH = 0.45        # DEFAULT: the slit's reach into the head, share of the head's half-width there
-COVER_SOFT = 0.04        # DEFAULT: the soft minimum's width, block measure
-COVER_PROUD = 1.04       # DEFAULT: the cover plate's outer face, in block measure (1 = the skin): a plate a hair over the skin
-COVER_IN = 0.80          # DEFAULT: its inner face, in block measure (hidden inside the head)
 COVER_OVER = 1.2         # DEFAULT: the plate overhangs the slit by this many slit widths, so at rest the slit is hidden
-COVER_MID = 0.25         # DEFAULT: the plates stop this share of the half-width short of the midline (left and right swing apart),
-                         # as pose.cover_weights holds the midline
 SOCKET = 1.15            # DEFAULT: eye socket radius over the eye's radius (a ring of shadow round the eyeball)
 SOCKET_DEPTH = 1.2       # DEFAULT: the socket's depth into the head over the eye's radius
 
@@ -94,17 +87,36 @@ def _cover_poly(rec):
     n = np.c_[t[:, 1], -t[:, 0]]; n *= np.sign(((rear - mid) * n).sum(1, keepdims=True) + 1e-12)       # outward: away from the cover
     ro = rear + n * COVER_OVER * SLIT_W; o = COVER_OVER * SLIT_W
     ro = np.vstack([ro[0] - t[0] * o, ro, ro[-1] + t[-1] * o])          # and past both ends of the slit
-    top = [[ro[-1, 0], yhi + 0.5 * SLIT_W], [pre[0, 0] - 0.01, yhi + 0.5 * SLIT_W]]
-    return np.vstack([ro, top, pre - [0.01, 0]]), rear
+    yt = max(yhi, float(ro[:, 1].max())) + 0.5 * SLIT_W          # over the rear line's own extended end (under it, the outline crossed itself)
+    top = [[ro[-1, 0], yt], [pre[0, 0] - 0.01, yt]]
+    return _simple(np.vstack([ro, top, pre - [0.01, 0]])), rear
+
+
+def _simple(P, n=1024):
+    """the outline of the area a polygon fills, as a simple polygon (a prism on a self-crossing outline is not a solid, and an exact
+    boolean with it returns nothing): raster fill, its contour, thinned to within two raster cells (0.2 % of its size)."""
+    from skimage.measure import find_contours, approximate_polygon
+    lo = P.min(0) - 0.01; k = (n - 1) / max(float((P.max(0) + 0.01 - lo).max()), 1e-9)
+    im = Image.new('L', (n, n), 0); ImageDraw.Draw(im).polygon([tuple((q - lo) * k) for q in P], fill=1)
+    M = np.pad(np.array(im, float), 1)
+    c = max(find_contours(M, 0.5), key=len) - 1                     # (row = y, col = x)
+    c = approximate_polygon(c, 2.0)[:-1]
+    return np.c_[c[:, 1], c[:, 0]] / k + lo
 
 
 def gills(rec, blocks):
-    """two cover plates (tier 2, on the opercle bones, made from the voxel field in carve) and the slit cutters behind each rear line."""
+    """the cover plates' side outline (the plates are cut in Blender, blender/clean_mesh.covers) and the slit cutters behind each rear
+    line: short blades every SLIT_STEP slit widths along the line, each SLIT_LAP times its spacing long, so they join as one smooth slit
+    (one blade per traced point, round 1, read as a string of beads)."""
     if not rec.get('cover') or 'rear' not in rec['cover'] or 'preop' not in rec['cover']: return None
     poly, rear = _cover_poly(rec); cut = []
+    arc = np.r_[0, np.cumsum(np.linalg.norm(np.diff(rear, axis=0), axis=1))]
+    if arc[-1] <= 0: return dict(poly=poly.tolist(), cutters=[])
+    u = np.linspace(0, arc[-1], max(int(np.ceil(arc[-1] / (SLIT_STEP * SLIT_W))), 2) + 1)
+    rear = np.c_[np.interp(u, arc, rear[:, 0]), np.interp(u, arc, rear[:, 1])]
     for sg in (1, -1):
         for a, b in zip(rear[:-1], rear[1:]):
-            t = b - a; s = float(np.linalg.norm(t))
+            t = b - a; s = float(np.linalg.norm(t)) * SLIT_LAP / 0.7
             if s < 1e-6: continue
             R = _frame(t); nb = R[:, 1] if R[0, 1] > 0 else -R[:, 1]          # the curve's normal pointing back (+x side)
             mid = (a + b) / 2 + nb[:2] * SLIT_W / 2; zs = _zsurf(blocks, mid[0], mid[1], 1.0)
@@ -118,16 +130,16 @@ def eyes(rec, blocks):
     E = rec['eye']; er = E['d'] / 2; x, y = E['x'], E['y']; zs = _zsurf(blocks, x, y, 1.0)
     if zs <= 0: return None
     balls, cut = [], []; sink = 1.0 - float(E.get('bulge', 0.12))     # the eye stands record eye.bulge eye radii past the skin, as in form.py
+    # socket and ball on the skin's own normal there: square to z, on a sloping head the socket opened to one side of the ball and
+    # left a crescent gap behind it (clean pass round 2)
+    p = np.array([x, y, zs]); e = 1e-4
+    g = np.array([(_f((p + d)[None], blocks).min() - _f((p - d)[None], blocks).min()) / (2 * e) for d in np.eye(3) * e])
+    n = g / max(np.linalg.norm(g), 1e-12); t1 = np.cross([0, 1.0, 0], n); t1 /= max(np.linalg.norm(t1), 1e-12); t2 = np.cross(n, t1)
     for sg in (1, -1):
-        balls.append(dict(kind='eyeball', tier=2, c=[x, y, sg * (zs - sink * er)], r=[er, er, er], bone='head'))
-        cut.append(dict(kind='cut_eye', tier=3, c=[x, y, sg * zs], r=[SOCKET * er, SOCKET * er, SOCKET_DEPTH * er], target='head'))
+        m = np.array([1, 1, sg]); R = np.stack([t1 * m, t2 * m, n * m], 1)
+        balls.append(dict(kind='eyeball', tier=2, c=(p * m - sink * er * n * m).tolist(), r=[er, er, er], bone='head'))
+        cut.append(dict(kind='cut_eye', tier=3, c=(p * m).tolist(), r=[SOCKET * er, SOCKET * er, SOCKET_DEPTH * er], R=R.tolist(), target='head'))
     return dict(balls=balls, cutters=cut)
-
-
-def _grid(lo, hi, h):
-    n = np.maximum(np.ceil((hi - lo) / h).astype(int) + 1, 2)
-    ax = [lo[i] + h * np.arange(n[i]) for i in range(3)]
-    X, Y, Z = np.meshgrid(*ax, indexing='ij'); return np.c_[X.ravel(), Y.ravel(), Z.ravel()], n
 
 
 def _bbox(q):
@@ -144,49 +156,6 @@ def _samples(q):
     v, _ = _ellipsoid(q['c'], q['r'], 10, 6, q.get('R'), q.get('n'), q.get('ry_lo')); c = np.asarray(q['c'], float)
     return np.vstack([c[None]] + [c + k * (v - c) for k in (0.9, 0.6, 0.3)])
 
-
-def _mesh(field, n, lo, h):
-    vol = field.reshape(n)
-    if vol.min() > 0 or vol.max() < 0: return None
-    V, F, _, _ = marching_cubes(vol, 0.0, spacing=(h, h, h), gradient_direction='descent')
-    return V + lo, F.tolist()
-
-
-def carve(blocks, cutters, h=CUT_VOX):
-    """mesh of the union of blocks minus the cutters, by marching cubes. None when nothing is left."""
-    lo = np.min([_bbox(q)[0] for q in blocks], 0) - 2 * h; hi = np.max([_bbox(q)[1] for q in blocks], 0) + 2 * h
-    P, n = _grid(lo, hi, h)
-    u = _f(P, blocks).min(1) - 1.0
-    if cutters: u = np.maximum(u, -(_f(P, cutters).min(1) - 1.0))
-    return _mesh(u, n, lo, h)
-
-
-def cover_plates(blocks, poly, h=CUT_VOX):
-    """the two cover plates: the shell of the head's blocks between block measure COVER_IN and COVER_PROUD, inside the cover's side
-    outline (poly, x y), off the midline. A side-outline mask is a signed distance from a raster of the outline."""
-    poly = np.asarray(poly, float); pad = 3 * h
-    lo2, hi2 = poly.min(0) - pad, poly.max(0) + pad
-    zmax = max(_zsurf(blocks, *p, 1.0) for p in poly) * 1.2 + pad
-    lo = np.array([lo2[0], lo2[1], 0.0]); hi = np.array([hi2[0], hi2[1], zmax])
-    P, n = _grid(lo, hi, h)
-    im = Image.new('L', (int(n[0]), int(n[1])), 0)
-    ImageDraw.Draw(im).polygon([((p[0] - lo[0]) / h, (p[1] - lo[1]) / h) for p in poly], fill=1)
-    inside = np.array(im, bool).T                                          # (nx, ny)
-    sd = (distance_transform_edt(~inside) - distance_transform_edt(inside)) * h   # < 0 inside the outline
-    sd = np.repeat(sd[:, :, None], n[2], 2).ravel()
-    # ~ radial share of the skin (1 on it), the blocks joined by a soft minimum: a plain minimum keeps the crest where two blocks
-    # meet, and a plate offset from it stood in folds at every block (round 1)
-    fk = np.sqrt(_f(P, blocks)); fm = -COVER_SOFT * np.log(np.exp(-(fk - fk.min(1, keepdims=True)) / COVER_SOFT).sum(1)) + fk.min(1)
-    zs = np.array([_zsurf(blocks, *p, 1.0) for p in poly]).max()
-    u = np.maximum.reduce([fm - COVER_PROUD, COVER_IN - fm, sd, COVER_MID * zs - P[:, 2]])
-    out = []
-    for sg in (1, -1):
-        m = _mesh(u, n, lo, h)
-        if m is None: return []
-        V, F = m; V = V * np.array([1, 1, sg])
-        if sg < 0: F = [f[::-1] for f in F]
-        out.append(dict(name='opercleL' if sg > 0 else 'opercleR', V=V, F=F))
-    return out
 
 
 def head_kit(rec, segs):
@@ -209,69 +178,27 @@ def _touch(q, blocks):
     return bool((_f(_samples(q), blocks).min(1) <= 1).any())
 
 
-# meshoptimizer (zeux/meshoptimizer, MIT; as blender/lods.py) thins a marching-cubes mesh: the lattice's even triangles, many times
-# what the blocks' own meshes spend, carry nothing a blockout needs. The PyPI wrapper declares no argtypes, so the C signature is here.
-import ctypes as _C
-import meshoptimizer.simplifier as _ms
-_P = _C.POINTER; _simp = _ms.lib.meshopt_simplify
-_simp.argtypes = [_P(_C.c_uint), _P(_C.c_uint), _C.c_size_t, _P(_C.c_float), _C.c_size_t, _C.c_size_t, _C.c_size_t, _C.c_float, _C.c_uint,
-                  _P(_C.c_float)]
-_simp.restype = _C.c_size_t
-MC_TRIS = 1500           # DEFAULT: a carved bone's mesh after thinning, triangles (a plain bone spends 2 x 196 + joint ~120)
-PIECE_TRIS = 600         # DEFAULT: a moving piece's (jaw, cover plate) mesh after thinning
-MC_ERR = 0.004           # DEFAULT: the thinning's largest error, share of the mesh's extent
+CT_IN = 0.99             # DEFAULT: share of the jaw block's points inside the head's jaw cut at rest (the jaw fills its own place)
 
 
-def thin(V, F, tris, err=MC_ERR):
-    idx = np.ascontiguousarray(np.asarray(F, np.uint32).ravel()); P = np.ascontiguousarray(V, np.float32); dst = np.zeros_like(idx)
-    if len(idx) // 3 <= tris: return V, F
-    n = _simp(dst.ctypes.data_as(_P(_C.c_uint)), idx.ctypes.data_as(_P(_C.c_uint)), len(idx), P.ctypes.data_as(_P(_C.c_float)), len(P), 12,
-              int(tris) * 3, float(err), 0, None)
-    T = dst[:n].reshape(-1, 3); used = np.unique(T); remap = np.full(len(V), -1); remap[used] = np.arange(len(used))
-    return np.asarray(V)[used], remap[T].tolist()
-
-
-def build(prims, kit, h=CUT_VOX):
-    """carve every spine bone a head cutter touches and mesh the moving pieces. Returns (carved: {bone: (V, F)}, pieces: [dict(name,
-    bone, V, F, mat)]) where bone is a spine index or the name of a head bone."""
-    head_cut = [q for q in kit['cutters'] if q['target'] == 'head']; carved = {}
-    for b in sorted(set(q['bone'] for q in prims)):
-        bl = [q for q in prims if q['bone'] == b]; cu = [q for q in head_cut if _touch(q, bl)]
-        if not cu: continue
-        m = carve(bl, cu, h)
-        if m: carved[b] = thin(*m, MC_TRIS)
-    pieces = []
+def cut_checks(kit, blocks):
+    """CT1 the jaw block, where it lies inside the head's blocks, lies inside the jaw's cut out of the head at rest (no jaw through the
+    skull), with a cavity cut in it; CT2 every gill slit lies under its cover plate's overhang at rest (side view); CT3 each eyeball's
+    centre lies in its socket. A part the record cannot place (no cover lines) is noted, not failed. blocks: the body's blocks."""
+    R = {}; cut = {k: [q for q in kit['cutters'] if q['kind'] == k] for k in ('cut_jaw', 'cut_mouth', 'cut_gill', 'cut_eye')}
     jaw = [q for q in kit['blocks'] if q['kind'] == 'jaw']
-    if jaw:
-        m = carve(jaw, [q for q in kit['cutters'] if q['target'] == 'jaw'], h / 2)
-        if m: V_, F_ = thin(*m, PIECE_TRIS); pieces.append(dict(name='jaw', bone='jaw', V=V_, F=F_, mat='jaw'))
-    if kit.get('cover_poly'):
-        segs = [q for q in prims if q['kind'] == 'segment']
-        for p in cover_plates(segs, kit['cover_poly'], h / 2):
-            V_, F_ = thin(p['V'], p['F'], PIECE_TRIS); pieces.append(dict(name=p['name'], bone=p['name'], V=V_, F=F_, mat='cover'))
-    for k, q in enumerate(q for q in kit['blocks'] if q['kind'] == 'eyeball'):
-        v, f = _ellipsoid(q['c'], q['r'], 12, 8); pieces.append(dict(name=f'eye_{"L" if q["c"][2] > 0 else "R"}', bone='head', V=v, F=f, mat='eye'))
-    return carved, pieces
-
-
-CT_IN = 0.99             # DEFAULT: share of the jaw block's vertices inside the head's jaw cut at rest (the jaw fills its own place)
-
-
-def cut_checks(kit, pieces):
-    """CT1 the jaw block lies inside the jaw's cut out of the head at rest (no jaw through the skull), with a cavity cut in it;
-    CT2 every gill slit lies under its cover plate's overhang at rest (side view), and both plates were made;
-    CT3 each eyeball's centre lies in its socket. A part the record cannot place (no cover lines) is noted, not failed."""
-    R = {}; P = {p['name']: p for p in pieces}; cut = {k: [q for q in kit['cutters'] if q['kind'] == k] for k in ('cut_jaw', 'cut_mouth', 'cut_gill', 'cut_eye')}
-    if 'jaw' in P and cut['cut_jaw']:
-        R['CT1_jaw_in_cut'] = round(float((_f(np.asarray(P['jaw']['V']), cut['cut_jaw']).min(1) <= 1.0).mean()), 3)
+    if jaw and cut['cut_jaw']:
+        S = _samples(jaw[0]); S = S[_f(S, blocks).min(1) <= 1.0]
+        R['CT1_jaw_in_cut'] = round(float((_f(S, cut['cut_jaw']).min(1) <= 1.0).mean()), 3) if len(S) else 0.0
         R['CT1_pass'] = R['CT1_jaw_in_cut'] >= CT_IN and bool(cut['cut_mouth'])
     else: R['CT1_pass'] = None
     if cut['cut_gill'] and kit.get('cover_poly'):
-        poly = np.asarray(kit['cover_poly']); im = Image.new('L', (2000, 2000), 0); lo = poly.min(0) - 0.05; k = 2000 / (poly.max(0) - lo + 0.05).max()
+        from scipy.spatial import ConvexHull                    # the plate is built on the outline's hull (clean_mesh.covers)
+        poly = np.asarray(kit['cover_poly']); poly = poly[ConvexHull(poly).vertices]; im = Image.new('L', (2000, 2000), 0); lo = poly.min(0) - 0.05; k = 2000 / (poly.max(0) - lo + 0.05).max()
         ImageDraw.Draw(im).polygon([tuple((q - lo) * k) for q in poly], fill=1); M = np.array(im, bool)
         c = np.array([q['c'][:2] for q in cut['cut_gill']]); ij = ((c - lo) * k).astype(int)
         R['CT2_slits_covered'] = round(float(M[ij[:, 1].clip(0, 1999), ij[:, 0].clip(0, 1999)].mean()), 3)
-        R['CT2_pass'] = R['CT2_slits_covered'] >= CT_IN and 'opercleL' in P and 'opercleR' in P
+        R['CT2_pass'] = R['CT2_slits_covered'] >= CT_IN
     else: R['CT2_pass'] = None
     balls = [q for q in kit['blocks'] if q['kind'] == 'eyeball']
     if balls and cut['cut_eye']:

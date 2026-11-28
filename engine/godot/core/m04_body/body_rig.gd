@@ -136,6 +136,8 @@ func apply_impact_impulse(world_dir, intensity := 0.6, kind := "bump") -> void:
 	if swim_pose != null and world_dir != null:
 		var d := BM.nrm(world_dir)
 		lr = d.dot(swim_pose.bodyRight); ly = d.dot(swim_pose.bodyAxisY); lb = -d.dot(swim_pose.bodyBack)
+	if _act.get("kind", "") == "rest":
+		_rest.impulse(lr, lb, mag)     # seated / lying: the trunk sways on its support
 	if kind == "splash":
 		arm_spring_l.add_impulse(Vector3(-0.55, 0.80, 0.30) * mag)
 		arm_spring_r.add_impulse(Vector3(0.55, 0.80, 0.30) * mag)
@@ -208,7 +210,9 @@ func solve_noclip_arm(sh: Vector3, target: Vector3, pole: Vector3, surf, o := {}
 	var mf: float = o.get("maxFlexDeg", 138.0)
 	var wr: float = o.get("wristRadius", 0.030)
 	var er: float = o.get("elbowRadius", 0.048)
+	var pin: float = o.get("pinW", 0.0)       # 1 = the wrist is holding something: it stays, only the elbow moves
 	var eff_t := push_clear(target, wr, surf, 0.35)
+	if pin > 0.0: eff_t = eff_t.lerp(target, pin)
 	var cp := pole
 	var ik := BM.two_bone(sh, eff_t, cp, upper_arm_len, forearm_len, sr, sm, mf)
 	if surf != null:
@@ -224,7 +228,7 @@ func solve_noclip_arm(sh: Vector3, target: Vector3, pole: Vector3, surf, o := {}
 			var fd := fc - fm
 			var fw := smoothstep(0.002, 0.018, fd.length())
 			if fw > 0.001:
-				eff_t += fd * (0.52 * fw); cp += fd * (1.15 * fw); adj = true
+				eff_t += fd * (0.52 * fw * (1.0 - pin)); cp += fd * (1.15 * fw); adj = true
 			if not adj: break
 			ik = BM.two_bone(sh, eff_t, cp, upper_arm_len, forearm_len, sr, sm, mf)
 	return ik
@@ -381,6 +385,9 @@ static func _ff(fh, x: float, z: float) -> float:
 
 ## updateSwim. s = the ported SwimmerLocomotion (core/m02_motor/swimmer_locomotion.gd). Returns the pose dictionary.
 func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense = null, on_stroke_pull = null, on_shore_footstep = null) -> Dictionary:
+	if _act_live(s):
+		return _update_act(dt, s, total_time, env, sense)
+	_act = {}
 	if not thalassa_exact and dt > MAX_STEP:
 		# FIX (stress B40): a long frame (the rig drawn per frame and the game hitched) was cut to 0.05 s by the step
 		# clamps, so the feet's step clocks lost time the body did not: planted feet dragged 9 cm. Catch up in
@@ -394,6 +401,400 @@ func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense
 		pose = _skeleton(pose, dt, s, env)
 		_breath_hooks(pose, s)     # (breath master clock)
 	return pose
+
+# ---------------------------------------------------------------- rest and ride (rest-ride thread)
+## Seated, lying and riding: the motor's body activity (core/m02_motor/body_act.gd, swimmer.act) says what she is
+## doing; the poses are core/m04_body/pose_rest.gd and pose_ride.gd (Thalassa ikSolvePelagosRestPose /
+## ikSolveCreatureRidePose). Every change between two poses goes through blend_chain (bone lengths held, no pops).
+const PoseRest := preload("res://core/m04_body/pose_rest.gd")
+const PoseRide := preload("res://core/m04_body/pose_ride.gd")
+const BodyAct := preload("res://core/m02_motor/body_act.gd")
+var _rest = PoseRest.new(null)
+var _ride = PoseRide.new(null)
+var _act := {}                # per activity: kind, phase seen last step, snapshots, foot targets
+var _last_raw = null          # the last walk / swim pose before the skeleton pass (a transition starts from it)
+var _hold_w := 0.0
+
+func _act_live(s) -> bool:
+	if thalassa_exact: return false
+	var a = s.get("act")
+	return a != null and a.kind != ""
+
+func _update_act(dt: float, s, total_time: float, env: Dictionary, sense) -> Dictionary:
+	var n := ceili(dt / MAX_STEP) if dt > MAX_STEP else 1
+	var pose := {}
+	_rest.rig = self
+	_ride.rig = self
+	for i in n:
+		pose = _act_step(dt / n, s, total_time - dt * float(n - 1 - i) / n, env, sense)
+	_rest.rig = null
+	_ride.rig = null
+	_hold_w = clampf(pose.get("holdW", 0.0), 0.0, 1.0)
+	pose = _skeleton(pose, dt / n, s, env)
+	_hold_w = 0.0
+	return pose
+
+func _act_step(dt: float, s, t: float, env: Dictionary, sense) -> Dictionary:
+	var a = s.act
+	if _act.get("kind", "") != a.kind:
+		_act = {"kind": a.kind, "phase": ""}
+	var first: bool = _act.phase != a.phase
+	_act.phase = a.phase
+	if a.kind == "rest": return _rest_step(dt, a, s, t, env, sense, first)
+	return _ride_step(dt, a, s, t, env, sense, first)
+
+func _live_base(dt: float, s, t: float, env: Dictionary, sense) -> Dictionary:
+	var p := _update_swim_step(dt, s, null, t, env, sense)
+	_last_raw = p
+	return p
+
+static func _snap(p: Dictionary) -> Dictionary:
+	var c := p.duplicate(true)
+	c.erase("skel")
+	return c
+
+func _floor_at(env: Dictionary, p: Vector3) -> float:
+	var f = env.get("floor_height")
+	return f.call(p.x, p.z) if f != null else -INF
+
+func _rest_step(dt: float, a, s, t: float, env: Dictionary, sense, first: bool) -> Dictionary:
+	var sp: Dictionary = a.spec
+	var seat: Transform3D = sp.seat
+	var kind: String = sp.kind
+	match a.phase:
+		"approach", "turn":
+			var lp := _live_base(dt, s, t, env, sense)
+			_act.pre = _snap(lp)     # before the skeleton pass (it re-applies the girdle itself)
+			return lp
+		"handoff":
+			# her standing snapshot -> the live walk pose: same eye, same planted feet (the walk was frozen under the act)
+			var w := _live_base(dt, s, t, env, sense)
+			return blend_chain(_act.snap, w, BodyAct.quintic(a.u()), {"mode": "rest_stand_up"})
+	if not _act.has("snap"):
+		# the walk pose she was in when the act took over (before the skeleton pass: it re-applies the girdle itself)
+		_act.snap = _act.pre if _act.has("pre") else _snap(_live_base(dt, s, t, env, sense))
+		var feet := []
+		for side in [-1.0, 1.0]:
+			var f0: Vector3 = _rest.seat_foot(seat, kind, side, -INF)
+			feet.append(_rest.seat_foot(seat, kind, side, _floor_at(env, f0)))
+		_act.seat_feet = feet
+		_act.snap_feet = [_act.snap.legL.ik.eff, _act.snap.legR.ik.eff]
+		_rest.duck_init = false
+	var duck: float = _rest.duck_for(dt, seat, env)
+	var look := {"look_yaw": a.look_yaw, "look_pitch": a.look_pitch, "duck": duck}
+	match a.phase:
+		"sit", "stand":
+			var x: float = a.u() if a.phase == "sit" else 1.0 - a.u()
+			return _sit_blend(dt, x, seat, kind, t, look, "rest_sit_down" if a.phase == "sit" else "rest_stand_up")
+		"seated":
+			var o := look.duplicate()
+			o.feet = _act.seat_feet
+			o.foot_ground = _seat_ground()
+			return _rest.solve_seat(dt, seat, kind, t, o)
+		"lie", "rise", "lying":
+			if a.phase == "lie" and first: _rest.reset_lie()
+			var lie: Transform3D = sp.get("lie", seat)
+			var pil: Transform3D = sp.get("pillow", lie)
+			var L: Dictionary = _rest.solve_lie(dt, lie, pil, t, {"look_yaw": a.look_yaw * 0.8, "look_pitch": a.look_pitch * 0.5})
+			if a.phase == "lying": return L
+			var x2: float = a.u() if a.phase == "lie" else 1.0 - a.u()
+			var o2 := look.duplicate()
+			o2.feet = _act.seat_feet
+			o2.foot_ground = _seat_ground()
+			var S: Dictionary = _rest.solve_seat(dt, seat, kind, t, o2)
+			return _lie_blend(x2, S, L, seat, lie, env)
+	return _rest.solve_seat(dt, seat, kind, t, look)
+
+func _seat_ground() -> Array:
+	var out := []
+	for i in 2:
+		var f: Vector3 = _act.seat_feet[i]
+		out.append(1.0 if f.y < _act.snap_feet[i].y + 0.03 else 0.0)
+	return out
+
+## Walk pose -> seated at sit progress x (the stand-up runs it backwards): the pelvis goes back and down with the
+## motor's eye (body_act.sit_lower), the trunk hinges forward over the hips and back up, the feet stay planted and
+## then move to where they rest when seated (a short step, or lifting off the floor under a high seat).
+func _sit_blend(dt: float, x: float, seat: Transform3D, kind: String, t: float, look: Dictionary, mode: String) -> Dictionary:
+	var w := BodyAct.sit_lower(x)
+	var feet := []
+	var fws := []
+	var up := seat.basis.y.normalized()
+	for i in 2:
+		var fw := BodyAct.quintic((x - 0.40 - 0.08 * i) / 0.5)
+		fws.append(fw)
+		var a0: Vector3 = _act.snap_feet[i]
+		var b0: Vector3 = _act.seat_feet[i]
+		feet.append(a0.lerp(b0, fw) + up * (0.03 * sin(PI * fw)))
+	var o := look.duplicate()
+	o.feet = feet
+	var g := _seat_ground()
+	o.foot_ground = [lerpf(1.0, g[0], fws[0]), lerpf(1.0, g[1], fws[1])]
+	var S: Dictionary = _rest.solve_seat(dt, seat, kind, t, o)
+	var p := blend_chain(_act.snap, S, w, {"feet": feet, "feet_w": fws, "lean": 0.32 * sin(PI * w), "mode": mode})
+	p.holdW = w
+	return p
+
+## Seated on the bunk's edge -> lying (rise: backwards). The trunk tips sideways onto the pillow side, then rolls
+## onto its back (two rotations: a single slerp swings the chest out over the aisle first, and from sitting up
+## the head would pass higher than seated, into a low upper bunk), pivoting on the head-side hip where it sits on
+## the mattress. The legs are blended in the turning pelvis's frame (curled, then knees up as she rolls onto her
+## back), so they keep their shape and never cross.
+## ADAPT: Thalassa has no bunk transition (it cuts to the lying pose under the camera glide).
+func _lie_blend(x: float, S: Dictionary, L: Dictionary, seat: Transform3D, lie: Transform3D, env := {}) -> Dictionary:
+	var U := seat.basis.y.normalized()
+	# toward the lying trunk as it is (inclined on the pillow), not the bare mattress axis
+	var H: Vector3 = ((L.neckPos as Vector3) - (L.pelvisPos as Vector3)).normalized()
+	var a1 := U.cross(H)
+	var r1_full := Basis()
+	if a1.length() > 1e-4: r1_full = Basis(a1.normalized(), U.angle_to(H))
+	var back1 := r1_full * seat.basis.z.normalized()
+	var want_back: Vector3 = L.bodyBack
+	want_back = (want_back - H * want_back.dot(H)).normalized()
+	var beta := atan2(H.dot(back1.cross(want_back)), back1.dot(want_back))
+	var s1 := BodyAct.quintic(x / 0.65)
+	var s2 := BodyAct.quintic((x - 0.25) / 0.75)
+	var r1 := Basis(a1.normalized(), U.angle_to(H) * s1) if a1.length() > 1e-4 else Basis()
+	var rot := Basis(H, beta * s2) * r1
+	var w := BodyAct.quintic(x)
+	var pa: Vector3 = S.pelvisPos
+	var hip_head: Vector3 = S.hipL if (S.hipL - S.hipR).dot(H) > 0.0 else S.hipR
+	var pivot: Vector3 = hip_head - U * 0.07
+	var Sp: Dictionary = S.duplicate(true)
+	_shift(Sp, pivot + rot * (pa - pivot) - pa)
+	# the elbows tuck in front of her chest while she is over on her side (left to point out, the lower one would
+	# go through the mattress)
+	var front: Vector3 = -(rot * seat.basis.z.normalized())
+	var out := blend_chain(Sp, L, w, {"rot_a": rot, "legs_local": true, "mode": "rest_lie_down",
+		"elbow_dir": (front + U * 0.3).normalized(), "elbow_w": 0.85 * sin(PI * clampf(x / 0.9, 0.0, 1.0))})
+	_curl_under(out, env)
+	_lift_feet(out, env)
+	return out
+
+## Feet that the blend would swing through the furniture (a sole grazing the mattress as the legs come up) are lifted
+## onto what is under them, the leg re-solved in its own bend plane (the lift follows the overlap: no steps).
+func _lift_feet(p: Dictionary, env: Dictionary) -> void:
+	if env.get("floor_height") == null: return
+	for k in ["legL", "legR"]:
+		var lg: Dictionary = p[k]
+		var ik: Dictionary = lg.ik
+		var fin: Transform3D = lg.finMat
+		var need := 0.0
+		for e in SOLE_PTS:
+			var q: Vector3 = fin * e
+			for o in [Vector2.ZERO, Vector2(0.03, 0), Vector2(-0.03, 0), Vector2(0, 0.03), Vector2(0, -0.03)]:     # an edge seen 3 cm early
+				var fy := _floor_at(env, q + Vector3(o.x, 0, o.y))
+				if is_finite(fy) and fy < (ik.root as Vector3).y + 0.05: need = maxf(need, fy + 0.004 - q.y)
+		if need <= 0.0: continue
+		var hip: Vector3 = ik.root
+		var line: Vector3 = (ik.eff as Vector3) - hip
+		var kn: Vector3 = (ik.mid as Vector3) - hip
+		var bend: Vector3 = kn - line.normalized() * kn.dot(line.normalized())
+		var tgt: Vector3 = (ik.eff as Vector3) + Vector3(0, need, 0)
+		var nik := BM.two_bone(hip, tgt, (ik.mid as Vector3) + bend.normalized() * 0.2, thigh_len, shin_len, 0.992, 0.04, 132.0)
+		var lg2 := lg.duplicate()
+		lg2.ik = nik
+		lg2.finMat = Transform3D(fin.basis, nik.eff)
+		p[k] = lg2
+
+## ADAPT (low bunk): lying back from sitting passes the trunk upright; under a low upper bunk the spine curls
+## forward about the waist (as the seated duck) by the least angle that keeps the skull 0.13 m clear. The angle is
+## found by bisection on the clearance (continuous as the pose moves, no steps).
+const CURL_CLEAR := 0.13
+func _curl_under(p: Dictionary, env: Dictionary) -> void:
+	var q = env.get("nearest_surface")
+	if q == null: return
+	var W: Vector3 = p.waistPos
+	var X: Vector3 = (p.chestMat.basis.x as Vector3).normalized()
+	var skull0: Vector3 = (p.headMat as Transform3D) * Vector3(0, 0.10, 0)
+	# only a ceiling counts (not the mattress under a lying head, nor the head board beside it)
+	var ceiling := func(_pt: Vector3, n: Vector3) -> bool: return n.y < -0.5
+	var clear := func(a: float) -> float:
+		var sk: Vector3 = W + Basis(X, -a) * (skull0 - W)
+		var hit: Dictionary = q.call(sk, CURL_CLEAR + 0.02, ceiling)
+		if hit.is_empty(): return 1.0
+		return float(hit.dist) - CURL_CLEAR
+	if clear.call(0.0) >= 0.0: return
+	var hi := 0.0
+	while hi < 1.2 and clear.call(hi) < 0.0: hi += 0.15
+	hi = minf(hi, 1.2)
+	var lo := maxf(0.0, hi - 0.15)
+	for _i in 10:
+		var mid := (lo + hi) * 0.5
+		if clear.call(mid) < 0.0: lo = mid
+		else: hi = mid
+	var R := Basis(X, -hi)
+	var rot := func(v: Vector3) -> Vector3: return W + R * (v - W)
+	for k in ["chestPos", "neckPos", "shoulderL", "shoulderR", "clavicleL", "clavicleR"]: p[k] = rot.call(p[k])
+	for k in ["chestMat", "headMat", "handLMat", "handRMat", "torchMat"]:
+		p[k] = Transform3D(R * (p[k] as Transform3D).basis, rot.call((p[k] as Transform3D).origin))
+	for k in ["armL", "armR"]:
+		var A: Dictionary = (p[k] as Dictionary).duplicate()
+		for j in ["root", "mid", "eff"]: A[j] = rot.call(A[j])
+		if A.has("bendAxis"): A.bendAxis = R * (A.bendAxis as Vector3)
+		p[k] = A
+	var hm: Dictionary = (p.headMotion as Dictionary).duplicate()
+	hm.pos = rot.call(hm.pos)
+	hm.fwd = R * (hm.fwd as Vector3)
+	p.headMotion = hm
+	p.bodyAxisY = ((p.neckPos as Vector3) - (p.pelvisPos as Vector3)).normalized()
+
+func _ride_step(dt: float, a, s, t: float, env: Dictionary, sense, first: bool) -> Dictionary:
+	var prev_swim = _last_raw
+	var sw := _live_base(dt, s, t, env, sense)
+	if not _act.has("begun"):
+		_act.begun = true
+		var gl := PoseRide.grip(a.rider, a.slot, a.slot_class, -1, a.ride_side)
+		var gr := PoseRide.grip(a.rider, a.slot, a.slot_class, 1, a.ride_side)
+		_ride.begin(prev_swim if prev_swim != null else sw, s.vel, gl.pos, gr.pos)
+	var R: Dictionary = _ride.solve(dt, a, s, t, env)
+	match a.phase:
+		"latch":
+			# FIX (Thalassa pops at both ends of a ride): its ride pose takes the creature's frame from the first latch
+			# frame and the swim pose comes back at the last release frame; both are blended here
+			var p := blend_chain(sw, R, BodyAct.quintic(a.u()), {"mode": "ride_latch", "legs_local": true})
+			p.holdW = R.holdW
+			p.grips = R.grips
+			return p
+		"release":
+			# FIX: the ride pose stays on the creature while the motor glides her off it (Thalassa left the body behind
+			# the camera): it is carried with her eye
+			if first: _act.rel_off = s.pos - a.anchor
+			_shift(R, s.pos - a.anchor - _act.get("rel_off", Vector3.ZERO))
+			var p2 := blend_chain(sw, R, 1.0 - BodyAct.quintic(a.u()), {"mode": "ride_release", "legs_local": true})
+			p2.holdW = R.holdW
+			return p2
+	return R
+
+static func _shift(p: Dictionary, off: Vector3) -> void:
+	if off.length() < 1e-7: return
+	for k in ["chestPos", "pelvisPos", "neckPos", "waistPos", "shoulderL", "shoulderR", "hipL", "hipR", "clavicleL", "clavicleR"]:
+		p[k] += off
+	for k in ["headMat", "chestMat", "pelvisMat", "handLMat", "handRMat", "torchMat"]:
+		p[k] = Transform3D(p[k].basis, p[k].origin + off)
+	for k in ["armL", "armR"]:
+		for q in ["root", "mid", "eff"]: p[k][q] += off
+	for k in ["legL", "legR"]:
+		for q in ["root", "mid", "eff"]: p[k].ik[q] += off
+		p[k].finMat = Transform3D(p[k].finMat.basis, p[k].finMat.origin + off)
+	p.headMotion.pos += off
+
+static func _dir_slerp(a: Vector3, b: Vector3, t: float) -> Vector3:
+	var la := a.length(); var lb := b.length()
+	if la < 1e-6 or lb < 1e-6: return a.lerp(b, t)
+	var an := a / la; var bn := b / lb
+	var d := clampf(an.dot(bn), -1.0, 1.0)
+	var r: Vector3
+	if d > 0.9995: r = an.lerp(bn, t).normalized()
+	elif d < -0.9995:
+		var ax := an.cross(Vector3.UP if absf(an.y) < 0.9 else Vector3.RIGHT).normalized()
+		r = Basis(ax, PI * t) * an
+	else: r = an.slerp(bn, t)
+	return r * lerpf(la, lb, t)
+
+static func _bslerp(a: Basis, b: Basis, t: float) -> Basis:
+	return Basis(a.orthonormalized().get_rotation_quaternion().slerp(b.orthonormalized().get_rotation_quaternion(), t))
+
+## Blend two full poses at weight t (0 = a, 1 = b) keeping every bone rigid: the pelvis moves, each spine segment
+## turns (slerp) at its own length, the chest / pelvis / head / hand / foot frames slerp, shoulders and hips ride their
+## frames, and the arms and legs are re-solved to blended targets (hands in the chest's frame, feet in the world) with
+## blended bend directions. o: rot_a (Basis: a's trunk turned about its pelvis first), feet [L, R] (world ankle
+## targets), feet_w [l, r] (foot frame weights), lean (rad: trunk hinged forward over the hips), knee_dir / knee_w
+## (world direction the knees are turned toward, and how far), elbow_dir / elbow_w (the same for the elbows), legs_local (free legs: ankles blended in the pelvis's
+## frame), mode.
+func blend_chain(a: Dictionary, b: Dictionary, t_raw: float, o := {}) -> Dictionary:
+	var t := clampf(t_raw, 0.0, 1.0)
+	var ra: Basis = o.get("rot_a", Basis())
+	var pa: Vector3 = a.pelvisPos
+	var pelvis: Vector3 = a.pelvisPos.lerp(b.pelvisPos, t)
+	var waist: Vector3 = pelvis + _dir_slerp(ra * (a.waistPos - a.pelvisPos), b.waistPos - b.pelvisPos, t)
+	var chest: Vector3 = waist + _dir_slerp(ra * (a.chestPos - a.waistPos), b.chestPos - b.waistPos, t)
+	var ca := _bslerp(ra * a.chestMat.basis.orthonormalized(), Basis(), 0.0)
+	var cbb: Basis = b.chestMat.basis.orthonormalized()
+	var cb := _bslerp(ca, cbb, t)
+	var pb := _bslerp(ra * a.pelvisMat.basis.orthonormalized(), b.pelvisMat.basis.orthonormalized(), t)
+	var neck: Vector3 = chest + cb * _dir_slerp(ca.transposed() * (ra * (a.neckPos - a.chestPos)), cbb.transposed() * (b.neckPos - b.chestPos), t)
+	var hoff: Vector3 = cb * (ca.transposed() * (ra * (a.headMat.origin - a.neckPos))).lerp(cbb.transposed() * (b.headMat.origin - b.neckPos), t)
+	var hb := _bslerp(ra * a.headMat.basis.orthonormalized(), b.headMat.basis.orthonormalized(), t)
+	var head_o := neck + hoff
+	var sh := {}
+	for k in ["shoulderL", "shoulderR"]:
+		sh[k] = chest + cb * (ca.transposed() * (ra * (a[k] - a.chestPos))).lerp(cbb.transposed() * (b[k] - b.chestPos), t)
+	var pab: Basis = ra * a.pelvisMat.basis.orthonormalized()
+	var pbb: Basis = b.pelvisMat.basis.orthonormalized()
+	var hips := {}
+	for k in ["hipL", "hipR"]:
+		hips[k] = pelvis + pb * (pab.transposed() * (ra * (a[k] - pa))).lerp(pbb.transposed() * (b[k] - b.pelvisPos), t)
+	# arm targets and bend directions in the chest frame
+	var arm_t := {}
+	for k in ["armL", "armR"]:
+		var A: Dictionary = a[k]; var B: Dictionary = b[k]
+		var ta: Vector3 = ca.transposed() * (ra * (A.eff - a.chestPos))
+		var tb: Vector3 = cbb.transposed() * (B.eff - b.chestPos)
+		var qa: Vector3 = ca.transposed() * (ra * (A.mid - A.root))
+		var qb: Vector3 = cbb.transposed() * (B.mid - B.root)
+		arm_t[k] = [ta.lerp(tb, t), _dir_slerp(qa, qb, t)]
+	# lean: the trunk hinged forward over the hips (about her right)
+	var lean: float = o.get("lean", 0.0)
+	if absf(lean) > 1e-5:
+		var lr := Basis(pb.x.normalized(), -lean)
+		waist = pelvis + lr * (waist - pelvis)
+		chest = pelvis + lr * (chest - pelvis)
+		neck = pelvis + lr * (neck - pelvis)
+		head_o = pelvis + lr * (head_o - pelvis)
+		cb = lr * cb
+		hb = lr * hb
+		for k in sh: sh[k] = pelvis + lr * (sh[k] - pelvis)
+	var arms := {}
+	var hands := {}
+	for k in ["armL", "armR"]:
+		var s_: Vector3 = sh["shoulderL" if k == "armL" else "shoulderR"]
+		var tgt: Vector3 = chest + cb * arm_t[k][0]
+		var edir: Vector3 = cb * arm_t[k][1]
+		var ew: float = o.get("elbow_w", 0.0)
+		if ew > 0.0: edir = _dir_slerp(edir.normalized(), o.elbow_dir, ew)     # elbows tucked toward a direction
+		var ik := BM.two_bone(s_, tgt, s_ + edir, upper_arm_len, forearm_len, 0.985, 0.04, 142.0)
+		arms[k] = ik
+		var hk := "handLMat" if k == "armL" else "handRMat"
+		var hbas := _bslerp(ra * a[hk].basis.orthonormalized(), b[hk].basis.orthonormalized(), t)
+		if absf(lean) > 1e-5: hbas = Basis(pb.x.normalized(), -lean) * hbas
+		hands[hk] = Transform3D(hbas, ik.eff)
+	var feet: Array = o.get("feet", [])
+	var fws: Array = o.get("feet_w", [t, t])
+	var legs := {}
+	for i in 2:
+		var k := "legL" if i == 0 else "legR"
+		var A: Dictionary = a[k].ik; var B: Dictionary = b[k].ik
+		var tgt: Vector3 = feet[i] if feet.size() == 2 else A.eff.lerp(B.eff, t)
+		if o.get("legs_local", false):      # free legs (swimming / riding): the ankle blended in the pelvis's frame
+			var la: Vector3 = pab.transposed() * (ra * (A.eff - pa))
+			var lb: Vector3 = pbb.transposed() * (B.eff - b.pelvisPos)
+			tgt = hips["hipL" if i == 0 else "hipR"] + pb * (la.lerp(lb, t) - (pab.transposed() * (ra * (a["hipL" if i == 0 else "hipR"] - pa))).lerp(pbb.transposed() * (b["hipL" if i == 0 else "hipR"] - b.pelvisPos), t))
+		var qa: Vector3 = pab.transposed() * (ra * (A.mid - A.root))
+		var qb: Vector3 = pbb.transposed() * (B.mid - B.root)
+		var hip: Vector3 = hips["hipL" if i == 0 else "hipR"]
+		var kdir: Vector3 = pb * _dir_slerp(qa, qb, t)
+		var kw: float = o.get("knee_w", 0.0)
+		if kw > 0.0: kdir = _dir_slerp(kdir.normalized(), o.knee_dir, kw)     # a knee raised over a lifted foot
+		var ik := BM.two_bone(hip, tgt, hip + kdir, thigh_len, shin_len, 0.992, 0.04, 132.0)
+		var fb := _bslerp(a[k].finMat.basis.orthonormalized(), b[k].finMat.basis.orthonormalized(), fws[i])
+		legs[k] = {"ik": ik, "finMat": Transform3D(fb, ik.eff), "finDir": fb.y}
+	var hm_a: Dictionary = a.headMotion
+	var hm_b: Dictionary = b.headMotion
+	var out := b.duplicate()
+	out.erase("skel")
+	out.merge({"mode": o.get("mode", "blend"), "neckPos": neck, "chestPos": chest, "waistPos": waist, "pelvisPos": pelvis,
+		"clavicleL": chest.lerp(sh.shoulderL, 0.45), "clavicleR": chest.lerp(sh.shoulderR, 0.45),
+		"shoulderL": sh.shoulderL, "shoulderR": sh.shoulderR, "hipL": hips.hipL, "hipR": hips.hipR,
+		"bodyRight": pb.x.normalized(), "bodyBack": pb.z.normalized(), "bodyAxisY": (neck - pelvis).normalized(),
+		"armL": arms.armL, "armR": arms.armR, "legL": legs.legL, "legR": legs.legR,
+		"chestMat": Transform3D(cb, chest), "pelvisMat": Transform3D(pb, pelvis), "headMat": Transform3D(hb, head_o),
+		"handLMat": hands.handLMat, "handRMat": hands.handRMat,
+		"torchMat": Transform3D(_bslerp(a.torchMat.basis, b.torchMat.basis, t), a.torchMat.origin.lerp(b.torchMat.origin, t)),
+		"headMotion": {"pos": head_o, "fwd": -hb.z.normalized(), "neckYaw": lerpf(hm_a.get("neckYaw", 0.0), hm_b.get("neckYaw", 0.0), t),
+			"neckPitch": lerpf(hm_a.get("neckPitch", 0.0), hm_b.get("neckPitch", 0.0), t)},
+		"holdW": lerpf(a.get("holdW", 0.0), b.get("holdW", 0.0), t)}, true)
+	return out
 
 ## M04 skeleton 0.7: the full bone chain the rig's anchors imply (spine_01..03, clavicles, toes), on top of the solved
 ## pose. Spine: a Hermite curve from the pelvis to the chest along their up axes, twist and bend shared along it.
@@ -458,6 +859,7 @@ func _follow_through(skel: Dictionary, dt: float, s) -> void:
 	var ang := ft_r.length()
 	if ang < 1e-5: return
 	var axis := ft_r / ang
+	ang *= 1.0 - _hold_w     # held (seated, lying, gripping a creature): the trunk does not swing off its supports
 	var piv: Vector3 = skel["spine_01"].origin
 	var parts := {"spine_02": 0.5, "spine_03": 1.0, "neck": 1.0, "head": 1.0,
 		"clavicle_l": 1.0, "clavicle_r": 1.0, "upperarm_l": 1.0, "upperarm_r": 1.0,
@@ -552,6 +954,12 @@ func _soft_arms(skel: Dictionary, dt: float, s) -> void:
 		# rebuild the bones: each turned by the rotation that takes its animated direction to the soft one
 		var E := sh + e
 		var H := sh + hp
+		if _hold_w > 0.0:
+			# held: hands resting on the thighs / gripping a fin stay where the pose puts them (bones kept rigid)
+			E = E.lerp(la.origin, _hold_w)
+			E = sh + (E - sh).normalized() * l1
+			H = H.lerp(hx.origin, _hold_w)
+			H = E + (H - E).normalized() * l2
 		var q1 := Quaternion((la.origin - sh).normalized(), e.normalized()) if (la.origin - sh).normalized().dot(e.normalized()) > -0.999 else Quaternion()
 		var nu := Transform3D(Basis(q1) * ua.basis, sh)
 		var fa0 := (hx.origin - la.origin).normalized()

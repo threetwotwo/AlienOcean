@@ -6,7 +6,7 @@ Differences from blender/export_glb.py: no bake, no maps, no interior, no LODs. 
 block rides the jaw bone and the cover plates the opercle bones, so gape and flare open the cut mouth and gill slits; colours are flat
 greys: alternate segments differ in shade so the bend reads in a test scene.
 """
-import bpy, json, sys, os
+import bpy, json, sys, os, math
 import numpy as np
 from mathutils import Vector, Matrix
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -29,24 +29,53 @@ def flat(name, rgb, two_sided=False):
 GREY_A, GREY_B, GREY_FIN = (0.42, 0.44, 0.46), (0.30, 0.32, 0.34), (0.62, 0.64, 0.66)   # DEFAULT: test-scene greys (no paint on a blockout)
 mat_a, mat_b, mat_f = flat('seg_a', GREY_A), flat('seg_b', GREY_B), flat('fin_plate', GREY_FIN, two_sided=True)
 
-V = np.array(D['V']); F = D['F']; VB = np.array(D['vbone'])
-me = bpy.data.meshes.new('body'); me.from_pydata([B(v) for v in V], [], F); me.update()
-me.materials.append(mat_a); me.materials.append(mat_b)
-for p in me.polygons:
-    p.use_smooth = True; p.material_index = int(VB[p.vertices[0]] % 2)
-body = bpy.data.objects.new('body', me); scn.collection.objects.link(body)
+V = np.array(D['V']); F = D['F']; VB = np.array(D['vbone'])       # the plain blocks: the rig's and the swim engine's mass model
+SHARP_DEG = 35.0      # DEFAULT: an edge sharper than this shades as a crease (slab seams, cut rims), the rest smooth
+
+def mesh_ob(name, parts, mats):
+    """one object from [(V, F, label)], record units -> Blender; returns (object, per-vertex labels)."""
+    Vs, Fs, Ls, o = [], [], [], 0
+    for v, f, lab in parts:
+        Vs += [B(x) for x in v]; Fs += [[o + int(i) for i in q] for q in f]; Ls += [lab] * len(v); o += len(v)
+    m_ = bpy.data.meshes.new(name); m_.from_pydata(Vs, [], Fs); m_.update()
+    for mt in mats: m_.materials.append(mt)
+    L = np.array(Ls, dtype=object)
+    for q in m_.polygons:
+        q.use_smooth = True
+        if len(mats) > 1: q.material_index = int(L[q.vertices[0]]) % len(mats)
+    m_.set_sharp_from_angle(angle=math.radians(SHARP_DEG))
+    ob = bpy.data.objects.new(name, m_); scn.collection.objects.link(ob); return ob, L
+
+# ---------------------------------------------------------------- LOD0: clean solids (blender/clean_mesh.py, exact booleans)
+from creature_maker.blender import clean_mesh as CM
+from creature_maker.blockout import _ellipsoid
+parts = [(v, f, i) for i, (v, f) in sorted(CM.bones(D).items())]
+KINDS0 = ('joint',) if D.get('plates') else ('joint', 'root')   # clean plates run their own roots into the body; a lozenge there was a knob
+for q in D['prims']:
+    if q['kind'] in KINDS0:
+        v, f = _ellipsoid(q['c'], q['r'], CM.SEG_HI, CM.RINGS_HI, q.get('R'), q.get('n'), q.get('ry_lo')); parts.append((v, f, q['bone']))
+body, VB0 = mesh_ob('body', parts, [mat_a])     # one tone: per-bone tones showed a sliver of the next tone at every seam (clean pass round 3)
 
 GREY_JAW, GREY_COVER, GREY_EYE = (0.36, 0.30, 0.30), (0.50, 0.47, 0.42), (0.06, 0.06, 0.07)   # DEFAULT: moving head blocks a shade apart
 mat_p = dict(jaw=flat('jaw', GREY_JAW), cover=flat('cover', GREY_COVER), eye=flat('eyeball', GREY_EYE))
-piece_obs = {}
-for p in D.get('pieces', []):    # tier 2 head blocks: lower jaw (jaw bone), gill-cover plates (opercle bones), eyeballs (their spine bone)
-    m_ = bpy.data.meshes.new(p['name']); m_.from_pydata([B(v) for v in p['V']], [], p['F']); m_.update(); m_.materials.append(mat_p[p['mat']])
-    for q in m_.polygons: q.use_smooth = True
-    ob = bpy.data.objects.new(p['name'], m_); scn.collection.objects.link(ob); piece_obs[p['name']] = (ob, p['bone'])
+piece_obs = {}        # tier 2 head blocks: lower jaw (jaw bone), gill-cover plates (opercle bones), eyeballs (their spine bone)
+K = D.get('kit3') or {}
+if K:
+    jw = CM.jaw(D)
+    if jw: piece_obs['jaw'] = (mesh_ob('jaw', [(jw[0], jw[1], 0)], [mat_p['jaw']])[0], 'jaw')
+    if K.get('cover_poly'):
+        for nm, (v, f) in CM.covers(D, K['cover_poly']).items(): piece_obs[nm] = (mesh_ob(nm, [(v, f, 0)], [mat_p['cover']])[0], nm)
+    Cs = dict(bones=D['bones'], xend=D['xend'])
+    for q in K.get('blocks', []):
+        if q['kind'] == 'eyeball':
+            v, f = _ellipsoid(q['c'], q['r'], CM.SEG_HI, CM.RINGS_HI); nm = 'eye_L' if q['c'][2] > 0 else 'eye_R'
+            piece_obs[nm] = (mesh_ob(nm, [(v, f, 0)], [mat_p['eye']])[0], f"spine_{RIG.spine_index(Cs, q['c'][0]):02d}")
 
 fin_obs = {}
-for k, f in D['fins'].items():
+FINS = D.get('plates') or D['fins']        # clean flat plates (blockout.plates); the full build's cards when absent
+for k, f in FINS.items():
     m_ = bpy.data.meshes.new(k); m_.from_pydata([B(v) for v in f['V']], [], f['F']); m_.update(); m_.materials.append(mat_f)
+    for q in m_.polygons: q.use_smooth = False                      # a flat plate shades flat
     ob = bpy.data.objects.new(k, m_); scn.collection.objects.link(ob); fin_obs[k] = ob
 
 # ---------------------------------------------------------------- rig: the full export's bones (rig.bones needs a cage-like C)
@@ -57,12 +86,13 @@ REC = dict(mouth=dict(line=D['mouth_line']), cover=dict(rear=D['cover_rear']))
 BL = RIG.bones(C, V, REC); NB, xs = RIG.spine_stations(C)
 spine_at = lambda x: f'spine_{RIG.spine_index(C, x):02d}'
 rig = rigging.build_armature(scn, BL, D['fins'], B, spine_at)
-W = {f'spine_{i:02d}': (VB == i).astype(float) for i in range(NB)}                 # rigid segments
-W.update(jaw=np.zeros(len(V)), opercleL=np.zeros(len(V)), opercleR=np.zeros(len(V)))
+nv0 = len(body.data.vertices)
+W = {f'spine_{i:02d}': (VB0 == i).astype(float) for i in range(NB)}                # rigid segments
+W.update(jaw=np.zeros(nv0), opercleL=np.zeros(nv0), opercleR=np.zeros(nv0))
 rigging.bind_groups(body, rig, W)
 for k, (ob, bn) in piece_obs.items(): rigging.bind_groups(ob, rig, {bn: np.ones(len(ob.data.vertices))})
 for k, ob in fin_obs.items():   # as export_glb: fin vertices follow the spine at their x, paired fins hand over to their root bone
-    fv = np.array(D['fins'][k]['V']); T = np.clip(np.array(D['fins'][k]['T'], float), 0, 1)
+    fv = np.array(FINS[k]['V']); T = np.clip(np.array(FINS[k]['T'], float), 0, 1)
     share = T if k.startswith(('pectoral', 'pelvic')) else np.zeros(len(fv))
     i0, a0, i1, a1 = RIG.spine_weights(C, fv[:, 0]); g = {}
     for j in range(len(fv)):

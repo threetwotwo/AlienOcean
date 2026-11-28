@@ -24,6 +24,7 @@ render_mode unshaded, cull_back, world_vertex_coords, fog_disabled, shadows_disa
 #include "res://look/sea_floor_map.gdshaderinc"
 #include "res://look/sea_march.gdshaderinc"
 global uniform vec4 sea_god;            // god rays on, frame mod 8, frames averaged (TAA / FSR 2 / MetalFX temporal) 1/0 (WorldRoot)
+#include "res://look/hot_probe.gdshaderinc"
 global uniform vec3 water_sun_air;
 global uniform float water_sun_lux;
 #include "res://look/sea_foam_shade.gdshaderinc"   // the whitecaps' look (after the lines above: it uses them)
@@ -275,4 +276,5 @@ void fragment() {
 	// the deep's own blue made that a thin dark band a few pixels high, which read as a seam (Gary 28 Nov playtest)
 	float melt = sea_horizon_melt * (1.0 - smoothstep(0.0, 0.012, V.z));
 	if (melt > 0.0) ALBEDO = mix(ALBEDO, sky_dome_nits(sea_gdt(normalize(vec3(-V.xy, 0.0015)))) * water_exposure, melt);
+	ALBEDO = hot_probe_paint(ALBEDO, vec3(0.0, 1.0, 0.0));   // stress-shot switch (look/hot_probe), off in play
 }

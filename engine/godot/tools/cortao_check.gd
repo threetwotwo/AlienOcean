@@ -7,8 +7,16 @@
 ##   C5 grain: high-pass std of the AO in the soft shadow < 0.02 (no speckle: SIMPLICITY, noise is not detail)
 ##   C6 no screen door: the periodic part of the grain (grain x the high-pass's correlation at CORTAO's filter tap spacing:
 ##      3 px, or 6 px at half resolution) < 0.0035 (under 1/255: invisible). A correlation alone means nothing when there is almost no grain (XeGTAO: 0.002).
+##   C7 screen edges: the shape normal (prepass) along the bottom row and the right column of open floor is within 5 deg of the
+##      one just inside. The floor's shading normal is rippled, like the sand; the shape normal must not fall back to it at the
+##      edge (key frame 28 Nov: dark dashes along the bottom row).
 ## Planted faults: --fault flip renders with flip_y inverted (the AO lands mirrored), which must fail C1 or C3;
-## --fault coarse makes the last filter pass use CORTAO's 3 px taps again (the lattice comes back), which must fail C6.
+## --fault coarse makes the last filter pass use CORTAO's 3 px taps again (the lattice comes back), which must fail C6;
+## --fault edge plants the old edge-normal bug (the clamped neighbour's zero difference wins), which must fail C7.
+##   C9 no ghost: the box jumps 3 m aside; 3 frames later the floor where its contact shadow was is open (r > 0.85) again
+##      (the AO's temporal history must not trail it; --fault ghost drops the history clamp, which must fail C9)
+## C8 (tests/run_cortao.sh, from the engine log): the run resizes the window 4 times and must log no "Uniforms were never supplied"
+## error (the materials' uniform set lost its AO texture when a resize freed it, Mac 28 Nov); env CORTAO_FAULT_FREE=1 plants it.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- <out dir> [--fault flip]
 extends SceneTree
 
@@ -24,9 +32,10 @@ func _initialize() -> void:
 	WorldRoot.declare_globals()
 	_run.call_deferred()
 
-func _box(pos: Vector3, size: Vector3, mat: Material) -> void:
+func _box(pos: Vector3, size: Vector3, mat: Material) -> MeshInstance3D:
 	var mi := MeshInstance3D.new(); var m := BoxMesh.new(); m.size = size; mi.mesh = m; mi.material_override = mat
 	mi.position = pos; root.add_child(mi)
+	return mi
 
 func _run() -> void:
 	var sm := ShaderMaterial.new()
@@ -34,8 +43,20 @@ func _run() -> void:
 	sm.shader.code = """shader_type spatial;
 #include "res://look/screen_ao.gdshaderinc"
 void fragment() { ALBEDO = vec3(0.7); ROUGHNESS = 1.0; AO = min(AO, screen_ao(SCREEN_UV)); }"""
-	_box(Vector3(0, -0.05, 0), Vector3(20, 0.1, 20), sm)
-	_box(Vector3(0, 0.5, 0), Vector3(1, 1, 1), sm)
+	# the floor's shading normal is rippled like the sand (tilts up to 80 deg, 4 cm period): the shape normal must ignore it everywhere
+	var fm := ShaderMaterial.new()
+	fm.shader = Shader.new()
+	fm.shader.code = """shader_type spatial;
+#include "res://look/screen_ao.gdshaderinc"
+varying vec3 wp;
+void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
+void fragment() {
+	ALBEDO = vec3(0.7); ROUGHNESS = 1.0; AO = min(AO, screen_ao(SCREEN_UV));
+	vec2 t = vec2(sin(wp.x * 157.0), sin(wp.z * 131.0 + wp.x * 40.0)) * 4.0;
+	NORMAL = normalize((VIEW_MATRIX * vec4(normalize(vec3(t.x, 1.0, t.y)), 0.0)).xyz);
+}"""
+	_box(Vector3(0, -0.05, 0), Vector3(20, 0.1, 20), fm)
+	var box := _box(Vector3(0, 0.5, 0), Vector3(1, 1, 1), sm)
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR; env.background_color = Color(0.3, 0.4, 0.5)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR; env.ambient_light_color = Color(1, 1, 1); env.ambient_light_energy = 1.0
@@ -49,7 +70,15 @@ void fragment() { ALBEDO = vec3(0.7); ROUGHNESS = 1.0; AO = min(AO, screen_ao(SC
 	RenderingServer.global_shader_parameter_set("cortao_on", 1.0)
 	var cam := Camera3D.new(); root.add_child(cam)
 	cam.position = Vector3(2.2, 1.6, 2.6); cam.look_at(Vector3(0, 0.3, 0)); cam.current = true
-	for i in 20: await process_frame
+	for i in 10: await process_frame
+	# resizes, as the game's fullscreen start and FSR scale changes do: the targets are remade while the materials still sample the
+	# old result (C8 counts the engine errors that leaves: none allowed)
+	if OS.get_environment("CORTAO_NO_RESIZE") == "":
+		for k in 3:
+			root.size = Vector2i(960 + 64 * (k + 1), 540 + 36 * (k + 1))
+			for i in 4: await process_frame
+		root.size = Vector2i(960, 540)
+	for i in 10: await process_frame
 	fx.capture_next = true
 	for i in 3: await process_frame
 	await RenderingServer.frame_post_draw
@@ -96,8 +125,34 @@ void fragment() { ALBEDO = vec3(0.7); ROUGHNESS = 1.0; AO = min(AO, screen_ao(SC
 			for x in 40:
 				c += hp[y * 40 + x] * hp[(y + L) * 40 + x]; cn += 1
 		lat = maxf(lat, (c / cn) / maxf(v / hp.size(), 1e-12))
-	var rows := [["C5 grain (high-pass std) < 0.02", grain < 0.02, grain], ["C1 contact r < 0.80", contact < 0.80, contact], ["C2 open floor r > 0.95", open > 0.95, open],
+	# C7: the prepass's shape normal along the bottom row and the right column of open floor vs 6-10 px inside them (the floor
+	# is flat, so they must agree; the bug left the rippled shading normal there)
+	var sn: Image = fx.captured_shape_n
+	var nw := sn.get_width(); var nh := sn.get_height()
+	var aw := ao.get_width(); var ah := ao.get_height()
+	var nrm := func(x: int, y: int) -> Vector3:
+		var c := sn.get_pixel(x, y); return Vector3(c.r, c.g, c.b) * 2.0 - Vector3.ONE
+	var edge_dev := 0.0
+	for side in 2:
+		var cnt := nw if side == 0 else nh
+		for i in range(4, cnt - 4):
+			var e: Vector3 = nrm.call(i, nh - 1) if side == 0 else nrm.call(nw - 1, i)
+			var inn := Vector3.ZERO
+			for k in range(6, 11): inn += nrm.call(i, nh - 1 - k) if side == 0 else nrm.call(nw - 1 - k, i)
+			if absf(e.length() - 1.0) > 0.05 or absf(inn.length() - 5.0) > 0.25: continue   # sky: the prepass writes no shape normal there (whatever the memory holds)
+			inn = inn.normalized()
+			if (ao.get_pixel(i * aw / nw, ah - 8).r if side == 0 else ao.get_pixel(aw - 8, i * ah / nh).r) < 0.9: continue   # not open floor (the box)
+			edge_dev = maxf(edge_dev, rad_to_deg(acos(clampf(e.normalized().dot(inn), -1.0, 1.0))))
+	var rows := [["C7 screen edges: shape normal within 5 deg of just inside", edge_dev < 5.0, edge_dev], ["C5 grain (high-pass std) < 0.02", grain < 0.02, grain], ["C1 contact r < 0.80", contact < 0.80, contact], ["C2 open floor r > 0.95", open > 0.95, open],
 		["C6 no screen door: 3 / 6 px periodic grain < 0.0035", grain * maxf(lat, 0.0) < 0.0035, grain * maxf(lat, 0.0)], ["C3 box top r > 0.95", top > 0.95, top], ["C4 lit contact/open <= 0.90", lc / maxf(lo, 1e-4) <= 0.90, lc / maxf(lo, 1e-4)]]
+	# C9: move the box away and look at its old contact shadow 3 frames later
+	box.position = Vector3(-3.0, 0.5, -2.0)
+	for i in 3: await process_frame
+	fx.capture_next = true
+	await process_frame
+	await RenderingServer.frame_post_draw
+	var ghost: float = at.call(fx.captured, Vector3(0.55, 0.0, 0.2), sx)
+	rows.append(["C9 no ghost: old contact r > 0.85 three frames after the box left", ghost > 0.85, ghost])
 	var all := true
 	for r in rows:
 		print("%s %s  (%.3f)" % ["PASS" if r[1] else "FAIL", r[0], r[2]]); all = all and r[1]
