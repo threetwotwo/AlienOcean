@@ -9,7 +9,7 @@
                "src": "research/schooling/school.py PRESETS mill (bigeye trevally daytime mill, Holland et al. 1996); M 0.88"}
   },
   "species": {
-    "trevally": {"base": "open", "bl_m_standin": 0.45, "school_size": 160, "d0": 1.45, "v0": 1.4, "fid_m": 2.5, "rush_speed_m": 1.2, "curious": 1.0,
+    "trevally": {"base": "open", "bl_m_standin": 0.45, "school_size": 160, "d0": 1.45, "v0": 1.4, "fid_m": 2.5, "rush_speed_m": 1.2, "curious": 1.0, "asset": "caranx_melampygus",
                  "src": "jack mackerel / mackerel NND 1.43-1.51 BL (Pitcher & Partridge 1979, paper Table 1); cruise ~1.1-1.5 BL/s (anthias / jacks, No. 22); FID stand-in 2.5 m (reef fish FID 1-4 m to divers, Gotanda et al. 2009)"},
     "lagoon_baitfish": {"base": "lagoon", "bl_m_standin": 0.12, "school_size": 120, "fid_m": 1.6, "rush_speed_m": 0.9, "R_home": 6.0,
                  "src": "key frame v4 (120 fish at 12 cm over the rock); lagoon wall preset. STAND-IN species id until the maker names one"},

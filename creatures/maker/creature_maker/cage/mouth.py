@@ -3,16 +3,18 @@ carry the skin from the lips out to the shared head ring iK, and the lips roll i
 the pharynx (domed end). Gill passages join the cavity through holes in its side wall (gill.py), which makes the throat.
 
 Rules: loops are laid on the snout chart (polar round the mouth tip: no snout pole); corner fan at each rictus (pinned
-straight spoke, HP-LIPS lesson); shared head ring (ring iK bends forward round the eye, held back from the lips); the lip
-roll turns inward and forward at the corners; the pharynx ends in a dome.
+spoke between the first loop's neighbours, HP-LIPS lesson); shared head ring (ring iK bends forward round the eye, held
+back from the lips); each lip column's lining runs straight in to the first oval behind the rictus (upper lip to the
+roof, lower lip to the floor, the corner column a hinge line); the pharynx ends in a dome.
 """
 import numpy as np
 from ..mesh import relax_rings
-from . import eye as eye_mod
+from . import eye as eye_mod, gill
 
 GAP, TLIP = 0.0025, 0.003          # closed-lip gap and lip thickness (SL)
 LIP_MG = 0.008                     # shared head ring: margin behind the lip (SL); the eye margin is eye.margin
 NC, ND = 7, 3                      # cavity rings, dome rings
+NF = 3                             # rings 1..NF belong to the mouth proper: lip roll, a ring between, first oval T
 
 
 class SnoutChart:
@@ -52,6 +54,7 @@ class Mouth:
     pass
 
 
+TUBE_MG = 0.005    # the cavity tube stays this far inside (SL): the cage skin is faceted and cuts inside the form
 IN_MG = 0.0015     # interior surfaces stay at least this far inside the body (SL); thin snouts and puffer cheeks broke it
 
 
@@ -130,13 +133,23 @@ def build_loops(B):
     # the first loops go round the corner instead of sliding across the slit towards the sparse lower lip
     # the spoke leaves the corner along the slit's outward bisector (a quadratic curve to ring iK), so the first loops
     # wrap round the corner instead of lying over the lip strip (alfonsino: loops crossed the upper lip at the rictus)
+    # The spoke is laid twice. First along the slit's own bisector; then, once the loops have relaxed, along the bisector
+    # of the first loop's two neighbours of the corner. Upper and lower lip rarely have the same column spacing, so the
+    # slit bisector can lie on the chord from the corner to one of those neighbours: a corner triangle with no area, and
+    # the lip roll behind it came through the skin at the first degrees of gape (alfonsino: 1.6 deg of margin, now 14)
     jc_ = [jr, NT - jr]
-    for jc in jc_:
-        Q0, R_ = QM[0][jc], RK[jc]; d0 = Q0 - 0.5 * (QM[0][(jc - 1) % NT] + QM[0][(jc + 1) % NT])
-        d0 = d0 / (np.linalg.norm(d0) + 1e-12); Cc = Q0 + d0 * 0.5 * np.linalg.norm(R_ - Q0)
-        for k in range(1, KM):
-            t = k / KM; QM[k][jc] = (1 - t) ** 2 * Q0 + 2 * t * (1 - t) * Cc + t * t * R_
-    relax_rings(QM, 60, pin=jc_)
+    for aim in (0, 1):
+        for jc in jc_:
+            Q0, R_ = QM[0][jc], RK[jc]; d0 = Q0 - 0.5 * (QM[0][(jc - 1) % NT] + QM[0][(jc + 1) % NT])
+            d0 = d0 / (np.linalg.norm(d0) + 1e-12)
+            if aim:
+                a, b = QM[1][(jc - 1) % NT] - Q0, QM[1][(jc + 1) % NT] - Q0
+                s_ = a / (np.linalg.norm(a) + 1e-12) + b / (np.linalg.norm(b) + 1e-12)
+                if np.linalg.norm(s_) > 0.2: d0 = s_ / np.linalg.norm(s_) * np.sign(s_ @ d0 or 1.0)
+            Cc = Q0 + d0 * 0.5 * np.linalg.norm(R_ - Q0)
+            for k in range(1, KM):
+                t = k / KM; QM[k][jc] = (1 - t) ** 2 * Q0 + 2 * t * (1 - t) * Cc + t * t * R_
+        relax_rings(QM, 60, pin=jc_)
     B.debug('mouth', QM=np.array(QM))
     MROWS = [LIPV]
     for k in range(1, KM):
@@ -147,36 +160,78 @@ def build_loops(B):
 
 
 def build_cavity(B):
-    """lip roll, oval cavity rings back to the pharynx, domed end; holes in the side wall where the gill passages join.
-    Writes M.CROWS, M.DOME, M.gut, M.HOLES."""
+    """lip roll, mouth lining in to the first oval, oval rings back to the pharynx, domed end; holes in the side wall where
+    the gill passages join. Writes M.CROWS, M.DOME, M.gut, M.HOLES ({side: (cells, loop)}, see gill.holes), M.NF."""
     T, form, mesh, M = B.T, B.form, B.mesh, B.mouth; NT, J = T.NT, T.J; jr, LIP3 = M.jr, M.LIP3
     ex, eyy, er = form.ex, form.eyy, form.er
     x_back = max(B.rec['gill_u'] - 0.03, M.x_r + 0.05)
-    # the lip rolls back into the mouth, except at the rictus: the corner is the back-most lip point and the skin loops
-    # step back from it (corner fan), so there the roll turns inward and forward into the cheek pocket
-    cw = np.array([max(0.0, 1 - min(abs(j - jr), abs(j - (NT - jr))) / 2.5) for j in range(NT)])
-    lip_in = np.array([p + np.array([TLIP * (1 - 2 * c), 0, 0]) - (form.radial(p) * TLIP * (0.6 + 0.4 * c) if p[0] > 1e-4 else 0)
-                       for p, c in zip(LIP3, cw)])
-    lip_in = keep_inside(form, lip_in, lambda P: P + np.array([0.0005, 0, 0]) - np.array([form.radial(p) * 0.0005 for p in P]))
-    x_c0 = float(lip_in[:, 0].mean()) + 0.004; y_l = float(LIP3[:, 1].mean())
+    x_c0 = float(LIP3[:, 0].mean()) + 0.004; y_l = float(LIP3[:, 1].mean())
 
-    def cav_ring(x):
+    def oval(x):
         c, a_, b_ = form.sec(x); s_ = np.clip((x - x_c0) / (x_back - x_c0), 0, 1); s_ = s_ * s_ * (3 - 2 * s_)
         ym = (1 - s_) * y_l + s_ * (c - 0.12 * a_)          # the pharynx lies low in the head, under the eyes and brain
         hc = 0.32 * a_; top = min(form.TOP(x) - 0.012, eyy - er - 0.008 if abs(x - ex) < er * 1.2 else 9); bot = form.BOT(x) + 0.012
-        hc = max(min(hc, top - ym, ym - bot), 0.003); wc = max(0.48 * b_, 0.004)
-        ps = 2 * np.pi * np.arange(NT) / NT
+        return ym, max(min(hc, top - ym, ym - bot), 0.003), max(0.48 * b_, 0.004)
+
+    def cav_ring(x, ps=2 * np.pi * np.arange(NT) / NT):
+        ym, hc, wc = oval(x)
         R = np.stack([np.full(NT, x), ym + hc * np.cos(ps), wc * np.sin(ps)], -1)
         cen = np.array([x, ym, 0.0])
         return keep_inside(form, R, lambda P: cen + (P - cen) * 0.97)
-    CROWS = [M.LIPV, [mesh.add_v(p, np.nan, np.nan) for p in lip_in]]
-    CR = [lip_in]
-    for c_ in range(2, NC + 1):
-        x = x_c0 + (x_back - x_c0) * (c_ - 1) / (NC - 1); R_ = cav_ring(x)
-        if c_ == 2: R_ = 0.5 * R_ + 0.5 * (lip_in + np.outer(1 - cw, [0.006, 0, 0]))
-        CR.append(R_)
-    relax_rings(CR, 20)          # even out the slit-to-oval transition behind the lips (it creased near the corners)
-    for R_ in CR[1:]: CROWS.append([mesh.add_v(p, np.nan, np.nan) for p in R_])
+    # The mouth proper (rule): each lip column runs straight in to its own point on the first oval T, just behind the
+    # rictus. The upper lip takes the arc above the rictus height and the lower lip the arc below, so the two linings part
+    # at the lips (palate and floor) and the corner column is a hinge line with room on both sides. Before, the rings were
+    # spread evenly back to the pharynx: the lining left the lips along the lips, in needle faces under the cheek skin,
+    # which folded or crossed the skin at the first degrees of gape (27 of 37 species).
+    x_t = min(M.x_r + 2 * TLIP, 0.5 * (M.x_r + x_back)); ym, hc, _ = oval(x_t)
+    ps_r = float(np.arccos(np.clip((LIP3[jr, 1] - ym) / hc, -0.8, 0.8)))
+
+    def frac(cols):          # arc-length share along the lip: 0 at the tip, 1 at the corner
+        d = np.r_[0, np.cumsum(np.linalg.norm(np.diff(LIP3[cols], axis=0), axis=1))]; return d / d[-1]
+    ps = np.zeros(NT); ps_even = 2 * np.pi * np.arange(NT) / NT; ps_even[ps_even > np.pi] -= 2 * np.pi
+    for sg in (1, -1):
+        up = [j % NT for j in (range(0, jr + 1) if sg > 0 else range(NT, NT - jr - 1, -1))]
+        lo = list(range(NT // 2, jr - 1, -1) if sg > 0 else range(NT // 2, NT - jr + 1))
+        ps[up] = sg * ps_r * frac(up); ps[lo] = sg * (np.pi - (np.pi - ps_r) * frac(lo))
+    ps[NT // 2] = np.pi; TR = cav_ring(x_t, ps)
+
+    def toward_t(P):         # bring lining points inside along their own line to T: the columns keep their order
+        P = P.copy()
+        for _ in range(40):
+            bad = form.sd_body(P) > -IN_MG
+            if not bad.any(): break
+            P[bad] += 0.1 * (TR[bad] - P[bad])
+        return P
+    # the roll leaves the lip half-way between straight in and its line to T, so the lining is a lip thickness under the
+    # skin. Near the lip tips, where the lip is closer to the axis than a lip is thick, it turns toward T instead (straight
+    # in would cross to the other side), and on a very small mouth it is never longer than 0.4 of the way to T.
+    D = TR - LIP3; ld = np.linalg.norm(D, axis=1, keepdims=True); cy = form.sec(np.clip(LIP3[:, 0], 0, form.XEND))[0]
+    r0 = np.hypot(LIP3[:, 1] - cy, LIP3[:, 2])[:, None]
+    D = D / ld - np.array([form.radial(p) for p in LIP3]) * np.clip(r0 / (2 * TLIP), 0, 1)
+    lip_in = toward_t(LIP3 + np.minimum(TLIP, 0.4 * ld) * D / np.linalg.norm(D, axis=1, keepdims=True))
+
+    CR = [lip_in] + [toward_t(lip_in + (TR - lip_in) * k / (NF - 1)) for k in range(1, NF - 1)]
+    # Behind T the tube runs evenly back to the pharynx; its first ring takes up half the turn from T's columns to even
+    # ones. Where the orbit squeezes the tube (a slender head: less than the tube's own height left under the eye), that
+    # ring stands far enough back for the gill holes, two rings on, to open behind the orbit: the passage ran through
+    # the eye socket (trumpetfish).
+    n_ = NC - NF - 1; k_g = NC - 2 - NF - 1         # rings from the first tube ring to the back; of those, to the hole ring
+    x_4 = x_t + (x_back - x_t) / (n_ + 1); squeezed = (eyy - er - 0.008) - (form.BOT(ex) + 0.012) < 2 * 0.32 * form.sec(ex)[1]
+    if squeezed: x_4 = min(max(x_4, (n_ * (ex + 1.2 * er) - k_g * x_back) / (n_ - k_g)), x_back - 0.01 * n_)
+    TUBE = [TR, cav_ring(x_4, 0.5 * (ps + ps_even))] + [cav_ring(x_4 + (x_back - x_4) * k / n_) for k in range(1, n_ + 1)]
+    if squeezed: BACK = TUBE[1:]; relax_rings(BACK, 20); TUBE = [TR] + BACK      # the first tube ring holds its place
+    else: relax_rings(TUBE, 20)
+    # relaxing can carry a ring out through a hollow in the profile, and so can the straight wall between two rings
+    # (small mouth, deep throat: rabbitfish). Rings shrink until they and the middle of each wall are inside.
+    for _ in range(40):
+        ok = True
+        for k in range(1, len(TUBE)):
+            for Q in (TUBE[k], 0.5 * (TUBE[k - 1] + TUBE[k])):
+                bad = form.sd_body(Q) > -TUBE_MG
+                if bad.any() and k < len(TUBE) - 1: c = TUBE[k].mean(0); TUBE[k][bad] = c + (TUBE[k][bad] - c) * 0.95; ok = False
+        if ok: break
+    CR += TUBE
+    CROWS = [M.LIPV] + [[mesh.add_v(p, np.nan, np.nan) for p in R_] for R_ in CR]
     # the pharynx ends in a dome (quarter-circle rings), not a flat fan: a flat end is a 90 degree crease
     Rb = cav_ring(x_back); cb = Rb.mean(0); db = 0.5 * min(np.ptp(Rb[:, 1]), np.ptp(Rb[:, 2]))
     DOME = []
@@ -184,22 +239,12 @@ def build_cavity(B):
         ph_ = k / (ND + 1) * np.pi / 2
         DOME.append([mesh.add_v(cb + (p - cb) * np.cos(ph_) + np.array([db * np.sin(ph_), 0, 0]), np.nan, np.nan) for p in Rb])
     gut = mesh.add_v(cb + np.array([db, 0, 0]), np.nan, np.nan)
-    HOLES = {}
-    G = B.gill.info
-    if G is not None:
-        nj = G['nj']; w = nj - 1; c_g = NC - 2
-        k0 = int(np.clip(NT // 4 - w // 2, 1, NT // 2 - 1 - w))
-        for sg in (1, -1):
-            cols = [k0 + m for m in range(w + 1)] if sg > 0 else [NT - (k0 + m) for m in range(w + 1)]
-            HOLES[sg] = (c_g, cols)
-    hole_cells = set()
-    for sg, (c_g, cols) in HOLES.items():
-        for m in range(len(cols) - 1):
-            a, b = cols[m], cols[m + 1]; hole_cells.add((c_g, min(a, b) if abs(a - b) == 1 else max(a, b)))
+    HOLES = gill.holes(B, [np.nan] + [float(R_[:, 0].mean()) for R_ in CR], NC - 2)     # {side: (cells, loop)}, planned with the slit
+    hole_cells = set(c for cells, _ in HOLES.values() for c in cells)
     for c_ in range(len(CROWS) - 1):
         for j in range(NT):
             if (c_, j) in hole_cells: continue
             mesh.add_face([CROWS[c_][j], CROWS[c_ + 1][j], CROWS[c_ + 1][J(j + 1)], CROWS[c_][J(j + 1)]], 'cavity')
     for a, b in zip([CROWS[-1]] + DOME[:-1], DOME): mesh.band(a, b, 'cavity')
     mesh.fan(DOME[-1], gut, 'cavity')
-    M.CROWS, M.DOME, M.gut, M.HOLES = CROWS, DOME, gut, HOLES
+    M.CROWS, M.DOME, M.gut, M.HOLES, M.NF = CROWS, DOME, gut, HOLES, NF

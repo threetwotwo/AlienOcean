@@ -20,6 +20,8 @@ var hold := false                # true: the waves stand still (shots that must 
 var self_test := false
 var disp_tex: Texture2DArrayRD
 var deriv_tex: Texture2DArrayRD
+var patch := Vector4(250.0, 21.4, 2.56, 0.32)   # the preset's cascades (m), as the shaders read them (sea_patch)
+var ring_hi := Vector4(32, 32, 32, 64)
 var moments := {}                # SeaSpectrum.moments() of the current params (the shader's MomX / MomY / MomR)
 var ready_ok := false
 
@@ -36,6 +38,19 @@ var _dirty := true
 # the height read back to the CPU (height_at): cascades 0 and 1 (250 m, 21.4 m: all but a few mm of the lagoon's
 # height), mip 0, fetched without a stall every readback_frames frames; a few frames behind the drawn sea
 var readback_frames := 4
+# the whitecaps (look/sea_foam.glsl, the Unreal tank's foam step): a 1024 x 1024 map over 400 m that follows the eye in
+# the still sea's frame, drifting with the wind; globals sea_foam (the map), sea_foam_org (centre island x, y, size m,
+# 1 = valid), sea_foam_k (the Jacobian threshold of cascades 0-1, soft width, deep-fold step, 1), sea_wind (wind dir
+# island x, y, U10 m/s, storm ramp)
+const FOAM_N := 1024
+const FOAM_SIZE := 400.0
+var foam_on := true
+var foam_tex: Texture2DRD
+var foam := {}                   # SeaSpectrum.foam_consts() of the current params
+var foam_eye := Vector2.ZERO     # island xy of the eye (set each frame from the camera)
+var _fa: RID; var _fb: RID; var _foam_ubo: RID; var _set_foam: RID
+var _foam_c := Vector2(INF, INF); var _foam_acc := Vector2.ZERO
+var _last_t := -1.0
 var _hb := [PackedByteArray(), PackedByteArray()]   # RGBA16F texels, row major (written on the render thread)
 var _hb_t := -1.0                                   # the wave clock the bytes were drawn at
 var _hb_mutex := Mutex.new()
@@ -45,7 +60,7 @@ func _init() -> void:
 	name = "FftSea"
 	declare_globals()
 	set_params(params)
-	disp_tex = Texture2DArrayRD.new(); deriv_tex = Texture2DArrayRD.new()
+	disp_tex = Texture2DArrayRD.new(); deriv_tex = Texture2DArrayRD.new(); foam_tex = Texture2DRD.new()
 	RenderingServer.call_on_render_thread(_init_rd)
 
 static func declare_globals() -> void:
@@ -59,6 +74,10 @@ static func declare_globals() -> void:
 	rs.global_shader_parameter_add("sea_mom_y", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
 	rs.global_shader_parameter_add("sea_mom_r", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
 	rs.global_shader_parameter_add("sea_on", rs.GLOBAL_VAR_TYPE_FLOAT, 0.0)
+	rs.global_shader_parameter_add("sea_foam", rs.GLOBAL_VAR_TYPE_SAMPLER2D, null)
+	rs.global_shader_parameter_add("sea_foam_org", rs.GLOBAL_VAR_TYPE_VEC4, Vector4(0, 0, FOAM_SIZE, 0))
+	rs.global_shader_parameter_add("sea_foam_k", rs.GLOBAL_VAR_TYPE_VEC4, Vector4(-10.0, 0.04, 0.0, 1.0))
+	rs.global_shader_parameter_add("sea_wind", rs.GLOBAL_VAR_TYPE_VEC4, Vector4(1, 0, 2, 0))
 	Engine.set_meta("sea_globals", true)
 
 func set_params(p: Dictionary) -> void:
@@ -70,6 +89,14 @@ func set_params(p: Dictionary) -> void:
 	rs.global_shader_parameter_set("sea_mom_x", moments.mom_x)
 	rs.global_shader_parameter_set("sea_mom_y", moments.mom_y)
 	rs.global_shader_parameter_set("sea_mom_r", moments.mom_r)
+	var c: Array = d.cascades; var r: Array = d.ring_hi
+	patch = Vector4(c[0], c[1], c[2], c[3]); ring_hi = Vector4(r[0], r[1], r[2], r[3])
+	rs.global_shader_parameter_set("sea_patch", patch)
+	rs.global_shader_parameter_set("sea_ring_hi", ring_hi)
+	foam = SeaSpectrum.foam_consts(d)
+	if not foam.on: rs.global_shader_parameter_set("sea_foam_org", Vector4(0, 0, FOAM_SIZE, 0))
+	rs.global_shader_parameter_set("sea_foam_k", Vector4(foam.jt, foam.soft, foam.da, 1.0))
+	rs.global_shader_parameter_set("sea_wind", Vector4(foam.wind.x, foam.wind.y, foam.U, foam.storm))
 
 func _compile(nm: String) -> RID:
 	var src := RDShaderSource.new()
@@ -113,7 +140,7 @@ func _init_rd() -> void:
 	rd = RenderingServer.get_rendering_device()
 	if rd == null:
 		push_warning("FftSea: no RenderingDevice (compatibility renderer or headless): the sea stays flat"); return
-	for nm in ["sea_spectrum", "sea_fft", "sea_assemble", "sea_mip"]:
+	for nm in ["sea_spectrum", "sea_fft", "sea_assemble", "sea_mip", "sea_foam"]:
 		if not _compile(nm).is_valid(): return
 	var F32 := RenderingDevice.DATA_FORMAT_R32G32B32A32_SFLOAT
 	var F16 := RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
@@ -131,6 +158,17 @@ func _init_rd() -> void:
 		var dm := _slices(_disp, m); var gm := _slices(_deriv, m)
 		_set_mip.append(rd.uniform_set_create([_uimg(0, dprev), _uimg(1, dm), _uimg(2, gprev), _uimg(3, gm)], _shaders.sea_mip, 0))
 		dprev = dm; gprev = gm
+	var tf := RDTextureFormat.new()
+	tf.format = F16; tf.width = FOAM_N; tf.height = FOAM_N
+	tf.usage_bits = RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT \
+		| RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_TO_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
+	_fa = rd.texture_create(tf, RDTextureView.new()); _fb = rd.texture_create(tf, RDTextureView.new())
+	_rids.append(_fa); _rids.append(_fb)
+	rd.texture_clear(_fa, Color(0, 0, 6.0, 1.0), 0, 1, 0, 1)   # no foam; the break clock quiet (BRK_CAP)
+	_foam_ubo = rd.uniform_buffer_create(80); _rids.append(_foam_ubo)
+	var fu := RDUniform.new(); fu.uniform_type = RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER; fu.binding = 4; fu.add_id(_foam_ubo)
+	_set_foam = rd.uniform_set_create([_uimg(0, d0), _uimg(1, g0), _uimg(2, _fa), _uimg(3, _fb), fu], _shaders.sea_foam, 0)
+	foam_tex.texture_rd_rid = _fa
 	disp_tex.texture_rd_rid = _disp
 	deriv_tex.texture_rd_rid = _deriv
 	ready_ok = true
@@ -141,10 +179,13 @@ func _publish() -> void:
 	RenderingServer.global_shader_parameter_set("sea_disp", disp_tex)
 	RenderingServer.global_shader_parameter_set("sea_deriv", deriv_tex)
 	RenderingServer.global_shader_parameter_set("sea_on", 1.0)
+	RenderingServer.global_shader_parameter_set("sea_foam", foam_tex)
 
 func _process(dt: float) -> void:
 	if not hold: time_s = fmod(time_s + dt * time_scale, SeaSpectrum.T_REPEAT)
 	_frame += 1
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if cam: foam_eye = Vector2(cam.global_position.x, -cam.global_position.z)
 	if ready_ok:
 		RenderingServer.call_on_render_thread(_run.bind(time_s))
 		if _frame % maxi(readback_frames, 1) == 0 or _hb_t < 0.0:
@@ -155,6 +196,41 @@ func step_now() -> void:
 	if ready_ok:
 		RenderingServer.call_on_render_thread(_run.bind(time_s))
 		RenderingServer.call_on_render_thread(_readback.bind(time_s))
+
+func preroll(seconds: float, step := 1.0 / 30.0) -> void:
+	## run the sea (and its foam) for `seconds` at `step` before a shot, so the foam has its history (render thread)
+	if not ready_ok: return
+	RenderingServer.call_on_render_thread(func():
+		var n := int(seconds / step)
+		for i in n:
+			time_s = fmod(time_s + step, SeaSpectrum.T_REPEAT)
+			_run(time_s))
+
+func _foam_prep(t: float) -> void:
+	## the foam step's constants for this run (before the compute list: buffers can't change inside one); dt = the wave
+	## clock's advance
+	var dt := 0.0 if _last_t < 0.0 else clampf(t - _last_t, 0.0, 0.25)
+	if t < _last_t: dt = 0.0     # the clock wrapped or was set back
+	_last_t = t
+	var tx := FOAM_SIZE / FOAM_N
+	var drift: Vector2 = foam.get("drift", Vector2.ZERO)
+	_foam_acc = Vector2(fposmod(_foam_acc.x + drift.x * dt, tx), fposmod(_foam_acc.y + drift.y * dt, tx))
+	var c := ((foam_eye - _foam_acc) / tx).round() * tx + _foam_acc
+	var pc := _foam_c if _foam_c.x != INF else c
+	_foam_c = c
+	var v := PackedFloat32Array([c.x, c.y, FOAM_SIZE, dt, pc.x, pc.y, drift.x, drift.y,
+		foam.get("jt2", -10.0), foam.get("soft", 0.04), foam.get("tau", 4.0), 1.0,
+		foam.get("da2", 0.0), foam.get("cbreak", 2.0), foam.get("storm", 0.0), foam.get("rows", 0.0),
+		patch.x, patch.y, patch.z, patch.w])
+	rd.buffer_update(_foam_ubo, 0, v.size() * 4, v.to_byte_array())
+	RenderingServer.global_shader_parameter_set.call_deferred("sea_foam_org", Vector4(c.x, c.y, FOAM_SIZE, 1.0))
+
+func _foam_step(cl: int) -> void:
+	## one foam step in the compute list, after the cascades are made
+	rd.compute_list_add_barrier(cl)
+	rd.compute_list_bind_compute_pipeline(cl, _pipes.sea_foam)
+	rd.compute_list_bind_uniform_set(cl, _set_foam, 0)
+	rd.compute_list_dispatch(cl, FOAM_N / 8, FOAM_N / 8, 1)
 
 func _readback(t: float) -> void:
 	for c in 2:
@@ -171,7 +247,7 @@ func has_height() -> bool:
 
 func _disp_tap(c: int, X: Vector2) -> Vector3:
 	## cascade c's (Dx, Dy, Dz) at island point X, bilinear with wrap (the GPU's own sampling of mip 0)
-	var L: float = [250.0, 21.4][c]
+	var L: float = patch.x if c == 0 else patch.y
 	var u := X / L * NS - Vector2(0.5, 0.5)
 	var i0 := Vector2i(floori(u.x), floori(u.y)); var f := u - Vector2(i0)
 	var b: PackedByteArray = _hb[c]
@@ -202,11 +278,12 @@ func height_at(gx: float, gz: float) -> float:
 
 func _run(t: float) -> void:
 	var v := PackedFloat32Array()
-	var patch := Vector4(250.0, 21.4, 2.56, 0.32); var ring := Vector4(32, 32, 32, 64)
-	for x in _spec + [patch, ring, Vector4(t, SeaSpectrum.T_REPEAT, 0.0, 1.0 if self_test else 0.0)]:
+	for x in _spec + [patch, ring_hi, Vector4(t, SeaSpectrum.T_REPEAT, 0.0, 1.0 if self_test else 0.0)]:
 		v.append_array([x.x, x.y, x.z, x.w])
 	rd.buffer_update(_ubo, 0, v.size() * 4, v.to_byte_array())
 	var g := NS / 16
+	var foam_now: bool = foam_on and foam.get("on", false)   # no whitecaps (calm lagoon): no foam step, nothing spent
+	if foam_now: _foam_prep(t)
 	var cl := rd.compute_list_begin()
 	rd.compute_list_bind_compute_pipeline(cl, _pipes.sea_spectrum)
 	rd.compute_list_bind_uniform_set(cl, _set_spec, 0)
@@ -233,7 +310,16 @@ func _run(t: float) -> void:
 		var mc := PackedFloat32Array([0.25, 0, 0, 0]).to_byte_array()
 		rd.compute_list_set_push_constant(cl, mc, mc.size())
 		rd.compute_list_dispatch(cl, maxi(sz / 8, 1), maxi(sz / 8, 1), LAYERS)
+	if foam_now: _foam_step(cl)
 	rd.compute_list_end()
+	if foam_now: rd.texture_copy(_fb, _fa, Vector3.ZERO, Vector3.ZERO, Vector3(FOAM_N, FOAM_N, 1), 0, 0, 0, 0)
+
+func read_foam() -> PackedFloat32Array:
+	## test helper (slow, render thread sync): the foam map as floats (r foam, g fresh, b break clock, a)
+	var data := rd.texture_get_data(_fa, 0)
+	var out := PackedFloat32Array(); out.resize(FOAM_N * FOAM_N * 4)
+	for i in out.size(): out[i] = data.decode_half(i * 2)
+	return out
 
 func read_layer(which: String, layer: int) -> PackedFloat32Array:
 	## test helper (slow, render thread sync): one cascade's mip 0 as floats (rgba per texel)

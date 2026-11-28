@@ -2,6 +2,27 @@
  "version": 1,
  "files": [
   {
+   "path": "engine/godot/assets/creatures/caranx_melampygus/fish.glb",
+   "md5": "34de55e020ad7f8088eb2b9782e07086",
+   "bytes": 5005188,
+   "store": "project files assets/creatures/caranx_melampygus/",
+   "built_by": "creatures/maker: python -m creature_maker glb"
+  },
+  {
+   "path": "engine/godot/assets/creatures/caranx_melampygus/fish_LOD1.glb",
+   "md5": "4315f0f6b9aee212e78a097cba015a5c",
+   "bytes": 4784356,
+   "store": "project files assets/creatures/caranx_melampygus/",
+   "built_by": "creatures/maker: python -m creature_maker glb"
+  },
+  {
+   "path": "engine/godot/assets/creatures/caranx_melampygus/fish_LOD2.glb",
+   "md5": "fe65975b6a52f2728ea1ae8e0ce71f1b",
+   "bytes": 4598448,
+   "store": "project files assets/creatures/caranx_melampygus/",
+   "built_by": "creatures/maker: python -m creature_maker glb"
+  },
+  {
    "path": "engine/godot/assets/world/lagoon_keyframe/SB_Bommie_0.glb",
    "md5": "c1da55141c34dbf7f7de97f966a45496",
    "bytes": 1381508,
@@ -161,27 +182,6 @@
    "bytes": 2427156,
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
-  },
-  {
-   "path": "engine/godot/assets/creatures/caranx_melampygus/fish.glb",
-   "md5": "9c233a6cb32ceae0ab107d57a513c908",
-   "bytes": 4863620,
-   "store": "project files assets/creatures/caranx_melampygus/",
-   "built_by": "creatures/maker: python -m creature_maker glb"
-  },
-  {
-   "path": "engine/godot/assets/creatures/caranx_melampygus/fish_LOD1.glb",
-   "md5": "9ee5e67f917df5e355b9e77ff0edc0c3",
-   "bytes": 4656520,
-   "store": "project files assets/creatures/caranx_melampygus/",
-   "built_by": "creatures/maker: python -m creature_maker glb"
-  },
-  {
-   "path": "engine/godot/assets/creatures/caranx_melampygus/fish_LOD2.glb",
-   "md5": "4eda7550a6cc9520042f085693935b31",
-   "bytes": 4491152,
-   "store": "project files assets/creatures/caranx_melampygus/",
-   "built_by": "creatures/maker: python -m creature_maker glb"
   }
  ]
 }

@@ -7,7 +7,30 @@
 - Art lever WorldRoot.sky_fill_k (AO_SKY_FILL): share of the sky's light entering the water, scaling water_ek0, the ambient,
   the GI's water light field and the haze alike. Default 0.6 = the key frame's 7 % (1 = physical). Shadow / rock / sand:
   51 / 49 / 74 -> 47 / 47 / 73 (key frame 44 / 41-43 / 78). Gary picks (card); 1.0 restores the physical share.
+- Fix (surface thread report): above water SDFGI drew milky 3-6 m blotches on the sand seen through the surface. The GI's
+  sky is now the water light field at any eye height, and above water the sun's light_indirect_energy is the share entering
+  the water (Fresnel x refraction x attenuation at z_ref, 0.74 at noon). Test GI5/GI6.
 
+## 0.6.0-dev (28 Nov 2026): lagoon dressing round 9, the layers linked
+- World: Gary kept the arch's form (28 Nov 01:30Z), so the empty sand band under it is closed by composition. The key frame's
+  massif was two kit heads stacked in depth (layout.json b0 at 4.7 m in front of b3 at 12.5 m), its foot overlapping the corals.
+  Same relation here with the kit's own heads: SB_Bommie_0 at 7.6 m before the arch's left foot (x1.3, stem sunk 0.4 m, turned
+  70 deg) and SB_Bommie_4 as a low boulder right of the gate (x0.6, sunk 0.15 m): mass heavy left, open right, gate clear.
+  Fable r9 then r9b (equal mushrooms bracketing the gate read as kit stamping; fixed by unequal scale, sink and turn). Manifest 0.7.0.
+
+## 0.6.0-dev (28 Nov 2026): the shared game root (M32)
+- Game root thread: GameRoot (`adapters/godot/game_root.gd`, scene `scenes/game.tscn`) builds the world and its services and
+  runs one tick order: clock, input, player, actors, fauna, plugs, camera, world. Ported from Thalassa v20.19
+  style/runtime.js updateSimulation (fauna synced before anything reads them) and core/feature-mounts.js (FeatureMounts).
+  New: SimClock (`core/world/sim_clock.gd`, the only game time, t = tick x dt), ActorRegistry
+  (`core/m32_game/actor_registry.gd`, double-buffered, uniform grid, snapshot records for the fish schools, Thalassa POI
+  records), ActorRig (`adapters/godot/actor_rig.gd`, motor + body rig + mannequin as motion_film wires them), GameServices.
+  The tide now moves at the start of each tick, before the girl reads the water (was after, one tick late).
+  Deviation D1: fauna read the player after she moves this tick (Thalassa: the pre-move position).
+- M03 camera adapter 0.2.1: FIX against Thalassa's same-tick swimmer.applyLook: `integrate_look(dt, look)` lets the game
+  root apply the look before the motor reads cam_yaw (was one tick late); tick() keeps integrating for callers that don't.
+- Test: `tests/test_game_root.gd` + `tests/run_game_root.sh` (G1-G10 every tick, 30/60/120 fps, monkey runs, planted faults
+  late_write / clock / grid). Film: `tools/game_film.gd`.
 ## 0.6.0-dev (28 Nov 2026, look thread): GI on by default, lit by the water's own light
 - Root cause of the black fish under SDFGI: Godot's SDFGI ignores the environment's ambient colour; its escaping rays read the
   sky's radiance cubemap, which was the air above the water. Fix: under water, the sky shader's cubemap passes

@@ -4,21 +4,22 @@ Cage checks (no Blender):
   P2  quads >= 95 %, worst corner (1st percentile) >= 20 deg
   P3  no non-manifold edges; open borders only at the eye openings
   P4  skin within 0.5 % SL (p95) / 2 % SL (max) of the form
-  P5  skin UV: area with stretch in [0.8, 1.25] >= 95 %, no folded UV faces
+  P5  skin UV: area with stretch in [0.8, 1.25] >= 95 %, no folded UV faces, no texel under two skin faces
   IC1 every part the record names exists; input faults and defaults listed
   EY1 eye rim radius within 5 % of the record eye
   OP1 openings are topology: genus 2 (mouth -> throat -> two gill exits), 2 border loops (eyes), consistent winding,
       and the lips reach each gill slit through interior faces only
   OP2 every interior-only vertex lies inside the body (signed distance < -0.1 % SL)
   OP3 no fold (> 60 deg between neighbouring faces) outside the designed creases (rolls, junctions, commissures)
-Export checks (after Blender): P1 triangle budget + LODs, P6 the normal map carries the form, P7 bones, P8 Khronos
+Export checks (after Blender): P1 triangle budget + LODs, P6 the normal map carries the form, faces out and is the same on
+both sides, P7 bones, P8 Khronos
 validator, P11 silhouette against the ceiling frame (info), and the export stage's own rows:
   EX1 Blender's skinning at the real gape equals the stress test's gape pose (pose.gape) within 0.01 % SL, and the jaw moves
   EX2 the same for the gill covers at the real flare (pose.flare)
   EX3 every cavity and gill face is on the 'interior' material, and every LOD keeps interior faces (the mouth never turns see-through)
   EX4 clips swim_loop, breathe_loop, gape, flare exist; swim_loop closes (last frame = first within 1e-4 BL)
   EX5 collision: at least 3 hulls (a body that bends), >= 99 % of the form's inside covered, hull volume <= 1.3 x form volume
-  EX6 the swim settings ride in the glTF (rig node extras alien_ocean.swim: envelope, wavelength, beat law, clips)
+  EX6 the swim settings ride in the glTF (rig node extras alien_ocean.swim: envelope with phase, envelopes at >= 2 speeds, wavelength, beat law, clips)
 """
 import json, os, sys, math, copy, hashlib, subprocess
 from collections import Counter, defaultdict, deque
@@ -103,6 +104,30 @@ def folds(C, V, limit=60):
     return dict(by), dmax
 
 
+UV_OVERLAP_RES = 512    # DEFAULT: the raster the overlap count is taken on (the smallest body map the maker ships)
+UV_OVERLAP_MAX = 0      # DEFAULT: texels allowed under two skin faces. None: such a texel is baked twice and one face loses
+
+
+def uv_overlap(C, res=UV_OVERLAP_RES):
+    """texels whose centre lies inside more than one skin face (strictly inside: a shared edge is not an overlap). A fold
+    shows as flipped faces, but one part of an island laid over another (a chart wrapped on itself, a flap over its lip)
+    flips nothing, and only this count sees it."""
+    cnt = np.zeros((res, res), np.int32)
+    for f, t, uv in zip(C['faces'], C['ftag'], C['uv']):
+        if t not in SKIN_TAGS: continue
+        uv = np.array(uv) * res; x0, y0 = np.floor(uv.min(0)).astype(int); x1, y1 = np.ceil(uv.max(0)).astype(int)
+        xs, ys = np.meshgrid(np.arange(max(x0, 0), min(x1 + 1, res)), np.arange(max(y0, 0), min(y1 + 1, res))); px, py = xs + 0.5, ys + 0.5
+        inside = np.zeros(xs.shape, bool)
+        for tr in ([(0, 1, 2)] if len(f) == 3 else [(0, 1, 2), (0, 2, 3)]):
+            A = uv[list(tr)]; d = (A[1, 1] - A[2, 1]) * (A[0, 0] - A[2, 0]) + (A[2, 0] - A[1, 0]) * (A[0, 1] - A[2, 1])
+            if abs(d) < 1e-12: continue
+            w0 = ((A[1, 1] - A[2, 1]) * (px - A[2, 0]) + (A[2, 0] - A[1, 0]) * (py - A[2, 1])) / d
+            w1 = ((A[2, 1] - A[0, 1]) * (px - A[2, 0]) + (A[0, 0] - A[2, 0]) * (py - A[2, 1])) / d
+            inside |= (w0 > 1e-3) & (w1 > 1e-3) & (1 - w0 - w1 > 1e-3)
+        cnt[ys[inside], xs[inside]] += 1
+    return int((cnt > 1).sum())
+
+
 def cage_checks(C, V, form, rec):
     R = {}; faces, tags = C['faces'], C['ftag']
     skin = [k for k, t in enumerate(tags) if t in SKIN_TAGS]
@@ -141,7 +166,8 @@ def cage_checks(C, V, form, rec):
     R['P5_stretch_ok_area'] = round(float((ok * r[:, 1]).sum() / r[:, 1].sum()), 3)
     bm = r[:, 2] > 0.5; R['P5_stretch_ok_area_without_eye_patch'] = round(float((ok * r[:, 1])[bm].sum() / r[:, 1][bm].sum()), 3)
     R['P5_uv_folded_faces'] = flips; R['P5_uv_md5'] = hashlib.md5(json.dumps(C['uv']).encode()).hexdigest()[:10]
-    R['P5_pass'] = R['P5_stretch_ok_area'] >= 0.95 and flips == 0
+    R['P5_uv_overlap_texels'] = uv_overlap(C); R['P5_uv_relaxed'] = all(v.get('relaxed') for v in C.get('uv_relax', {}).values())
+    R['P5_pass'] = R['P5_stretch_ok_area'] >= 0.95 and flips == 0 and R['P5_uv_overlap_texels'] <= UV_OVERLAP_MAX
     exp = expected_parts(rec); got = dict(eyes=C['parts']['eyes'], fins=sorted(C['parts']['fins']))
     R['IC1_missing'] = sorted(set(exp['fins']) - set(got['fins'])) + (['eye'] * (exp['eyes'] - got['eyes']))
     R['IC1_input_faults'] = C.get('input_faults', []); R['IC1_defaults_used'] = C.get('defaults_used', [])
@@ -178,9 +204,19 @@ def pose_checks(C, V, rec, jaw_w=None, sweep=True):
     return R
 
 
+P6_BACK_MAX = 1e-4      # DEFAULT: share of skin texels that may face into the skin (single rays at the tail pole); a face baked
+                        # from the wrong side is hundreds of texels
+P6_SIDE_DEG, P6_SIDE_MAX = 25.0, 0.02   # DEFAULT: twin texels of the two sides may differ by more than 25 deg (the speck
+                                        # limit) on at most 2 % of them (edges that fall on different texel rows)
+
+
 def p6(N, Mk):
     """the normal map carries the form: every third of the body has >= 10 % of texels tilted > 3 deg, the map is not
-    inverted, and no isolated specks remain (> 25 deg from all 8 neighbours)."""
+    inverted, no isolated specks remain (> 25 deg from all 8 neighbours), no texel faces into the skin, and the two sides
+    carry the same map. The left island lies in the upper half of the texture and the right island at the same place in
+    the lower half (uv.py), so a texel and the one half a texture below it are twins on a body that is the same on both
+    sides (every body the maker builds so far). A bake fault is never the same on both sides: the interior faces baked
+    over the skin maps (0.3.0) made backwards patches on the cheek and throat of one side and the tail root of the other."""
     if Mk.shape != N.shape[:2]: Mk = np.asarray(Image.fromarray(Mk.astype(np.uint8) * 255).resize(N.shape[:2][::-1])) > 127
     Nn = N / (np.linalg.norm(N, axis=-1, keepdims=True) + 1e-9)
     tilt = Nn[..., 2] < np.cos(np.radians(3)); cols = np.where(Mk.any(0))[0]; a, b = cols.min(), cols.max()
@@ -190,9 +226,13 @@ def p6(N, Mk):
         for dx in (-1, 0, 1):
             if dy or dx: best = np.maximum(best, (Nn * np.roll(np.roll(Nn, dy, 0), dx, 1)).sum(-1))
     specks = int((best < np.cos(np.radians(25)))[Mk].sum())
-    zp1 = float(np.percentile(Nn[..., 2][Mk], 1))
+    zp1 = float(np.percentile(Nn[..., 2][Mk], 1)); back = int((Nn[..., 2][Mk] < 0).sum())
+    h = N.shape[0] // 2; both = Mk[:h] & Mk[h:2 * h]; dot = (Nn[:h] * Nn[h:2 * h]).sum(-1)
+    side = float((dot[both] < np.cos(np.radians(P6_SIDE_DEG))).mean()) if both.any() else 1.0
+    twins = float(both.sum() / max(Mk.sum() / 2, 1))          # share of skin texels that have a twin: the islands are packed as twins
     return dict(P6_tilted_share_head_trunk_tail=[round(t, 3) for t in thirds], P6_specks=specks, P6_normal_z_p1=round(zp1, 3),
-                P6_pass=min(thirds) >= 0.10 and specks <= 10 and zp1 > 0.2)
+                P6_backward_texels=back, P6_sides_differ_share=round(side, 4), P6_twin_texel_share=round(twins, 3),
+                P6_pass=min(thirds) >= 0.10 and specks <= 10 and zp1 > 0.2 and back <= P6_BACK_MAX * Mk.sum() and side <= P6_SIDE_MAX and twins >= 0.95)
 
 
 def validator(path):
@@ -245,7 +285,8 @@ def ex_checks(out, st):
         sw = next((n['extras']['alien_ocean']['swim'] for n in js.get('nodes', []) if n.get('name') == 'rig' and 'alien_ocean' in n.get('extras', {})), None)
     elif 'swim_extras' in st: sw = st['swim_extras']
     need = ('wave', 'beat_law', 'clips')
-    R['EX6_pass'] = bool(sw) and all(k in sw for k in need) and bool(sw['wave'].get('amplitude_envelope_BL')) and bool(sw['wave'].get('lam_BL'))
+    R['EX6_pass'] = bool(sw) and all(k in sw for k in need) and bool(sw['wave'].get('amplitude_envelope_BL')) and bool(sw['wave'].get('lam_BL')) \
+        and len(sw['wave'].get('envelopes_by_speed') or []) >= 2 and all(len(r) == 3 for r in sw['wave']['amplitude_envelope_BL'])
     return R
 
 
@@ -281,13 +322,22 @@ def planted(C0, V0, VN0, form, rec):
     PL['GP1 (upper lip loop bound to the jaw)'] = not pose_checks(C0, V0, rec, jaw_w=w, sweep=False)['GP1_pass']
     from .pose import range_sweep, gape_target
     PL['SR1 (upper lip loop bound to the jaw)'] = range_sweep(C0, V0, rec, jaw_w=w, only=['gape'])['gape']['safe'] < gape_target(rec)
+    c = copy.deepcopy(C0); bodyf = [i for i, t in enumerate(C0['ftag']) if t == 'body']; a_, b_ = (np.array(c['uv'][bodyf[i]]) for i in (0, 40))
+    c['uv'][bodyf[0]] = (a_ + b_.mean(0) - a_.mean(0)).tolist()
+    PL['P5 (one skin face laid over another in UV)'] = run(c, V0)['P5_uv_overlap_texels'] > 0
+    yy, xx = np.mgrid[0:64, 0:64]; g = np.sin(xx / 5.0) * 0.9; nm = np.dstack([g, np.cos(yy % 32 / 4.0) * 0.3, np.ones((64, 64))])   # the same relief on both halves
+    PL['P6 planted baseline passes'] = p6(nm, np.ones((64, 64), bool))['P6_pass']
+    n2 = nm.copy(); n2[40:52, 10:30] = [0, 0, 1.0]
+    PL['P6 (flat panel baked on one side only)'] = p6(n2, np.ones((64, 64), bool))['P6_sides_differ_share'] > P6_SIDE_MAX
+    n2 = nm.copy(); n2[8:12, 10:20] = [0.3, 0, -0.95]; n2[40:44, 10:20] = [0.3, 0, -0.95]
+    PL['P6 (patch baked from the inside, facing into the skin)'] = p6(n2, np.ones((64, 64), bool))['P6_backward_texels'] > P6_BACK_MAX * 64 * 64
     PL['P6 (flat normal map)'] = not p6(np.dstack([np.zeros((64, 64)), np.zeros((64, 64)), np.ones((64, 64))]), np.ones((64, 64), bool))['P6_pass']
     PL['P1 (40k tris)'] = not export_checks('/nonexistent', dict(tris_total=40000, bones=10))['P1_pass']
     good = dict(EX1_gape_max_err_pctSL=0.001, EX1_gape_moved_pctSL=6.0, EX2_flare_max_err_pctSL=0.001, EX2_flare_moved_pctSL=2.0,
                 interior_faces=10, lods=dict(LOD1=dict(tris=1, interior_tris=5), LOD2=dict(tris=1, interior_tris=2)),
                 clips=dict(swim_loop={}, breathe_loop={}, gape={}, flare={}), swim_loop_closure_BL=0.0,
                 collision=dict(hulls=5, coverage=1.0, hull_over_form_volume=1.2),
-                swim_extras=dict(wave=dict(amplitude_envelope_BL=[[0, 0.02]], lam_BL=1.0), beat_law={}, clips={}))
+                swim_extras=dict(wave=dict(amplitude_envelope_BL=[[0, 0.02, 0.0]], lam_BL=1.0, envelopes_by_speed=[{}, {}]), beat_law={}, clips={}))
     ex = lambda **kw: ex_checks('/nonexistent', {**good, **kw})
     PL['EX planted baseline passes'] = all(ex()[k] for k in ('EX1_pass', 'EX2_pass', 'EX3_pass', 'EX4_pass', 'EX5_pass', 'EX6_pass'))
     PL['EX1 (jaw skinned off the stress pose by 0.5 % SL)'] = not ex(EX1_gape_max_err_pctSL=0.5)['EX1_pass']
@@ -296,6 +346,7 @@ def planted(C0, V0, VN0, form, rec):
     PL['EX4 (swim loop does not close)'] = not ex(swim_loop_closure_BL=0.01)['EX4_pass']
     PL['EX5 (one rigid hull for a bending body)'] = not ex(collision=dict(hulls=1, coverage=1.0, hull_over_form_volume=1.1))['EX5_pass']
     PL['EX6 (no swim settings in the glTF)'] = not ex(swim_extras=None)['EX6_pass']
+    PL['EX6 (one speed only, no envelopes to blend)'] = not ex(swim_extras=dict(wave=dict(amplitude_envelope_BL=[[0, 0.02, 0.0]], lam_BL=1.0, envelopes_by_speed=[{}]), beat_law={}, clips={}))['EX6_pass']
     return PL
 
 

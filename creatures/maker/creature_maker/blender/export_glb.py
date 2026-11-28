@@ -68,6 +68,17 @@ V = Z['V']
 # ---------------------------------------------------------------- BAKE: the professional step, in Blender's own tangent frame
 tmp_m = bpy.data.materials.new('bake_tmp'); tmp_m.use_nodes = True
 body = mesh_obj('body', V, C['faces'], C['uv'], tmp_m)
+INT_IDX, INT_SKIP = interior.slot(body, C)     # interior faces off the skin's bake target before anything is baked
+# orbit linings (the tuck ring of each eye patch) turn into the socket and lie inside the form by design, up to 1.6 % SL deep,
+# further than the bake cage reaches out: their rays start inside the solid and hit the form's far side from behind. They do not
+# sample the form: they wait on the throwaway slot too, and take a flat tangent normal (the cage's own shading) and the rim's AO.
+_tuck = set(v for rings in C['openings']['eye_rings'] for v in rings[-1])
+LINING = [k for k, (f, t) in enumerate(zip(C['faces'], C['ftag'])) if t == 'eye' and _tuck & set(f)]
+for k in LINING: body.data.polygons[k].material_index = INT_IDX
+PLANT = os.environ.get('CREATURE_PLANT_BAKE_FAULT', '')   # tests only: puts the 0.3.0 fault back, to show P6 catches it
+_inner = [k for k, t in enumerate(C['ftag']) if t in interior.INNER]
+if PLANT == 'interior_on_skin':
+    for k in _inner: body.data.polygons[k].material_index = 0
 Fm = np.load(os.path.join(OUT, 'form_mc.npz'))
 me = bpy.data.meshes.new('form'); me.from_pydata([B(v) for v in Fm['V']], [], Fm['F'].tolist()); me.update()
 for p_ in me.polygons: p_.use_smooth = True
@@ -86,6 +97,16 @@ NB_ = bake('NORMAL', imn)[..., :3] * 2 - 1
 ima = bpy.data.images.new('bake_ao', RES, RES, float_buffer=True); ima.colorspace_settings.name = 'Non-Color'
 scn.cycles.samples = 32; AO = bake('AO', ima)[..., 0]
 bake_s = round(_t.time() - t0, 1)
+for k in LINING: body.data.polygons[k].material_index = 0
+for k in _inner: body.data.polygons[k].material_index = INT_IDX
+if LINING:
+    from scipy.ndimage import distance_transform_edt
+    from creature_maker.maps import raster
+    _sk = [k for k, t in enumerate(C['ftag']) if t in ('body', 'eye', 'mouth', 'cap')]; _ln = set(LINING)
+    _F = raster([C['faces'][k] for k in _sk], [np.array(C['uv'][k]) for k in _sk], V, Z['VN'], RES)[3]     # face per texel, Blender's row order
+    _lin = np.isin(_F, [i for i, k in enumerate(_sk) if k in _ln]); _src = (_F >= 0) & ~_lin
+    _iy, _ix = distance_transform_edt(~_src, return_distances=False, return_indices=True)
+    NB_[_lin] = (0.0, 0.0, 1.0); AO[_lin] = AO[_iy[_lin], _ix[_lin]]
 # fine relief: UV-space height -> tangent normal, combined with the baked form normal (reoriented normal mapping)
 H = np.load(os.path.join(OUT, 'body_height.npy')); Mk = np.load(os.path.join(OUT, 'body_mask.npy'))
 if H.shape[0] != RES:
@@ -122,7 +143,7 @@ bpy.data.objects.remove(form)
 body_m = pbr('body', image('body_base', 'body_base.png'), image('body_normal', 'body_normal.png', True), image('body_orm', 'body_orm.png', True))
 body.data.materials[0] = body_m
 # interior slot: cavity + gill passage faces on their own material 'interior' (engine contract), maps baked from the cage itself
-INT_IDX, INT_STATS = interior.setup(body, body_m, C, OUT)
+INT_IDX, INT_STATS = interior.setup(body, body_m, C, OUT, INT_IDX, INT_SKIP)
 int_m = pbr('interior', image('interior_base', 'interior_base.png'), None, image('interior_orm', 'interior_orm.png', True), two_sided=False)
 body.data.materials[INT_IDX] = int_m
 # underwater skin: reflectance 0.01-0.06 % (lessons, fins handover s5) -> IOR of water-skin, not 1.5
@@ -218,6 +239,10 @@ if os.path.exists(_cp):
 from creature_maker.pose import FLARE_REAL
 GAPE_REAL = float(REC.get('gape_deg', 30.0)); CHK['real_gape_deg'] = GAPE_REAL; CHK['real_flare_deg'] = FLARE_REAL
 SW = swim_clip.clips(C, V, RAW, BL, CHK)
+# the shipped clips open only as far as the stress test found clean (SR1_safe): a clip past it would ship a measured fold. The real
+# angle stays in pose_limits.real, and SR1 keeps failing upstream until the cage reaches it.
+_safe = CHK.get('SR1_safe') or {}
+GAPE_CLIP = min(GAPE_REAL, float(_safe.get('gape', GAPE_REAL))); FLARE_CLIP = min(FLARE_REAL, float(_safe.get('flare', FLARE_REAL)))
 FPS = 120; scn.render.fps = FPS; scn.render.fps_base = 1.0
 chain = swim_clip.chain_names(NB); cmap = {chain[i]: f'spine_{i:02d}' for i in range(NB)}
 def timed(clip, fps):
@@ -231,9 +256,10 @@ def hinge(name):
 JAW = [hinge('jaw')]; COVERS = [hinge('opercleL'), hinge('opercleR')]
 rigging.key_clip(rig, 'swim_loop', timed(SW['swim'], SW['swim_fps']), FPS)
 rigging.key_clip(rig, 'breathe_loop', timed_b(SW['breathe'], SW['breathe_fps']), FPS)
-rigging.key_clip(rig, 'gape', rigging.hinge_frames(rig, JAW, GAPE_REAL), FPS)
-rigging.key_clip(rig, 'flare', rigging.hinge_frames(rig, COVERS, FLARE_REAL), FPS)
-SW['extras']['clips']['gape']['peak_deg'] = GAPE_REAL; SW['extras']['clips']['flare']['peak_deg'] = FLARE_REAL
+rigging.key_clip(rig, 'gape', rigging.hinge_frames(rig, JAW, GAPE_CLIP), FPS)
+rigging.key_clip(rig, 'flare', rigging.hinge_frames(rig, COVERS, FLARE_CLIP), FPS)
+SW['extras']['clips']['gape']['peak_deg'] = GAPE_CLIP; SW['extras']['clips']['flare']['peak_deg'] = FLARE_CLIP
+SW['extras']['clips']['gape']['peak_rule'] = SW['extras']['clips']['flare']['peak_rule'] = 'min(real angle, SR1_safe): the clip never opens past the clean stress-test range'
 SW['extras']['head_bones'] = {n: dict(pivot_m=[round(c, 6) for c in (B(bspec[n]['pivot']).x, B(bspec[n]['pivot']).z, -B(bspec[n]['pivot']).y)],
                                       axis_gltf=[round(c, 6) for c in (hinge(n)[2].x, hinge(n)[2].z, -hinge(n)[2].y)],
                                       opens='positive angle about axis_gltf (armature space, right hand)') for n in ('jaw', 'opercleL', 'opercleR')}
@@ -286,10 +312,18 @@ glb = os.path.join(OUT, 'fish.glb'); LOD0 = [body, rig] + list(fin_obs.values())
 _exp(glb, LOD0); finish(glb, 0)
 # LOD chain: meshoptimizer on seam-split copies (blender/lods.py); eyes dropped at LOD2, collision only on LOD0
 lods = {}; lod_obs = {}; CREASES = set(v for r in C['rolls'] for v in r)
-for lod, ratio in ((1, 0.4), (2, 0.14)):
-    obs = []
-    for o in [body] + list(fin_obs.values()):
-        lo, nt = LODS.simplify(o, ratio if o is body else max(ratio * 1.6, 0.3), f'{o.name}_LOD{lod}', lock=CREASES if (o is body and lod == 1) else ()); lo.hide_render = True; obs.append(lo)
+# targets are budgets (P1: LOD1 <= 60 % of LOD0, LOD2 <= 1,000 tris), not fixed ratios: a fish with bigger traced fins or more cage
+# rows gets a lower ratio. Start from the usual ratio, then scale it down until the LOD is inside its budget with a 5 % margin.
+T0 = tris_of(LOD0)
+for lod, ratio, budget in ((1, 0.4, 0.57 * T0), (2, 0.14, 950)):
+    for attempt in range(4):
+        obs = []
+        for o in [body] + list(fin_obs.values()):
+            lo, nt = LODS.simplify(o, ratio if o is body else max(ratio * 1.6, 0.3 * min(1.0, ratio / 0.14)), f'{o.name}_LOD{lod}', lock=CREASES if (o is body and lod == 1) else ()); lo.hide_render = True; obs.append(lo)
+        got = tris_of(obs + (eye_obs if lod == 1 else []))
+        if got <= budget or attempt == 3: break
+        for lo in obs: bpy.data.objects.remove(lo, do_unlink=True)
+        ratio *= 0.97 * budget / got
     keep = obs + [rig] + (eye_obs if lod == 1 else [])
     pth = os.path.join(OUT, f'fish_LOD{lod}.glb'); _exp(pth, keep); finish(pth, lod)
     lint = sum(1 for p in obs[0].data.polygons if p.material_index == INT_IDX)

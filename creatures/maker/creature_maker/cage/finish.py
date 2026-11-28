@@ -34,6 +34,20 @@ def orient(B, V):
                     seen[kk] = True; dq.append(kk)
     if np.mean([out_(faces[k]) > 0 for k, t in enumerate(mesh.ftag) if t == 'body']) < 0.5:
         mesh.faces = [f[::-1] for f in faces]
+    split_from_corners(B)
+
+
+def split_from_corners(B):
+    """a quad at a slit corner is split by the diagonal from the corner vertex (quads split 0-2). The other diagonal
+    skips the corner and leaves a sliver along the closed slit, which flips at the first degrees of opening (anthias:
+    the skin over the rictus crossed the lip roll at gape 5)."""
+    rank = {}
+    for ch in B.commissures:
+        for k, v in enumerate(ch): rank.setdefault(v, k)
+    faces = B.mesh.faces
+    for k, f in enumerate(faces):
+        c = [(rank[v], i) for i, v in enumerate(f) if v in rank]
+        if len(f) == 4 and c and min(c)[1] % 2: faces[k] = f[1:] + f[:1]
 
 
 def snap(P, N, f, reach=0.008, it=22):
@@ -61,7 +75,9 @@ def snap_to_form(B, V):
     for _, t_ in E['tucks']: free[t_] = True
     for _, r in E['rims']: free[r] = True
     free[M.MROWS[1]] = True
-    D = np.zeros_like(V); D[feat] = snap(V[feat], VN[feat], B.form.sd_full) - V[feat]
+    # the skin snaps onto the form without its mouth cleft: the cage has its own lips there, and a loop vertex that lay on
+    # the mouth line was pulled to the bottom of the cleft, through the lip lining (damsel, barracuda at the rictus)
+    D = np.zeros_like(V); D[feat] = snap(V[feat], VN[feat], lambda P: B.form.sd_full(P, cleft=False)) - V[feat]
     nb = [[] for _ in range(len(V))]
     for f in faces:
         for a, b in zip(f, f[1:] + f[:1]): nb[a].append(b); nb[b].append(a)

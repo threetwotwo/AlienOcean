@@ -43,12 +43,26 @@ func _floor_height(x: float, z: float) -> float:
 func _nearest_surface(p: Vector3, r: float) -> Dictionary:
 	return _query().nearest_surface(p, r)
 
+var _look_done := false
+
+## Integrate this tick's look before the motor reads cam_yaw / cam_pitch (game root's input phase). FIX against the
+## 0.2.0 order, where tick() integrated after the motor and the packet carried last tick's yaw; Thalassa applied the
+## look in the same tick (swimmer.applyLook). tick() then skips its own integration this tick; callers that never call
+## this (motion_film, test_camera, the golden test) keep the old behaviour.
+func integrate_look(dt: float, look: Vector2) -> void:
+	_integrate(dt, look)
+	_look_done = true
+
+func _integrate(dt: float, look: Vector2) -> void:
+	yaw = wrapf(yaw - look.x * dt, -PI, PI)
+	pitch = clampf(pitch + look.y * dt, -pitch_limit, pitch_limit)
+
 ## Once per physics tick after the player moved. look: rad/s (x = turn right, y = up). Returns the frame plus
 ## body_alpha (0 when the lens is inside the head) and blend (1 = settled in the requested shot).
 func tick(dt: float, _eye: Vector3, look: Vector2, _water_y: float) -> Dictionary:
 	t += dt
-	yaw = wrapf(yaw - look.x * dt, -PI, PI)
-	pitch = clampf(pitch + look.y * dt, -pitch_limit, pitch_limit)
+	if not _look_done: _integrate(dt, look)
+	_look_done = false
 	var tp := not (shot == "first_person" or shot == "observe")
 	last_frame = body.motor.swimmer.get_actor_frame(t)
 	var env := {}

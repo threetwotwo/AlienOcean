@@ -1,4 +1,4 @@
-// Sea seen from below 0.3.0 (water surface thread; 0.2.0 engine thread's stand-in): the ported lagoon underside,
+// Sea seen from below 0.3.1 (water surface thread; 0.2.0 engine thread's stand-in): the ported lagoon underside,
 // lagoonwater v98 WINDOW_HLSL with its saved settings (UnderPhys 1, SunPhys 1, SkyFree 1, Fringe 0, SunTrue 0,
 // Mirror 1, FloorNet 8 = the net as its mean in the mirror), on the FFT sea (look/sea_waves.gdshaderinc).
 //  Snell's window: the share of the pixel's wave facets inside the critical angle (their slope spread + the pixel),
@@ -9,6 +9,8 @@
 // Opaque (cull_front: the mesh's back faces are what the eye sees from below), so look/underwater_view.gdshader adds
 // the eye's own water path to the surface as to everything else. Values in nits x exposure.
 // The mirror's floor comes from adapters/godot/sea_floor_map.gd (colour and top height under the eye, from above).
+// 0.3.1 (27 Nov, storm stress test): past the critical angle the refracted ray is held at the grazing ray instead of
+// snapping to straight up (v98 did the same snap; on calm water it never showed, on storm waves it drew hard blobs).
 shader_type spatial;
 render_mode unshaded, cull_front, world_vertex_coords, fog_disabled, shadows_disabled;
 #include "res://look/water_physics.gdshaderinc"
@@ -17,6 +19,7 @@ render_mode unshaded, cull_front, world_vertex_coords, fog_disabled, shadows_dis
 #include "res://look/sea_waves.gdshaderinc"
 global uniform vec3 water_sun_air;      // toward the key body in air (Godot y-up)
 global uniform float water_sun_lux;     // its beam, lux on a surface facing it
+#include "res://look/sea_foam_shade.gdshaderinc"   // the whitecaps' look (after the lines above: it uses them)
 uniform float nq = 32.0;                // quads per ring (the mesh's)
 uniform float fine3 = 1.0;              // v89: the finest cascade, underside only
 uniform float sun_size = 1.0;           // x the real sun's disc (0.533 deg)
@@ -87,9 +90,12 @@ void fragment() {
 	float rs = (1.33 * cie - ctp) / (1.33 * cie + ctp + 1e-6);
 	float rp = (1.33 * ctp - cie) / (1.33 * ctp + cie + 1e-6);
 	float tr = clamp(1.0 - 0.5 * (rs * rs + rp * rp), 0.0, 1.0) * cov;
-	vec3 T = refract(I, Nm, 1.33);
-	float tok = (dot(T, T) > 1e-4) ? 1.0 : 0.0;           // 0 = past the critical angle at the mean normal
-	vec3 Tn = normalize(mix(vec3(0.0, 0.0, 1.0), T, tok));
+	// the refracted ray; past the critical angle at the mean normal it stays at the grazing ray (refract with k held at
+	// 0) instead of jumping to straight up: on storm waves the jump drew hard posterised blobs at the window's edge
+	// (critique 27 Nov). Inside the window this is refract() exactly; the window's own edge is still cov's.
+	float cni = dot(Nm, I);
+	vec3 Tn = normalize(1.33 * I - (1.33 * cni + sqrt(max(1.0 - 1.7689 * (1.0 - cni * cni), 0.0))) * Nm);
+	float tok = 1.0;
 	// the sky along the refracted ray, x n^2 (v92 SkyFree 1: the sky's own brightness)
 	acc += tr * sky_dome_nits(sea_gdt(Tn)) * 1.776889;
 	{   // v24: the sun through the facets, its disc widened by the facets' spread
@@ -100,6 +106,9 @@ void fragment() {
 		float up = step(0.0, water_sun_air.y);
 		acc += up * tok * tr * vec3(1.0, 0.97, 0.9) * (1.7689 * water_sun_lux / (6.2831853 * s2_i)) * exp(-0.5 * ang_i * ang_i / s2_i);
 	}
+	// the whitecaps from below (tank v374): foam lets dull daylight through in place of the window's sky and sun
+	SeaFoam fo = sea_foam_read(still, wi, cam, nq, TIME);
+	acc = sea_foam_under_window(fo, acc);
 	// the mirror (v67 UnderPhys): the water's glow along the reflected ray + the floor where it lands. v73 (S-B): where the
 	// ray really lands, marched over the floor map (6 steps, then the crossing interpolated), within 30 m and where the
 	// mirror counts (R > 0.06); its colour from the map. Outside the map: the still floor (v67's site depth).
@@ -134,5 +143,6 @@ void fragment() {
 	vec3 glow = w_glow(rg, 0.0, uL);
 	vec3 u_mir = glow + f_lit * exp(-c * uL);
 	acc += (1.0 - tr) * mirror_k * u_mir;
+	acc = sea_foam_under_haze(fo, acc);                     // the bubble cloud under breaking water: a bright haze
 	ALBEDO = min(acc * water_exposure, vec3(30000.0));
 }

@@ -13,6 +13,9 @@ day the milestone was reached.
   trevally lands. Supersedes the parked Unreal school lab (schools/, schoollab v1-v87) as the live school system.
   Thalassa v20.19's social behaviours ported on top (calm-diver circling, silent-observation ring, ride escort,
   roll law); checks S11-S12.
+  Schools draw the maker's export (trevally caranx_melampygus: LOD meshes, materials, swim wave from glTF extras,
+  check S14). Export r2 adopted: three swim envelopes (1.45, 2.175, 2.9 BL/s) blended by each fish's speed in the
+  shader, beat from the envelopes' measured rates, and burst-and-coast (2 beats then a glide) below steady.U_min.
 - Creature maker moves into the repo as stage modules (creatures/maker/, tool version 0.3.0-dev): record, form, chart,
   cage features (template, eye, mouth, gill, finish), UV, maps, fins, Blender export, checks, board. Output is
   byte-identical to the last fish-restart proof script. Real openings: mouth, throat and both gill passages are topology

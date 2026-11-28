@@ -1,5 +1,5 @@
 {
- "version": "0.6.0",
+ "version": "0.7.0",
  "name": "lagoon_keyframe",
  "intent": "The approved key frame (15 Nov, Blender) as a place in the open-world lagoon: a weathered head with a gate (focal point, upper left third), warm coral heads leading in from the near sand (table coral as the colour accent), the grown meadow framing the right edge, open sand and a clear blue lane for the fish school. Restrained, Japanese garden: three rock masses (focal arch, one behind, one far), five coral heads, one meadow bed, the rest is sand and water.",
  "frame": "key frame layout metres (Blender: x right, y forward, z up). godot = anchor_yaw * (x, z, -y) + anchor",
@@ -31,6 +31,32 @@
     "SB_Bommie_0_v18c_apron",
     "SB_Skirt_0_v18c"
    ]
+  },
+  {
+   "p": "SB_Bommie_0",
+   "at": [
+    -3.4,
+    6.9,
+    -0.4
+   ],
+   "rot": 3.52,
+   "role": "mid-ground head in front of the arch's left foot (the key frame's own near head, kit b0)",
+   "with": "SB_Skirt_0",
+   "why": "r9 SILHOUETTE (Gary kept the arch's form 28 Nov 01:30Z; Fable r7c: the massif floats, an empty sand band between its foot and the corals): the key frame's massif was two kit heads stacked in depth (layout.json b0 at 4.7 m in front of b3 at 12.5 m), so its foot overlapped the corals. Same relation here with the kit's own heads in the mid-ground, overlapping the arch's foot in frame, the gate left clear: at ~25 % of the frame width, 10 m; r9b (Fable r9: equal mushrooms bracketing the gate read as kit stamping, and the near layer still unlinked): nearer at 7.6 m, x1.3, stem sunk 0.4 m, turned 70 deg, so its base overlaps the coral group's tops",
+   "s": 1.3
+  },
+  {
+   "p": "SB_Bommie_4",
+   "at": [
+    -0.13,
+    11.0,
+    -0.15
+   ],
+   "rot": 4.0,
+   "role": "low head before the arch's right leg",
+   "with": "SB_Skirt_4",
+   "why": "r9 SILHOUETTE (Gary kept the arch's form 28 Nov 01:30Z; Fable r7c: the massif floats, an empty sand band between its foot and the corals): the key frame's massif was two kit heads stacked in depth (layout.json b0 at 4.7 m in front of b3 at 12.5 m), so its foot overlapped the corals. Same relation here with the kit's own heads in the mid-ground, overlapping the arch's foot in frame, the gate left clear: at ~55 % of the frame width, 11 m, right of the gate; r9b: x0.6 and sunk 0.15 m to a low boulder (lopsided mass, heavy left, as the key frame)",
+   "s": 0.6
   },
   {
    "p": "SB_Bommie_2",

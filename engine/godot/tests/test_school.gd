@@ -60,6 +60,7 @@ func _inside_rock(p: Vector3) -> bool:
 func _school(id: String, n: int, sd: int, home: Vector3, tether: bool, threaded := false) -> FishSchool:
 	var s := FishSchool.new()
 	s.species_id = id; s.count = n; s.seed_ = sd; s.home = home; s.tethered = tether; s.threaded = threaded
+	s.use_asset = false        # checks run on the record's body length (assets are gitignored); films use the export
 	s.process_mode = Node.PROCESS_MODE_DISABLED
 	world.add_child(s)
 	if fault:
@@ -333,6 +334,43 @@ func _run() -> void:
 		var inv := _invariants(rec, sim.p)
 		_add("S13", "ride escort (Thalassa): fish keep with the ridden manta (within 14.5 m, heading its way), none inside its body or startled", float(near) / sim.N >= 0.7 and follow >= 0.7 and dmin >= 1.2 and rec.startled_max <= int(0.05 * sim.N) and inv.S4 and inv.S5,
 			{"near": snappedf(float(near) / sim.N, 0.01), "heading_with_it": snappedf(follow, 0.01), "min_dist_m": snappedf(dmin, 0.01), "startled_max": rec.startled_max})
+	# S14: the creature maker's export in the school (when its gitignored glbs are present; else reported as skipped)
+	if _want("S14"):
+		var CM = load("res://fish/creature_school_mesh.gd")
+		var aid: String = Species.params("trevally").get("asset", "")
+		if not CM.available(aid):
+			print("SKIP  S14 export %s not present (assets are gitignored; fetch per assets.lock.json)" % aid)
+		else:
+			var a: Dictionary = CM.load_species(aid)
+			var ok: bool = a.meshes.size() == 3
+			var snout := INF; var tail := -INF
+			var m0: ArrayMesh = a.meshes[0]
+			var vs: PackedVector3Array = m0.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+			for q in vs: snout = minf(snout, 0.5 - q.x); tail = maxf(tail, 0.5 - q.x)
+			# beat: the measured (U, beat_Hz) of each r2 envelope, and the record's beat f at its cruise U_rec
+			var sw: Dictionary = a.swim
+			var beat_err := 0.0
+			for e in sw.wave.get("envelopes_by_speed", []): beat_err = maxf(beat_err, absf(CM.beat_hz(sw, float(e.U_BLps)) - float(e.beat_Hz)))
+			var f_rec: float = CM.beat_hz(sw, float(sw.steady.U_rec_BLps))
+			beat_err = maxf(beat_err, absf(f_rec - float(sw.record_motion.f)))
+			# burst-and-coast below U_min (r2 rule): a slow fish (v = U_min / 2) beats then glides, about half the time,
+			# on the U_min table; a cruising fish (2 BL/s) beats all the time on its own speed's table
+			var nd := FishSchool.new(); nd.asset = a; nd._draw_dt = 1.0 / 60.0
+			nd._d_s = PackedFloat64Array([0.0, 0.0]); nd._swim_ph = PackedFloat64Array([0.0, 0.0])
+			nd._bc_t = PackedFloat64Array([0.0, 0.0]); nd._bc_k = PackedFloat64Array([1.0, 1.0])
+			var um: float = CM.u_min(sw)
+			var glide := [0, 0]; var ub := [0.0, 0.0]; var steps := 600
+			for t in steps:
+				for j in 2:
+					ub[j] = nd._swim_drive(j, [0.5 * um, 2.0][j])
+					if nd._bc_k[j] < 0.1: glide[j] += 1
+			nd.free()
+			var g0 := float(glide[0]) / steps; var g1 := float(glide[1]) / steps
+			ok = ok and absf(a.bl_m - float(sw.body_length_m)) < 1e-4 and absf(snout) < 0.01 and absf(tail - 1.0) < 0.01 and beat_err < 1e-3
+			ok = ok and g0 >= 0.25 and g0 <= 0.6 and g1 == 0.0 and absf(ub[0] - um) < 1e-6 and absf(ub[1] - 2.0) < 1e-6
+			_add("S14", "maker export in the school: 3 LODs, body length from the glb, snout at s 0 and tail at s 1, beat at each envelope speed and the record's cruise; below U_min it beats then glides (r2)", ok,
+				{"bl_m": a.bl_m, "body_s_range": [snappedf(snout, 0.001), snappedf(tail, 0.001)], "beat_err_Hz": snappedf(beat_err, 0.0001), "f_at_U_rec": snappedf(f_rec, 0.0001),
+				 "glide_frac_slow": snappedf(g0, 0.01), "glide_frac_cruise": g1, "surfaces": [a.meshes[0].get_surface_count(), a.meshes[1].get_surface_count(), a.meshes[2].get_surface_count()]})
 	# S10: cost (cloud CPU; the Mac's P-cores are faster)
 	if _want("S10"):
 		_new_world(); await _settle_physics()

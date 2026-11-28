@@ -53,7 +53,11 @@ def adapt(path, style=None):
     SL = float(get(R, 'outline.end')); f = 1.0 / SL
     def P(name, src): prov.append(dict(input=name, source=src))
     O = R['outline']
-    out = dict(species=D.get('species'), label=get(R, 'name', '', need=False), SL_mm=float(get(R, 'SL', SL, need=False)))
+    # real size: record.size.SL_mm (measured standard length of an adult); record.SL is the outline length in record
+    # units on older records, so it is only the fallback, listed as a DEFAULT row when used
+    sl_mm = get(R, 'size.SL_mm', None, need=False)
+    if sl_mm is None: sl_mm = get(R, 'SL', SL, need=False); DEFAULTS.append(dict(input='size.SL_mm', source='DEFAULT', value=f'record.SL ({sl_mm}), outline units, not mm'))
+    out = dict(species=D.get('species'), label=get(R, 'name', '', need=False), SL_mm=float(sl_mm))
     sc = lambda tab: [[a * f, b * f] for a, b in tab]
     out['outline'] = dict(top=sc(O['top']), bot=sc(O['bot']), hw=sc(O['hw']),
                           nUp=[[a * f, b] for a, b in O['nUp']], nLo=[[a * f, b] for a, b in O['nLo']])
@@ -68,11 +72,38 @@ def adapt(path, style=None):
     G = R['skeleton']['gills']
     margin = [[a * f, b * f] for a, b in G['opercle']['margin']]
     sub = [[p[0] * f, p[1] * f] for p in dget(G, 'subopercle', [], 'skeleton.gills')]
-    rear = margin + [p for p in sub[::-1] if p[1] < margin[-1][1]]       # cover free edge: opercle margin then subopercle
-    rear = sorted(rear, key=lambda p: -p[1])
+    if sub and math.dist(sub[0], margin[-1]) < math.dist(sub[-1], margin[-1]): sub = sub[::-1]   # either order: walk away from the margin
+    sub = sub[::-1]
+    # cover free edge, side part: opercle margin, then the subopercle down to the cover's lower corner, where it turns to run
+    # more forward than down. The forward part is the ventral margin (it scrambled a y-sorted rear edge; and on a deep belly
+    # the subopercle's lowest point is its front end, not the corner)
+    k = next((m for m in range(1, len(sub) - 1) if sub[m + 1][0] - sub[m][0] < -abs(sub[m + 1][1] - sub[m][1])), len(sub) - 1)
+    rear = sorted(margin + [p for p in sub[:k + 1] if p[1] < margin[-1][1]], key=lambda p: -p[1])
     preop = [[p[0] * f, p[1] * f] for p in G['preopercle']]
     out['cover'] = dict(rear=rear, preop=preop, step=float(get(R, 'skeleton.gills.step', 0.006 * SL, need=False)) * f)
-    P('opercle plate', 'record.skeleton.gills.opercle.margin + subopercle'); P('preopercle plate', 'record.skeleton.gills.preopercle')
+    # the slit's ring is taken from the whole free edge, ventral margin too: from the side part alone it fell one ring
+    # further back on deep bodies, where the flap crossed the body skin
+    out['cover']['edge_all'] = sorted(margin + [p for p in sub if p[1] < margin[-1][1]], key=lambda p: -p[1])
+    P('opercle plate', 'record.skeleton.gills.opercle.margin + subopercle (to the lower corner)'); P('preopercle plate', 'record.skeleton.gills.preopercle')
+    # under the head the free edge runs on forward (subopercle, interopercle, branchiostegal membrane) and ends on the
+    # isthmus at the interopercle's front end: the apex of the gill V
+    io = [p[0] * f for p in dget(G, 'interopercle', [], 'skeleton.gills')]
+    out['cover']['apex_x'] = min(io) if io else None
+    if io: P('gill V: apex', 'record.skeleton.gills.interopercle (front end)')
+    # branchiostegal fan {n, th0, dth}: ray k ends at angle th0 + k dth round the section (degrees, 0 = flank, -90 = ventral
+    # midline; the section scaled to its half-width). The first ray is the membrane's inner end: 90 + th0 is the isthmus
+    # half-angle. The last ray is where the membrane starts under the cover. (t0, dt, u1, du lie inside the head: not used.)
+    BS = dget(G, 'branchiostegals', {}, 'skeleton.gills')
+    th0, dth, nbs = (float(dget(BS, k_, v_, 'skeleton.gills.branchiostegals')) for k_, v_ in (('th0', -70), ('dth', 9), ('n', 6)))
+    out['cover']['isthmus_deg'] = float(np.clip(90 + th0, 5, 45)); out['cover']['membrane_top_deg'] = float(min(-th0 - (nbs - 1) * dth, 80))
+    P('gill V: isthmus and membrane angles', 'record.skeleton.gills.branchiostegals th0, dth, n')
+    # lower jaw from below: the ramus runs between the dentary line (outer) and the mandible's lower edge (inner), [x, y, z]
+    J = R.get('jaw') or {}; dn, lo = J.get('dentary'), J.get('mandibleLow')
+    out['jaw'] = dict(dentary=[[v * f for v in p] for p in dn] if dn else None, low=[[v * f for v in p] for p in lo] if lo else None)
+    if not dn: DEFAULTS.append(dict(input='jaw.dentary', source='DEFAULT', value='mouth tip to jaw joint, on the skin'))
+    if not lo: DEFAULTS.append(dict(input='jaw.mandibleLow', source='DEFAULT', value='half the dentary width, meeting at the chin'))
+    if not io: DEFAULTS.append(dict(input='skeleton.gills.interopercle (apex of the gill V)', source='DEFAULT', value='jaw joint x'))
+    if dn: P('lower-jaw V (rami)', 'record.jaw.dentary + jaw.mandibleLow')
     out['gill_u'] = float(get(R, 'gill.u')) * f
     # jaw joint (quadrate-articular) and opercle hinge: the pivots for the gape and gill-flare poses
     xr, yr = seam[-1]; ml_ = seam[-1, 0] - seam[0, 0]
@@ -166,7 +197,12 @@ def stylize(out, style, P):
     ml = np.array(out['mouth']['line']); tip = ml[np.argmin(ml[:, 0])]
     out['mouth']['line'] = (tip + k * (ml - tip)).tolist(); out['mouth']['maxilla_h'] *= k
     out['jaw_joint'] = (tip + k * (np.array(out['jaw_joint']) - tip)).tolist()
+    for key in ('dentary', 'low'):                        # the rami follow the mouth
+        if out['jaw'][key]: out['jaw'][key] = [list(tip + k * (np.array(p[:2]) - tip)) + [p[2]] for p in out['jaw'][key]]
+    if out['cover']['apex_x'] is not None: out['cover']['apex_x'] = max(out['cover']['apex_x'], out['jaw_joint'][0])
     k = float(style.get('girth', 1.0)); out['outline']['hw'] = [[a, b * k] for a, b in out['outline']['hw']]
+    for key in ('dentary', 'low'):
+        if out['jaw'][key]: out['jaw'][key] = [[p[0], p[1], p[2] * k] for p in out['jaw'][key]]
     out['style'] = {k_: float(v) for k_, v in style.items()}
     P('style deviation', 'command line --style ' + ','.join(f'{k_}={v}' for k_, v in sorted(style.items())))
 

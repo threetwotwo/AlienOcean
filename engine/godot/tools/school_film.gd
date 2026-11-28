@@ -104,6 +104,15 @@ func _setup():
 				var c: Vector3 = st.a if st.set else s2.sim.metrics().centre_m
 				return [c + Vector3(-1.0, 1.2, 7.0), c + Vector3(-0.5, 0.0, 0.0)]
 			dur = 10.0
+		"close":
+			var s4 := _school("trevally", 0, 5, home + Vector3(0.0, 0.8, 0.0), true, {})
+			# a close look at the school (checks the creature export's mesh, material and swim wave in the school)
+			path = func(tt: float) -> Vector3: return home + Vector3(-30.0, 0.0, 0.0)
+			cam_path = func(tt: float) -> Array:
+				var c: Vector3 = s4.sim.metrics().centre_m
+				var k: float = s4.params.bl_m / 0.17       # framed for a 17 cm fish; scaled to the export's body length
+				return [c + Vector3(-0.4, 0.25, 1.6) * k, c]
+			dur = 6.0
 		"circle":
 			var s3 := _school("trevally", 0, 4, home + Vector3(0.0, 0.8, 0.0), true, {"back_colour": Color(0.16, 0.26, 0.30), "flank_colour": Color(0.80, 0.84, 0.86)})
 			# she drifts in slowly and hovers: curious trevally circle her (Thalassa calm-diver behaviour)
