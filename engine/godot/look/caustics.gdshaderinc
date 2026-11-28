@@ -19,6 +19,12 @@ const float CAUS_S = 0.90;             // live Unreal strength: CausticStrength 
 const float CAUS_HEADROOM = 2.0;       // live Unreal CausticHeadroom: the light function's ceiling, x plain sun
 const float CAUS_MASK_M = 0.30;        // the light function fades in over the first 30 cm under the still surface
 const float CAUS_TB_CELL = 7.0;        // v98 TB_CELL_M: the tile-break patches, m
+// Past the deepest map layer the net is not held at that layer's contrast for ever (a 30 m slope used to get the 5 m net at full
+// strength): the light spread over the sun's disc and the unresolved short waves (key frame v7c's lens spread, p50 1.1 deg) blurs
+// the net's cells (about 25 cm at 5 m) once depth x spread passes their size, so its swing falls as 1 / sqrt(1 + (dz / L)^2),
+// L = cell / spread = 0.25 / 0.0192 = 13 m: 0.7 at 18 m, 0.45 at 30 m, 0.25 at 60 m (Gary 28 Nov: clear in the shallow lagoon,
+// a natural fade toward open water, not noisy).
+const float CAUS_FADE_M = 13.0;
 
 // ---- v98's tile break: three copies of the tile (turned 0, 36.9, 73.7 deg and shifted), weighted by patches of 7 m
 float caus_tb_w(vec2 x, float v) {
@@ -119,7 +125,8 @@ float caustic_net(vec3 wpos, float depth, vec3 sun_w, float pixel_m, float time_
 	}
 	s = max(s, vec3(0.0));
 	float c = nw < 1.0 ? mix(s.r, s.g, nw) : mix(s.g, s.b, nw - 1.0);
-	return mix(1.0, c, clamp(depth / CAUS_D0, 0.0, 1.0));
+	float dz = max(depth - CAUS_DEPTHS[2], 0.0) / CAUS_FADE_M;
+	return mix(1.0, c, clamp(depth / CAUS_D0, 0.0, 1.0) * inversesqrt(1.0 + dz * dz));
 }
 // The sun's light function (Unreal M_LW_LF_Caustics): S = (CausticStrength + CausticPerStop x ExposureBias) x NetK,
 // under water only, never over the headroom. net_k 1 = the saved Unreal picture.

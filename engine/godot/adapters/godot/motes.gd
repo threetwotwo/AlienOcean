@@ -13,7 +13,7 @@ const SWELL_HS := 0.03                    # m (SeaSpectrum.LAGOON swell_hs)
 const SWELL_TP := 12.0                    # s (swell_tp)
 const SWELL_DEG := 40.0                   # heading (swell_deg)
 const WIND_DEG := 30.0                    # (wind_deg)
-const DEPTH := 4.0                        # m, the lagoon's mean depth
+const DEPTH := LagoonWaterField.SURFACE_Y # m, the lagoon's mean depth (sand at y 0)
 
 @export var density := 20.0               # Unreal MoteDensity (v21)
 var _t := 0.0
