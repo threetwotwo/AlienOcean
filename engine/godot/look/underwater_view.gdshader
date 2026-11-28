@@ -10,6 +10,7 @@ render_mode unshaded, cull_disabled, depth_draw_never, depth_test_disabled, fog_
 #include "res://look/water_physics.gdshaderinc"
 #include "res://look/caustics.gdshaderinc"
 #include "res://look/god_rays.gdshaderinc"
+#include "res://look/sea_bathy.gdshaderinc"
 
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
@@ -33,6 +34,7 @@ void fragment() {
 		vec3 d = normalize((INV_VIEW_MATRIX * vec4(vp.xyz, 0.0)).xyz);
 		vec3 c = water_a + water_b;
 		float z0 = water_y - cam.y;
+		float ocean = sea_bathy_ss(20.0, 120.0, sea_bathy_depth(cam.xz));   // past the reef: the open ocean's water (as sea_top)
 		vec3 glow;
 		if (depth <= 1e-7) {
 			// no geometry on this ray (depth at the far plane: reversed z 0). Is there a floor under it? Not when the eye is below
@@ -49,7 +51,7 @@ void fragment() {
 				L = min(fd, L); scene = w_floor_nits() * water_exposure; glow = w_glow(d, z0, L);
 			} else if (!has_floor) {
 				// the abyss: endless water, its own light field (Unreal M_OO_Abyss DEEP), nothing behind it
-				scene = vec3(0.0); glow = w_deep(d, z0, 1e4);
+				scene = vec3(0.0); glow = w_deep_o(d, z0, 1e4, ocean);
 			} else glow = w_glow(d, z0, L);
 		} else {
 			// a ray that ends below the lagoon floor (down a reef wall, a fore-reef slope 50-150 m down) sees mostly water column, not
@@ -58,7 +60,7 @@ void fragment() {
 			float zend = z0 + max(-d.y, 0.0) * L;
 			float kd = clamp((zend - (water_y - water_floor_y)) / 10.0, 0.0, 1.0);
 			glow = w_glow(d, z0, L);
-			if (kd > 0.0) glow = mix(glow, w_deep(d, z0, L), kd);
+			if (kd > 0.0) glow = mix(glow, w_deep_o(d, z0, L, ocean), kd);
 		}
 		vec3 god = god_k > 0.5 ? god_rays(cam, d, L, FRAGCOORD.xy, god_frame) : vec3(0.0);
 		if (god_k > 1.5) ALBEDO = vec3(0.5 + 0.25 * god_acc(cam, d, L, FRAGCOORD.xy, god_frame));
