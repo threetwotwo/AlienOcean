@@ -40,7 +40,7 @@ void main() {
 		vec3 e[36];
 		for (int j = 0; j < 6; j++) for (int i = 0; i < 6; i++) {
 			vec3 v = texelFetch(src, clamp(b + ivec2(i, j), ivec2(0), sm), 0).rgb;
-			v = mix(v, vec3(0.0), bvec3(isnan(v) || isinf(v)));   // a broken texel (NaN / fp16 overflow) gives no glare
+			v = mix(v, vec3(0.0), bvec3(uvec3(isnan(v)) | uvec3(isinf(v))));   // a broken texel (NaN / fp16 overflow) gives no glare
 			e[j * 6 + i] = clamp(v * pc.b.x * pc.b.yzw - pc.a.w, vec3(0.0), vec3(pc.d.z));
 		}
 		const float tw[4] = float[](0.125, 0.375, 0.375, 0.125);

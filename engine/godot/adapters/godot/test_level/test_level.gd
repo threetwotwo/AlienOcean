@@ -181,8 +181,9 @@ func set_toggle(n: String, on: bool) -> void:
 		"god_rays": wr.god_rays = on
 		"caustics": wr.caustics.enabled = on
 		"agx": wr.set_agx(on)
-		"bloom": if on: wr.set_bloom_style(wr.bloom_style)
-			else: wr.bloom = 0.0   # the key frame's veiling glare in the AgX pass (bloom thread 28 Nov)
+		"bloom":   # the key frame's veiling glare in the AgX pass (bloom thread 28 Nov)
+			if on: wr.set_bloom_style(wr.bloom_style)
+			else: wr.bloom = 0.0
 		"taa": get_viewport().use_taa = on
 		"ssao", "cortao", "gtao", "vbao": _set_ao_toggle(wr, n, on)
 		"ssil": wr.env.ssil_enabled = on

@@ -56,6 +56,8 @@ func _at(part: Array, x: float, y: float) -> float:
 
 func _process(_d: float) -> bool:
 	frame += 1
+	if frame > 600:   # no read-back: the AgX or bloom shader failed to build (see the log)
+		print("BLOOM CHECK: FAIL (no glare read back; shader compile error?)"); quit(1); return false
 	if frame == 6 or (phase == 1 and frame % 3 == 0): fx.dump = true
 	if fx.dumped.is_empty(): return false
 	var d: Dictionary = fx.dumped; fx.dumped = {}

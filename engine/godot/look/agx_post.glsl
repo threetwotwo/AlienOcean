@@ -114,14 +114,14 @@ void main() {
 	// camera veiling glare (bloom): same exposed units as the pyramid's prefilter (look/bloom.glsl)
 	if (P.p6.x > 0.0) {
 		vec3 ex = clamp(c - P.p6.y, vec3(0.0), vec3(P.p6.w));
-		ex = mix(ex, vec3(0.0), bvec3(isnan(c) || isinf(c)));   // as the prefilter: a broken texel gives no glare
+		ex = mix(ex, vec3(0.0), bvec3(uvec3(isnan(c)) | uvec3(isinf(c))));   // as the prefilter: a broken texel gives no glare
 		// the same lone-texel rule as the pyramid's prefilter (neighbours in the same exposed units)
 		float kx = Exposure * exp2(Bias) / max(BufScale, 1e-30);
 		vec3 nb = vec3(0.0);
 		for (int q = 0; q < 4; q++) {
 			ivec2 o4 = q == 0 ? ivec2(1, 0) : q == 1 ? ivec2(-1, 0) : q == 2 ? ivec2(0, 1) : ivec2(0, -1);
 			vec3 bn = texelFetch(color_src, clamp(px + o4, ivec2(0), sz - 1), 0).rgb;
-			bn = mix(bn, vec3(0.0), bvec3(isnan(bn) || isinf(bn)));
+			bn = mix(bn, vec3(0.0), bvec3(uvec3(isnan(bn)) | uvec3(isinf(bn))));
 			nb = max(nb, clamp(bn * kx * max(P.DG.rgb, vec3(0.0)) - P.p6.y, vec3(0.0), vec3(P.p6.w)));
 		}
 		ex = min(ex, max(vec3(P.p8.z), P.p8.w * nb));
