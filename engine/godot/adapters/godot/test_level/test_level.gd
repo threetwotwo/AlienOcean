@@ -149,7 +149,7 @@ func worst_frame_ms(seconds := 10.0) -> float:
 # ---- switches: every one has a getter and a setter, so the test can prove each one returns to where it was ----
 
 func toggle_names() -> Array:
-	return ["sdfgi", "god_rays", "caustics", "agx", "taa", "ssao", "cortao", "gtao", "vbao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider", "bubbles"]
+	return ["sdfgi", "god_rays", "caustics", "agx", "bloom", "taa", "ssao", "cortao", "gtao", "vbao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider", "bubbles"]
 
 func get_toggle(n: String) -> bool:
 	var wr := game.world_root
@@ -158,6 +158,7 @@ func get_toggle(n: String) -> bool:
 		"god_rays": return wr.god_rays
 		"caustics": return wr.caustics.enabled
 		"agx": return wr.agx_fx.enabled
+		"bloom": return wr.bloom > 0.0
 		"taa": return get_viewport().use_taa
 		"ssao": return wr.env.ssao_enabled
 		"cortao": return wr.ao_mode == "cortao"
@@ -182,6 +183,9 @@ func set_toggle(n: String, on: bool) -> void:
 		"god_rays": wr.god_rays = on
 		"caustics": wr.caustics.enabled = on
 		"agx": wr.set_agx(on)
+		"bloom":   # the key frame's veiling glare in the AgX pass (bloom thread 28 Nov)
+			if on: wr.set_bloom_style(wr.bloom_style)
+			else: wr.bloom = 0.0
 		"taa": get_viewport().use_taa = on
 		"ssao", "cortao", "gtao", "vbao": _set_ao_toggle(wr, n, on)
 		"ssil": wr.env.ssil_enabled = on
@@ -370,7 +374,7 @@ func stats() -> Dictionary:
 
 # ---- benchmark (F9 in the panel, or AO_BENCH=1 at start: run_benchmark.command): the cost of each system on this machine ----
 
-const BENCH_SWITCHES := ["ssao", "cortao", "ssil", "shadows", "god_rays", "caustics", "agx", "grass_v2", "sea", "schools", "lagoon", "half_res", "sdfgi"]   # sdfgi last: it rebuilds for seconds after it comes back
+const BENCH_SWITCHES := ["ssao", "cortao", "ssil", "shadows", "god_rays", "caustics", "agx", "bloom", "grass_v2", "sea", "schools", "lagoon", "half_res", "sdfgi"]   # sdfgi last: it rebuilds for seconds after it comes back
 var bench_running := false
 signal bench_done(path: String)
 
