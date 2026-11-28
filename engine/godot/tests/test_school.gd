@@ -372,6 +372,26 @@ func _run() -> void:
 				{"bl_m": a.bl_m, "body_s_range": [snappedf(snout, 0.001), snappedf(tail, 0.001)], "beat_err_Hz": snappedf(beat_err, 0.0001), "f_at_U_rec": snappedf(f_rec, 0.0001),
 				 "glide_frac_slow": snappedf(g0, 0.01), "glide_frac_cruise": g1, "surfaces": [a.meshes[0].get_surface_count(), a.meshes[1].get_surface_count(), a.meshes[2].get_surface_count()]})
 	# S10: cost (cloud CPU; the Mac's P-cores are faster)
+	# S15: drawn upright: the drawn frame (FishSchool.fish_basis) puts the fish's back up for every heading and pitch up
+	# to the species cap, rolls into the turn by no more than the bank cap, and stays right-handed (not mirrored).
+	# The headless renderer keeps no MultiMesh transforms, so the frame function itself is checked. Caught upside-down
+	# schools (28 Nov).
+	if _want("S15"):
+		var worst_up := 1.0; var worst_hand := 1.0; var worst_head := 1.0; var roll_ok := true
+		for a in 24:
+			for pd in [-50.0, -20.0, 0.0, 20.0, 50.0]:
+				var yaw := TAU * a / 24.0; var pr := deg_to_rad(pd)
+				var fwd := Vector3(cos(pr) * cos(yaw), sin(pr), -cos(pr) * sin(yaw))
+				var b0: Basis = FishSchool.fish_basis(fwd, 0.0)
+				worst_up = minf(worst_up, b0.y.dot(Vector3.UP) / cos(pr))
+				worst_hand = minf(worst_hand, b0.x.cross(b0.y).dot(b0.z))
+				worst_head = minf(worst_head, b0.x.dot(fwd))
+				# a left turn (positive bank) rolls the back toward the fish's left; the fish's left is -z in the mesh
+				var bl: Basis = FishSchool.fish_basis(fwd, 0.3)
+				var left: Vector3 = -b0.z
+				roll_ok = roll_ok and bl.y.dot(left) > 0.25 and bl.y.dot(b0.y) > cos(0.3) - 1e-3
+		_add("S15", "fish drawn upright for every heading and pitch, right-handed (not mirrored), rolling into the turn", worst_up > 0.999 and worst_hand > 0.999 and worst_head > 0.999 and roll_ok,
+			{"worst_up": snappedf(worst_up, 0.0001), "handedness": snappedf(worst_hand, 0.0001), "heading": snappedf(worst_head, 0.0001), "roll_into_turn": roll_ok})
 	if _want("S10"):
 		_new_world(); await _settle_physics()
 		var s := _school("lagoon_baitfish", 120, 2, Vector3(0, -6, 0), true, true)

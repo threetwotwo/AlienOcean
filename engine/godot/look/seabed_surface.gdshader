@@ -13,8 +13,8 @@ render_mode blend_mix, cull_back, diffuse_lambert, specular_disabled;
 // Better sand colour lock (SD2, Gary-approved design 14 Nov; passed in Unreal: #cbc8c2 vs lock #cdcac4): bare sand takes the
 // locked colour, darker sorted sand #c8c4bb in the paint's darker patches. Floor pieces only (sand_lock 1).
 uniform float sand_lock : hint_range(0.0, 1.0) = 0.0;
-uniform vec3 sand_c : source_color = vec3(0.804, 0.792, 0.769);    // #cdcac4
-uniform vec3 sand_d : source_color = vec3(0.784, 0.769, 0.733);    // #c8c4bb
+uniform vec3 sand_c : source_color = vec3(0.941, 0.882, 0.753);    // #f0e1c0 (key frame sand, Gary card 28 Nov; was #cdcac4)
+uniform vec3 sand_d : source_color = vec3(0.890, 0.800, 0.635);    // #e3cca2 (was #c8c4bb)
 uniform float roughness_base : hint_range(0.0, 1.0) = 0.92;
 uniform float caustic_strength : hint_range(0.0, 3.0) = 1.0;   // Unreal's NetK: x the saved net strength (1 = the Unreal picture)
 varying vec3 wpos;

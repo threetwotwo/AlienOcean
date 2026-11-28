@@ -273,11 +273,7 @@ func _draw(alpha: float) -> void:
 		var yaw: float = _d_yaw[i]
 		_bank[i] = lerpf(_bank[i], clampf(yaw * 0.22 * bank_gain, -0.40, 0.40), 1.0 - exp(-5.5 * _draw_dt))
 		var bank: float = _bank[i]
-		var side := Vector3.UP.cross(fwd)
-		if side.length() < 1e-4: side = Vector3.FORWARD
-		side = side.normalized()
-		var up := side.cross(fwd).normalized().rotated(fwd, -bank)
-		var basis := Basis(fwd, up, fwd.cross(up).normalized()).scaled(Vector3(r, r, r))
+		var basis := fish_basis(fwd, bank).scaled(Vector3(r, r, r))
 		var mm := _mm[lod].multimesh
 		var k: int = counts[lod]
 		mm.set_instance_transform(k, Transform3D(basis, pos))
@@ -324,6 +320,15 @@ func _swim_drive(i: int, v: float) -> float:
 		_bc_k[i] = lerpf(_bc_k[i], 0.0, 1.0 - exp(-dt / 0.15))
 		if _bc_k[i] > 0.3: _swim_ph[i] = fmod(_swim_ph[i] + TAU * f * dt, TAU)   # finish the stroke, then hold
 	return um
+
+## A fish's drawn frame: x = heading (head toward +x in the mesh), y = its back, rolled by bank (positive rolls the back
+## toward its left, into a left turn), z = x cross y. Upright for a level heading (check S15; it was upside down to 28 Nov).
+static func fish_basis(fwd: Vector3, bank: float) -> Basis:
+	var side := Vector3.UP.cross(fwd)
+	if side.length() < 1e-4: side = Vector3.FORWARD
+	side = side.normalized()
+	var up := fwd.cross(side).normalized().rotated(fwd, -bank)
+	return Basis(fwd, up, fwd.cross(up).normalized())
 
 func metrics() -> Dictionary:
 	return sim.metrics()
