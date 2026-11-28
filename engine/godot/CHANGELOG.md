@@ -1,5 +1,26 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, lagoon dressing): the lagoon dressed like key frame v7c
+- Target: key frame v7c (Gary approved 28 Nov 04:35Z, "Approve, keep A brightness"; papers/process/art_bible/style_level/keyframe/
+  key_frame_v7.png, layout_v7.json). world_dress/lagoon_keyframe.json 1.0.0 is its layout: the v18c arch at (-2.9, 10.6) rot 5.18,
+  the kit heads at their v7 places, a patch rock (SB_Bommie_4 s 0.9, sunk 0.5) under the table and boulder corals, five corals on
+  their v7 spots, the meadow tiles, the v7 school volume (40 trevally) and the two swim lanes kept clear.
+- Corals with "seat": "hard" rest on the rock under them, not the sand (v7 seat_z). Fix in DressCell.seat: the physics space still
+  holds a body where it stood until the next physics step, so a coral seated on a rock moved in the same pass landed on the rock's
+  old place (r10: table and boulder 0.18 m high). The move is added back for a vertical ray; test D6 covers it (13/13 pass).
+- Sunk rocks get the v7 rig's sand bank (habitat.bank, h 0.12) as their own skirt piece (SB_Skirt_4_bank, "bank" in the manifest):
+  without it the patch rock's wide foot stood over the sand as a pancake. Habitat outlines now come from each rock as placed
+  (scale, sink), so the meadow cull and rubble see where it meets the sand.
+- Coral rubble aprons: Debris Maker coral_apron.py v2 on coral_rubble_kit_v3, each piece resting on rock, bank or sand
+  (kf_coral_rubble, one concave collision mesh).
+- Lone seagrass tiles are placed, not kept: recentred on their spot as the rig's add_glb did (kf_<tile>_r), culled for their own
+  place. Before, a lone tile stood at its meadow offset from its spot.
+- Gate camera turned 10 deg left to frame the hole. Fable silhouette read on r12: narrow pass, placement within 5 px of v7 for the
+  arch, far rocks, boulder, staghorn and brain coral; r13 then fixed the table foot (cap height, grey dome under it).
+- Open (not in this change): the meadow reads thinner and stiffer than v7 (the rig bends every blade with kf_grass add_sway; the
+  game meadow's sway and shoots belong to grass_field.gd), rubble scatter tighter than v7, the arch's flat plinth base and clean
+  doorway (arch reshape deferred until the lighting work lands, Gary 28 Nov 01:58Z). Pieces: 29, 1.68 M tris, 437 hulls.
+
 ## 0.6.0-dev (28 Nov 2026, look thread): the GI forgets the old light after a jump in the hour
 - Surface thread report: after the hour slider jumped noon -> 23:00 the lagoon stayed noon-lit (sand, fish blown-out cyan at
   night exposure). Reproduced (shot 09, AO_HOUR 12 then 23 six frames before the shot): frame mean 135/205/210; GI off 6/15/21.

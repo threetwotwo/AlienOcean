@@ -69,6 +69,17 @@ V = Z['V']
 tmp_m = bpy.data.materials.new('bake_tmp'); tmp_m.use_nodes = True
 body = mesh_obj('body', V, C['faces'], C['uv'], tmp_m)
 INT_IDX, INT_SKIP = interior.slot(body, C)     # interior faces off the skin's bake target before anything is baked
+# the skin's shading stops where the skin does: the edges between a skin face and an interior face (the lip rolls, the gill
+# slits' lips) are sharp, so a lip vertex takes its normal from the skin faces only. Averaged with the lining, which turns
+# inward there, the lip normals leaned up to 90 deg into the opening and the bake wrote the opposite lean over every skin face
+# that touches a lip: one large face at the corner of the gill slit carried most of the map's steepest texels and all but one
+# of its specks (export r5).
+_ek = {}
+for _p in body.data.polygons:
+    for _k in _p.edge_keys: _ek.setdefault(_k, set()).add(C['ftag'][_p.index] in interior.INNER)
+SHARP = sum(1 for _e in body.data.edges if len(_ek.get(tuple(sorted(_e.vertices)), ())) == 2)
+if os.environ.get('CREATURE_PLANT_BAKE_FAULT', '') != 'lips_shaded_with_lining':   # tests only: the lean back, to show P6 catches it
+    for _e in body.data.edges: _e.use_edge_sharp = len(_ek.get(tuple(sorted(_e.vertices)), ())) == 2
 # orbit linings (the tuck ring of each eye patch) turn into the socket and lie inside the form by design, up to 1.6 % SL deep,
 # further than the bake cage reaches out: their rays start inside the solid and hit the form's far side from behind. They do not
 # sample the form: they wait on the throwaway slot too, and take a flat tangent normal (the cage's own shading) and the rim's AO.
@@ -161,44 +172,67 @@ for k, f in C['fins'].items():
     fin_obs[k] = mesh_obj('fin_' + k, fv, f['F'], [[fuv[i] for i in q] for q in f['F']], fin_m)
     colour0(fin_obs[k], 1 - 0.85 * np.array(f['T']))   # COLOR_0 R = fin thickness (FUNDAMENTALS: fish exports), root 1 -> edge 0.15
 
-# eyes: iris dome + cornea, 2 shells, sitting in the template's eye opening
+# eyes: three low shells per eye in the cage's eye opening (iris with its pupil pit, lens, cornea window), placed by the
+# cage's eye optics (cage.eye.optics). The look is in the maps and the materials, not the mesh: iris fibres, collarette and
+# limbal step in a normal map; the argentea (the iris mirror) as metal in the ORM map, broken into platelet cells; the
+# pupil pit and the lens black and glossy; the cornea a clear window. Triangle budget: checks EX7.
+IRIS_SEG, LENS_SEG, CORNEA_SEG = 16, 10, 16      # DEFAULTS: segments round each shell. 126 triangles an eye; at the eye's size on a
+                                                 # 10k fish the rim's own ring (the cage, about 30 sides) is the finer silhouette
+IRIS_OVER = 1.04                                 # DEFAULT: the iris root reaches this far under the rim (x eye radius), no gap at a glancing view
+EYE_TEX = 256                                    # DEFAULT: eye maps, pixels a side (an eye is about 1/40 of the body's length)
+EYE_ROUGH = 0.2                                  # DEFAULT: iris roughness (old iris shine designer: rough 0.2)
 def eye_tex():
-    import numpy as np
+    """iris maps in the disc's own coords (uv radius 1 = the iris root). Base = pigment only (the old Eyes finding: a grey
+    "still share" of the mirror baked into colour washed the iris out; the mirror is a material, here metal in ORM)."""
     from PIL import Image
-    R = 256; yy, xx = np.mgrid[0:R, 0:R] / (R - 1) * 2 - 1; r = np.sqrt(xx ** 2 + yy ** 2)
-    iris = np.array(C['eye']['iris']); pup = C['eye']['pupil']
-    a = np.arctan2(yy, xx); streak = 0.85 + 0.15 * np.cos(a * 37) * np.cos(a * 11)
-    col = iris[None, None] * (0.55 + 0.45 * np.clip((r - pup) / (1 - pup), 0, 1)[..., None] ** 0.5) * streak[..., None]
-    col = np.where((r > 0.86)[..., None], col * 0.35, col)                 # limbal ring
-    col = np.where((r < pup)[..., None], 0.01, col)
-    col = col ** (1 / 2.2)
-    Image.fromarray((np.clip(col, 0, 1) * 255).astype(np.uint8)).save(os.path.join(OUT, 'eye_base.png'))
+    R = EYE_TEX; yy, xx = np.mgrid[0:R, 0:R] / (R - 1) * 2 - 1; r = np.sqrt(xx ** 2 + yy ** 2); a = np.arctan2(yy, xx)
+    iris = np.array(C['eye']['iris']); o = C['eyes'][0]['optics']; pup = o['pupil_r'] / (IRIS_OVER * C['eyes'][0]['r'])
+    t = np.clip((r - pup) / (1 - pup), 0, 1)                                  # 0 at the pupil's edge, 1 at the root
+    fib = 0.5 + 0.5 * np.cos(a * 37 + 3 * np.sin(a * 5)) * np.cos(a * 11)     # radial fibres
+    coll = np.exp(-((t - 0.22) / 0.10) ** 2)                                  # collarette: the bright ring near the pupil
+    col = iris[None, None] * (0.55 + 0.30 * t ** 0.5 + 0.30 * coll)[..., None] * (0.8 + 0.2 * fib)[..., None]
+    limb = np.clip((r - 0.90) / 0.05, 0, 1)                                   # thin dark limbal line (old look layout: mirror over most of the iris)
+    col = col * (1 - 0.7 * limb)[..., None]; col = np.where((r < pup)[..., None], 0.004, col)
+    Image.fromarray((np.clip(col, 0, 1) ** (1 / 2.2) * 255).astype(np.uint8)).save(os.path.join(OUT, 'eye_base.png'))
+    # height: fibres as furrows, the collarette a ridge, the limbus a step down to the root, the pupil's edge rolled
+    h = 0.5 * fib * t * (1 - limb) + 0.8 * coll - 0.6 * limb + 0.5 * np.exp(-((r - pup) / 0.03) ** 2)
+    gy, gx = np.gradient(h); k_ = R / 24.0; nrm = np.dstack([-gx * k_, -gy * k_, np.ones_like(h)]); nrm /= np.linalg.norm(nrm, axis=-1, keepdims=True)
+    Image.fromarray(((nrm * 0.5 + 0.5) * 255).astype(np.uint8)).save(os.path.join(OUT, 'eye_normal.png'))
+    # ORM: the mirror share (record paint.eye.silver) as metal over the iris, in platelet cells so it glints unevenly
+    rng = np.random.default_rng(7); cell = rng.random((R // 4, R // 4)).repeat(4, 0).repeat(4, 1)
+    metal = C['eye'].get('silver', 0.42) * (0.3 + 1.4 * cell ** 2) * (r > pup) * (1 - limb)      # mean = the mirror share x 0.77; a few cells flash
+    rough = np.where(r < pup, 0.05, EYE_ROUGH * (0.7 + 0.6 * cell))
+    Image.fromarray((np.dstack([np.ones_like(r), np.clip(rough, 0, 1), np.clip(metal, 0, 1)]) * 255).astype(np.uint8)).save(os.path.join(OUT, 'eye_orm.png'))
 eye_tex()
-eye_m = pbr('eye', image('eye_base', 'eye_base.png')); eye_m.node_tree.nodes['Principled BSDF'].inputs['Roughness'].default_value = 0.25
+eye_m = pbr('eye', image('eye_base', 'eye_base.png'), image('eye_normal', 'eye_normal.png', True), image('eye_orm', 'eye_orm.png', True))
+lens_m = bpy.data.materials.new('eye_lens'); lens_m.use_nodes = True; lb = lens_m.node_tree.nodes['Principled BSDF']
+lb.inputs['Base Color'].default_value = (0.004, 0.004, 0.006, 1); lb.inputs['Roughness'].default_value = 0.05
 cor_m = bpy.data.materials.new('cornea'); cor_m.use_nodes = True; cb = cor_m.node_tree.nodes['Principled BSDF']
 cb.inputs['Roughness'].default_value = 0.02; cb.inputs['Alpha'].default_value = 0.08
 try: cor_m.surface_render_method = 'BLENDED'
 except Exception: pass
-def cap(c, n, r, h, seg=24, rings=5, name='cap', mat=None, uvmap=True):
+def lathe(c, n, prof, seg, name, mat, uv_r):
+    """a shell of revolution round the eye's axis: prof = [(radius, height over the rim plane)] from the outer edge in; a
+    last radius of 0 is a pole. UV = the disc, radius / uv_r."""
     n = np.array(n); c = np.array(c); t = np.cross(n, [0, 1, 0]); t /= np.linalg.norm(t); b = np.cross(n, t)
-    Rs = (r * r + h * h) / (2 * h); ctr = c - n * (Rs - h)
-    vs, uvs = [], []
-    for k in range(rings + 1):
-        al = math.asin(min(r / Rs, 1)) * (1 - k / rings)
+    pole = prof[-1][0] <= 0; rings = prof[:-1] if pole else prof; vs, uvs = [], []
+    for rad, hgt in rings:
         for s in range(seg):
-            ph = 2 * math.pi * s / seg; d = n * math.cos(al) + (t * math.cos(ph) + b * math.sin(ph)) * math.sin(al)
-            vs.append(ctr + Rs * d); rr = math.sin(al) / (r / Rs); uvs.append((0.5 + 0.5 * rr * math.cos(ph), 0.5 + 0.5 * rr * math.sin(ph)))
-    vs.append(c + n * h); uvs.append((0.5, 0.5))
-    fs = [[k * seg + s, k * seg + (s + 1) % seg, (k + 1) * seg + (s + 1) % seg, (k + 1) * seg + s] for k in range(rings - 1) for s in range(seg)]
-    fs += [[(rings - 1) * seg + s, (rings - 1) * seg + (s + 1) % seg, len(vs) - 1] for s in range(seg)]
-    fs = [f for f in fs if True]
-    return mesh_obj(name, vs, [f[::-1] if True else f for f in fs], [[uvs[i] for i in f[::-1]] for f in fs], mat)
+            ph = 2 * math.pi * s / seg; d = t * math.cos(ph) + b * math.sin(ph)
+            vs.append(c + n * hgt + d * rad); rr = min(rad / uv_r, 1.0); uvs.append((0.5 + 0.5 * rr * math.cos(ph), 0.5 + 0.5 * rr * math.sin(ph)))
+    fs = [[k * seg + s, k * seg + (s + 1) % seg, (k + 1) * seg + (s + 1) % seg, (k + 1) * seg + s] for k in range(len(rings) - 1) for s in range(seg)]
+    if pole:
+        vs.append(c + n * prof[-1][1]); uvs.append((0.5, 0.5))
+        fs += [[(len(rings) - 1) * seg + s, (len(rings) - 1) * seg + (s + 1) % seg, len(vs) - 1] for s in range(seg)]
+    return mesh_obj(name, vs, [f[::-1] for f in fs], [[uvs[i] for i in f[::-1]] for f in fs], mat)
 eye_obs = []
 cb.inputs['IOR'].default_value = 1.376     # cornea
 for e in C['eyes']:
-    sd = 'L' if e['side'] > 0 else 'R'
-    eye_obs.append(cap(np.array(e['c']) - np.array(e['n']) * 0.004, e['n'], e['r'] * 1.12, e['r'] * 0.30, name='eye_iris_' + sd, mat=eye_m))
-    eye_obs.append(cap(np.array(e['c']) - np.array(e['n']) * 0.002, e['n'], e['r'] * 1.14, e['r'] * 0.45, name='eye_cornea_' + sd, mat=cor_m))
+    sd = 'L' if e['side'] > 0 else 'R'; o = e['optics']; r = e['r']; rL, zL, sag = o['lens_r'], o['lens_z'], o['cornea_sag']
+    eye_obs.append(lathe(e['c'], e['n'], [(IRIS_OVER * r, o['iris_seat']), (o['pupil_r'], o['iris_z']), (0, o['iris_z'] - 0.3 * rL)], IRIS_SEG, 'eye_iris_' + sd, eye_m, IRIS_OVER * r))
+    eye_obs.append(lathe(e['c'], e['n'], [(rL, zL), (rL * math.cos(math.pi / 4), zL + rL * math.sin(math.pi / 4)), (0, zL + rL)], LENS_SEG, 'eye_lens_' + sd, lens_m, rL))
+    Rs = (r * r + sag * sag) / (2 * sag); mid = r * math.sqrt(0.5)                 # the window: a low cap of a sphere on the rim
+    eye_obs.append(lathe(e['c'], e['n'], [(r, 0.0), (mid, math.sqrt(Rs * Rs - mid * mid) - (Rs - sag)), (0, sag)], CORNEA_SEG, 'eye_cornea_' + sd, cor_m, r))
 for ob in eye_obs:
     for p in ob.data.polygons: p.flip()
     colour0(ob, np.ones(len(ob.data.vertices)))
@@ -350,6 +384,7 @@ json.dump(dict(SW['extras']), open(os.path.join(OUT, 'swim.json'), 'w'), indent=
 stats = dict(glb_kb=round(os.path.getsize(glb) / 1024), objects=len([o for o in LOD0 if o.type == 'MESH' and not o.name.startswith('col_')]))
 stats['tris_total'] = tris_of(LOD0); stats['normal_specks_fixed'] = SPECKS_FIXED; stats['bones'] = len(rig.data.bones); stats['lods'] = lods; stats['lod_chain'] = SW['extras']['lod_chain']; stats['blender_bake_s'] = bake_s
 stats.update(INT_STATS); stats.update(RIG_INFO); stats.update(EXS)
+stats['eye_shell_tris'] = tris_of(eye_obs); stats['eye_patch_tris'] = sum(len(f) - 2 for f, t in zip(C['faces'], C['ftag']) if t == 'eye')
 stats['clips'] = {n: dict(loop=v['loop']) for n, v in anim_x.items()}; stats['swim_loop_closure_BL'] = SW['loop_err']
 stats['collision'] = dict(hulls=len(HUL), coverage=round(cov, 4), hull_over_form_volume=round(vol, 3), verts=[len(h[0]) for h in HUL], bones=[f'spine_{h[2]:02d}' for h in HUL])
 json.dump(stats, open(os.path.join(OUT, 'glb_stats.json'), 'w'), default=float); print('EXPORT', stats)
