@@ -27,8 +27,12 @@ const MAX_STEP := 1.0 / 55.0     # longest rig step; a longer frame is caught up
 const SWIM_ANKLE_RATE := 6.0
 var swim_ankle_rel := {}
 var swing_floor := {"L": NAN, "R": NAN}
+var pelv_yaw_off := 0.0     # pelvis held back by a planted foot's hip rotation range (fast turns)
 var support_dg := 0.0     # pelvis ground from the feet's support minus the floor under her centre (stairs)
 var pelvis_yield := 0.0     # how far the pelvis is lowered so a planted foot stays reachable
+var land_drop := {"L": 0.0, "R": 0.0}     # a foot that touched down above where it stands settles, not snaps
+var last_ank := {"L": NAN, "R": NAN}
+var last_stepping := {"L": false, "R": false}
 var land_age := {"L": 0.0, "R": 0.0}     # seconds each foot has been planted
 const FOOT_R := 0.035       # foot half-width used for wall clearance
 ## The sole plate's heel, ball-centre and toe ends plus its four corners in the foot frame (the mannequin's sole box:
@@ -1008,6 +1012,32 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		"getFloorHeight": get_floor, "crouchBlend": s.shore_crouch_blend,
 		"colliders": sense.get("colliders") if sense != null else null, "pois": sense.get("pois") if sense != null else null})
 	var pelv_yaw: float = yaw + loco.pelvisYaw
+	if not thalassa_exact and not OS.has_environment("NO_YAWLAG"):
+		# ROOT (stress monkey slips): a planted foot can't turn, and the hip rotates only int 0.20 / ext 0.48 rad over
+		# it (plus a little ankle). Turning faster than the steps come, the leg solver twisted the planted foot on the
+		# ground (ball moving 5-12 cm, ankle still). A body keeps the pelvis with the stance foot and lets the spine take
+		# the turn: the pelvis yaw is held inside every planted foot's range and catches up once that foot lifts
+		var off := lerpf(pelv_yaw_off, 0.0, BM.expk(9.0, sdt))
+		if not s.shore_is_airborne:
+			var lo := -INF; var hi := INF
+			for sd in [-1.0, 1.0]:
+				var fq: Dictionary = loco.footL if sd < 0.0 else loco.footR
+				var fo: Dictionary = loco.footR if sd < 0.0 else loco.footL
+				if fq.stepping or not fo.stepping: continue     # with both feet down the foot steps (rotation request)
+				var d := BM.wrap_pi(pelv_yaw - fq.yaw)     # pelvis yaw from the foot; trn = side * d
+				var r_lo := (-0.48 - 0.08) if sd < 0.0 else (-0.20 - 0.08)
+				var r_hi := (0.20 + 0.08) if sd < 0.0 else (0.48 + 0.08)
+				lo = maxf(lo, r_lo - d); hi = minf(hi, r_hi - d)
+			var want := off
+			if lo <= hi: want = clampf(off, lo, hi)
+			elif is_finite(lo): want = (lo + hi) * 0.5
+			# taken up at most 6 rad/s: the range keeps 0.08 rad of ankle twist in hand for it, and a hold that came on
+			# in one tick (the other foot lifting) popped the knee (stress B35 at 120 Hz)
+			off = move_toward(off, want, 6.0 * sdt)
+		pelv_yaw_off = clampf(off, -0.7, 0.7)
+		pelv_yaw += pelv_yaw_off
+	else:
+		pelv_yaw_off = 0.0
 	var pelv_fwd := Vector3(-sin(pelv_yaw), 0, -cos(pelv_yaw))
 	var pelv_right_base := Vector3(cos(pelv_yaw), 0, -sin(pelv_yaw))
 	var pelv_back := -pelv_fwd
@@ -1136,7 +1166,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 						var pp := Vector3(fx, 0, fz) + tdir * minf(left, k * 0.05)
 						for off in [-0.03, 0.07, 0.17]:
 							var g_h: float = get_floor.call(pp.x + ffw.x * off, pp.z + ffw.z * off)
-							if is_finite(g_h) and g_h - f0 < 0.36 and g_h <= f1 + 0.02: tgt_floor = maxf(tgt_floor, g_h)
+							if is_finite(g_h) and g_h - f0 < 0.36 and g_h <= maxf(f0, f1) + 0.02: tgt_floor = maxf(tgt_floor, g_h)     # stepping down, the tread being left counts too (toe over its edge)
 			var prev_f: float = swing_floor[key]
 			if not fst.stepping or is_nan(prev_f) or not is_finite(tgt_floor):
 				swing_floor[key] = tgt_floor
@@ -1164,6 +1194,15 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		# ROOT (stress J7 slide): a planted foot is a world constant until it lifts; out of the hip's reach box it asks
 		# for a step (below, ahead of time) instead of being dragged into the box
 		if thalassa_exact or fst.stepping or s.shore_is_airborne: ft = clamped
+		if not thalassa_exact and not OS.has_environment("NO_CLIFT") and fst.stepping and not s.shore_is_airborne and get_floor != null \
+				and Vector2(clamped.x - ft_raw.x, clamped.z - ft_raw.z).length() > 0.001:
+			# ROOT (stress B12 step down at 30/120 Hz): a long swing held back inside the reach box sat over the tread
+			# it was leaving while its height came down to the landing below: the sole went 11 cm into the step. Held
+			# back, the foot clears the ground under where it is (heel, middle and toe)
+			var cfw := Vector3(-sin(fst.yaw), 0, -cos(fst.yaw))
+			for o2 in [-0.03 - FOOT_R, 0.07, 0.17]:
+				var gc: float = get_floor.call(ft.x + cfw.x * o2, ft.z + cfw.z * o2)
+				if is_finite(gc) and gc - floor_here < 0.36: ft.y = maxf(ft.y, gc + 0.052 + 0.01)
 		if not thalassa_exact:
 			# FIX (stress J7): a planted foot outside these reach limits was dragged along the ground (skating up to
 			# 1.6 m/s in turns) until the foot placer's own, wider emergency distance fired. Ask it to step now.
@@ -1208,6 +1247,15 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			"kneeOutBias": lerpf(0.07, 0.11, air_b), "kneeLiftBias": fst.heelKick * 0.24 + wade_b * 0.06,
 			"minAnklePitchRad": -0.82, "maxAnklePitchRad": 0.48, "maxAnkleYawRad": 0.16, "maxAnkleRollRad": 0.20,
 			"groundBlend": jmp.groundFootBlend, "groundFwd": boot_fwd, "groundUp": fn}
+		var foot_k := "L" if side < 0 else "R"
+		if not thalassa_exact:
+			# ROOT (stress B35 knee pop at 120 Hz): a swing cut short by the stance budget touched down with its ankle still
+			# 10 cm up (the swing floor over the slope's uphill side); planted, the ankle dropped in one tick. The landed
+			# foot settles onto its ground at 4 m/s instead (two to three ticks)
+			if last_stepping[foot_k] and not fst.stepping and not s.shore_is_airborne and is_finite(last_ank[foot_k]):
+				land_drop[foot_k] = clampf(last_ank[foot_k] - ft.y, 0.0, 0.15)
+			land_drop[foot_k] = maxf(0.0, land_drop[foot_k] - 4.0 * dt) if not fst.stepping else 0.0
+			ft.y += land_drop[foot_k]
 		var solved := BM.leg(hip, ft, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
 		if not thalassa_exact:
 			var fk5 := "L" if side < 0 else "R"
@@ -1220,7 +1268,15 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 						var gp: float = get_floor.call(s.pos.x + v3.x * tau, s.pos.z + v3.z * tau)
 						if is_finite(gp): hp.y += clampf(gp - floor_here, -0.36, 0.36)
 					var pr2 := BM.leg(hp, ft, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
-					return pr2.ik.eff.distance_to(ft)
+					# ROOT (stress monkey landing slip): the reach box too, not only the leg. Landing in a side step the
+					# leading foot leaves the box sideways long before the leg runs out of length; timed by the leg
+					# alone the trailing foot went first and the leading one was dragged until it could step
+					var rq := ft - hp
+					var bl := clampf(rq.dot(pelv_right_base) * side, -0.048, 0.22) * side
+					var bf := clampf(rq.dot(pelv_fwd), lerpf(-0.34, -0.45, mra), lerpf(0.36, 0.45, mra))
+					var bc := hp + pelv_right_base * bl + pelv_fwd * bf
+					var box_ex := Vector2(bc.x - ft.x, bc.z - ft.z).length()
+					return maxf(pr2.ik.eff.distance_to(ft), box_ex - 0.013 if not OS.has_environment("NO_BOX") else 0.0)
 				var TOL := 0.012
 				if miss_at.call(0.0) > TOL: tl = 0.0
 				elif miss_at.call(0.48) > TOL:
@@ -1361,6 +1417,8 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			var fk2 := "L" if side < 0 else "R"
 			if not fst.stepping and miss > 0.03:
 				world_foot_placer.forced[fk2] = maxf(world_foot_placer.forced[fk2], miss * (0.33 if (land_age[fk2] < 0.12 and miss <= HARD_MISS) else 1.0))
+		last_ank[foot_k] = solved.ik.eff.y
+		last_stepping[foot_k] = fst.stepping
 		return {"ik": solved.ik, "finMat": solved.finMat, "finDir": solved.finDir}
 	var leg_l: Dictionary = shore_leg.call(-1.0)
 	var leg_r: Dictionary = shore_leg.call(1.0)
