@@ -224,7 +224,10 @@ PLATE_CLOSE = 0.004      # DEFAULT (SL): notches narrower than twice this are fi
 PLATE_ROOT = 0.02        # DEFAULT (SL): a median plate's root runs at least this far under the record's back or belly line
 PLATE_REACH = 0.08       # DEFAULT (SL): the furthest a paired plate's root edge runs on into the body
 PLATE_FREE_T = 0.3       # DEFAULT: a paired plate stays clear of the body beyond this share of the way from its root
-PLATE_TURN_MAX = 30      # DEFAULT (deg): the most a paired plate turns about its root line to clear the body
+PLATE_TURN_MAX = 45      # DEFAULT (deg): the most a paired plate turns about its root line to clear the body
+PL1_MIN_PX = 400         # DEFAULT: PL1 compares a fin only when its outline shows this many pixels clear of the body (of 400 x 400)
+PLATE_KEEP = 0.7         # DEFAULT: a cleaned outline that kept less than this share of the area falls back to the trace
+PLATE_SMOOTH = 0.003     # DEFAULT (SL): the cleaned outline is smoothed along its length over this much
 PLATE_OPEN = 0.0025      # DEFAULT (SL): burrs and slivers thinner than twice this are cut (a lobe tip loses ~2x this of length)
 
 
@@ -282,8 +285,14 @@ def _clean2d(Q, r_open=PLATE_OPEN, r_close=PLATE_CLOSE):
     M = M == (np.argmax(np.bincount(M.ravel())[1:]) + 1)                              # the largest piece
     M = ndi.binary_fill_holes(M)
     C = max(find_contours(ndi.gaussian_filter(np.pad(M, 2).astype(float), 1.0), 0.5), key=len)
+    k = max(PLATE_SMOOTH / px, 1.0)                                                     # a light smoothing along the outline:
+    C = np.c_[ndi.gaussian_filter1d(C[:, 0], k, mode='wrap'), ndi.gaussian_filter1d(C[:, 1], k, mode='wrap')]   # the raster's wobble
     C = approximate_polygon(C, 0.35)[:-1]
     return C[:, ::-1] * px + lo - 2 * px                                                # (row, col) -> (x, y)
+
+
+def _area(Q):
+    Q = np.asarray(Q, float); return 0.5 * abs(float((Q[:, 0] * np.roll(Q[:, 1], -1) - np.roll(Q[:, 0], -1) * Q[:, 1]).sum()))
 
 
 def _card_border(V, Mb):
@@ -311,7 +320,8 @@ def plates(form, rec, fins, segs):
                 line = form.TOP if up else form.BOT             # thinner than the cleaning's opening and was cut away (clean pass round 2)
                 yl = line(Q[root, 0]) - (PLATE_ROOT if up else -PLATE_ROOT)
                 Q[root, 1] = np.minimum(Q[root, 1], yl) if up else np.maximum(Q[root, 1], yl)
-            Q = _clean2d(Q); P, T = _plate2d(Q); V = np.c_[P, np.zeros(len(P))]; out[k] = dict(V=V, F=T.tolist(), T=[0.0] * len(V)); continue
+            Q0 = Q.copy(); C = _clean2d(Q); Q = C if _area(C) >= PLATE_KEEP * _area(Q) else Q   # a row of fine spines cleans away: keep its trace
+            P, T = _plate2d(Q); V = np.c_[P, np.zeros(len(P))]; out[k] = dict(V=V, F=T.tolist(), T=[0.0] * len(V), raw=Q0); continue
         Bd = _card_border(f['V'], Mb); c = Bd.mean(0); _, _, W = np.linalg.svd(Bd - c); e1, e2 = W[0], W[1]
         Q = np.c_[(Bd - c) @ e1, (Bd - c) @ e2]; to3 = lambda q: c + q[:, :1] * e1 + q[:, 1:2] * e2
         # the root edge runs on in the plate's own plane until it is PLATE_SINK inside the blocks: the plate enters the body itself
@@ -320,7 +330,7 @@ def plates(form, rec, fins, segs):
         for j in range(Mb):
             h = np.where(_f(to3(Q[j] + ts[:, None] * d2), segs).min(1) <= PLATE_SINK)[0]
             Q[j] = Q[j] + ts[h[0] if len(h) else -1] * d2
-        Q = _clean2d(Q); P, T = _plate2d(Q); V = to3(P)
+        C = _clean2d(Q); Q = C if _area(C) >= PLATE_KEEP * _area(Q) else Q; P, T = _plate2d(Q); V = to3(P)
         # T: the way out from the card's root row, along the plate (the stretch run on into the body counts 0)
         j = np.argmin(np.linalg.norm(P[:, None] - Qr0[None], axis=2), 1); sd = ((P - Qr0[j]) * -d2).sum(1)
         Tn = np.clip(sd / max(sd.max(), 1e-9), 0, 1); root = np.asarray(f['V'], float)[:Mb]
@@ -340,20 +350,21 @@ def plates(form, rec, fins, segs):
 
 
 def plate_checks(form, rec, PL, segs):
-    """PL1 each median plate's side view, clear of the body, against the record's traced outline (the cleaning keeps the fin's shape:
-    >= BK3_MIN); PL2 no paired plate runs into the body beyond PLATE_FREE_T of the way from its root."""
+    """PL1 each median plate's side view, clear of the body, against its outline before cleaning (the cleaning keeps the fin's shape:
+    >= BK3_MIN; the outline against the record is BK3); PL2 no paired plate runs into the body beyond PLATE_FREE_T of the way from its root."""
     R = {}; iou = {}; xb = np.linspace(0, form.XEND, 400)
     body = np.vstack([np.c_[xb, form.TOP(xb)], np.c_[xb, form.BOT(xb)][::-1]])
     for k, p in PL.items():
         if k.startswith(('pectoral', 'pelvic')): continue
-        edge = _fin_outline(rec, k, form)
+        edge = p.get('raw')
         if edge is None: continue
-        V = np.asarray(p['V'])[:, :2]; lo = np.minimum(V.min(0), edge.min(0)); sc = 400 / max(float((np.maximum(V.max(0), edge.max(0)) - lo).max()), 1e-9)
+        edge = np.asarray(edge, float); V = np.asarray(p['V'])[:, :2]; lo = np.minimum(V.min(0), edge.min(0)); sc = 400 / max(float((np.maximum(V.max(0), edge.max(0)) - lo).max()), 1e-9)
         px = lambda P: [tuple(q) for q in ((np.asarray(P) - lo) * sc).tolist()]
         a = Image.new('1', (402, 402)); d = ImageDraw.Draw(a)
         for t in p['F']: d.polygon(px(V[t]), fill=1)
         b = Image.new('1', (402, 402)); ImageDraw.Draw(b).polygon(px(edge), fill=1)
         m = Image.new('1', (402, 402)); ImageDraw.Draw(m).polygon(px(body), fill=1); clear = ~np.array(m)
+        if (np.array(b) & clear).sum() < PL1_MIN_PX: continue            # a fin a hair over the back (trumpetfish spines): nothing to compare
         iou[k] = round(_iou(np.array(a) & clear, np.array(b) & clear), 4)
     R['PL1_plate_iou'] = iou; R['PL1_pass'] = (not iou) or min(iou.values()) >= BK3_MIN
     pierce = {}
@@ -378,8 +389,8 @@ JOINTS = True         # DEFAULT: joint spheroids on. Measured (BK5, the swim cli
                       # overlapping ellipsoids per bone already close a narrow body's bend); pufferfish 0.544 -> 0.252 % SL with them
                       # (a wide body's blocks swing their flanks apart). ~100 triangles a joint
 PRIM_RES = (10, 6)    # DEFAULT: a primitive's mesh (longitude x latitude): small shapes, 100 triangles each
-JOINT_IN = 0.95          # DEFAULT: a joint spheroid's surface stays at this block measure inside the chain at rest (~2.5 % in: under
-                         # the 48 x 24 block facets' ~0.9 % sag)
+JOINT_IN = 0.985         # DEFAULT: a joint spheroid's surface stays at this block measure inside the chain at rest (~0.75 % in: under
+                         # the 48 x 24 block facets' ~0.2 % sag, yet as full as the dip allows so a bend's open wedge shows it, not a crack)
 JOINT_FILL = 0.97     # DEFAULT: a joint spheroid stays this far inside the section (it must not swell the side or top view)
 ROOT_PAD = 0.15       # DEFAULT: a root lozenge reaches this share of its length further into the body than the gap (so the edge sinks)
 ROOT_T = 0.25         # DEFAULT: a root lozenge's thickness, x the local body half-width (a fleshy fin base, thinner than the body)
@@ -414,7 +425,7 @@ def joints(form, rec, segs):
         q = dict(kind='joint', c=[x, (t + b) / 2, 0.0], r=[JOINT_FILL * w, JOINT_FILL * (t - b) / 2, JOINT_FILL * w], bone=i)
         # inside the chain at rest: the chain's union dips between its blocks under the record's section, and a spheroid at
         # JOINT_FILL of the record stood through the dip as a pale patch (clean pass, Gary 28 Nov "not clean enough")
-        v, _ = _ellipsoid(q['c'], q['r'], 32, 16); c = np.asarray(q['c']); lo, hi = 0.3, 1.0      # the clean mesher's own facets (a coarser
+        v, _ = _ellipsoid(q['c'], q['r'], 48, 24); c = np.asarray(q['c']); lo, hi = 0.3, 1.0      # the clean mesher's own facets (a coarser
         # sample missed the vertex that stood through, a light stripe at one joint, clean pass round 2)
         for _ in range(20):
             k = (lo + hi) / 2

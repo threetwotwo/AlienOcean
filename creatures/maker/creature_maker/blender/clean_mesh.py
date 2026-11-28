@@ -20,12 +20,15 @@ from creature_maker.blockout import _ellipsoid
 SEG_HI, RINGS_HI = 48, 24     # DEFAULT: a body block's facets (longitude x latitude). 14 x 8 tore where blocks crossed; at 48 x 24 a
                               # crossing line is smooth at a 1600 px close-up of a 50 cm fish
 SEG_PRIM, RINGS_PRIM = 32, 16 # DEFAULT: joint spheroids, root lozenges (hidden at rest); the jaw, cutters and eyes, seen close, at SEG_HI
+SLIT_TAPER = 0.2              # DEFAULT: the slit narrows to nothing over this share of its length at each end
 COVER_T = 0.035               # DEFAULT: the cover plate's thickness, x the head's half-width
 COVER_GAP = 0.01              # DEFAULT: the plate's outer face stands at least this x the head's half-width over every block
 COVER_MID = 0.5               # DEFAULT: the plates stop where the surface comes nearer the midline than this x the head's half-width
 COVER_BRIDGE = 0.25           # DEFAULT: rib valleys under the plate are bridged over this share of the plate's length
 COVER_GRID = 0.002            # DEFAULT (SL): the height grid the plate is read from
 COVER_STEP = 0.006            # DEFAULT (SL): the plate's triangle size
+COVER_SEAT = 0.0              # DEFAULT (SL): the plate's rim comes down onto the blocks over this band inside its outline (off: at
+                              # 0.005-0.012 the rim followed the ribs and read crumpled or pillowed; a plate standing proud reads cleaner)
 COVER_ROUND = 0.008           # DEFAULT (SL): the plate outline's kinks, tabs and notches under twice this are rounded off
 
 
@@ -121,7 +124,9 @@ def _slits(blades):
         if len(B) < 2: continue
         C = np.array([q['c'][:2] for q in B]); w = float(np.median([q['r'][1] for q in B]))
         t = np.gradient(C, axis=0); t /= np.maximum(np.linalg.norm(t, axis=1, keepdims=True), 1e-12); n = np.c_[-t[:, 1], t[:, 0]]
-        poly = np.vstack([C + n * w, (C - n * w)[::-1]])
+        a = np.r_[0, np.cumsum(np.linalg.norm(np.diff(C, axis=0), axis=1))]; e = np.minimum(a, a[-1] - a) / max(SLIT_TAPER * a[-1], 1e-9)
+        wv = w * np.sqrt(np.clip(e, 0.02, 1))[:, None]                 # rounded ends (square ends read as a black card at flare)
+        poly = np.vstack([C + n * wv, (C - n * wv)[::-1]])
         floor = float(np.median([abs(q['c'][2]) - q['r'][2] for q in B]))
         out.append(prism('slit', poly, floor, 1.0) if sg > 0 else prism('slit', poly, -1.0, -floor))
     return out
@@ -195,8 +200,13 @@ def covers(D, poly):
     C = max(find_contours(ndi.gaussian_filter(np.pad(M, 2).astype(float), 1.0), 0.5), key=len) - 2
     Q = approximate_polygon(C, 0.35)[:-1][:, ::-1] * h + lo[:2]
     P2, T, nb = _plate2d(Q, COVER_STEP, border=True)
-    zo = ndi.map_coordinates(Zo, [(P2[:, 1] - lo[1]) / h, (P2[:, 0] - lo[0]) / h], order=1)
-    zi = zo - 2 * COVER_T * zs; n = len(P2)          # the inner face runs inside the head: only the slit behind shows under the plate
+    ij = [(P2[:, 1] - lo[1]) / h, (P2[:, 0] - lo[0]) / h]
+    zo = ndi.map_coordinates(Zo, ij, order=1); zb = ndi.map_coordinates(Z, ij, order=1) + COVER_GAP * zs
+    # the rim seats on the blocks: within COVER_SEAT of the outline the outer face comes down onto the ribs (bridging them to the very
+    # edge, the plate stood off every rib valley as a dark hole in the top and front views, clean pass round 2)
+    Bq = P2[:nb]; dist = np.min(np.linalg.norm(P2[:, None] - Bq[None], axis=2), 1)
+    w = np.clip(dist / COVER_SEAT, 0, 1) if COVER_SEAT > 0 else np.ones(len(P2)); w = w * w * (3 - 2 * w)
+    zo = zb + w * (zo - zb); zi = zo - COVER_T * zs; n = len(P2)
     V = np.r_[np.c_[P2, zo], np.c_[P2, zi]]
     e1, e2 = P2[T[:, 1]] - P2[T[:, 0]], P2[T[:, 2]] - P2[T[:, 0]]
     T = np.where((e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0])[:, None] < 0, T[:, ::-1], T)    # counter-clockwise seen from +z

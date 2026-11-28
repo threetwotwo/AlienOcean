@@ -53,8 +53,8 @@ parts = [(v, f, i) for i, (v, f) in sorted(CM.bones(D).items())]
 KINDS0 = ('joint',) if D.get('plates') else ('joint', 'root')   # clean plates run their own roots into the body; a lozenge there was a knob
 for q in D['prims']:
     if q['kind'] in KINDS0:
-        v, f = _ellipsoid(q['c'], q['r'], CM.SEG_PRIM, CM.RINGS_PRIM, q.get('R'), q.get('n'), q.get('ry_lo')); parts.append((v, f, q['bone']))
-body, VB0 = mesh_ob('body', parts, [mat_a, mat_b])
+        v, f = _ellipsoid(q['c'], q['r'], CM.SEG_HI, CM.RINGS_HI, q.get('R'), q.get('n'), q.get('ry_lo')); parts.append((v, f, q['bone']))
+body, VB0 = mesh_ob('body', parts, [mat_a])     # one tone: per-bone tones showed a sliver of the next tone at every seam (clean pass round 3)
 
 GREY_JAW, GREY_COVER, GREY_EYE = (0.36, 0.30, 0.30), (0.50, 0.47, 0.42), (0.06, 0.06, 0.07)   # DEFAULT: moving head blocks a shade apart
 mat_p = dict(jaw=flat('jaw', GREY_JAW), cover=flat('cover', GREY_COVER), eye=flat('eyeball', GREY_EYE))
