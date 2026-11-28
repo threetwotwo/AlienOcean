@@ -20,18 +20,19 @@ uniform vec4 push_bound = vec4(0.0, -1e6, 0.0, 0.0);   // a sphere around every 
 uniform float sway_amp = 0.045;       // metres at the tip (Thalassa aMat.y scale for short grass)
 uniform vec2 current_dir = vec2(0.8, 0.6);
 uniform float current_lean = 0.07;    // metres of tip lean down the current
-uniform float thin_start = 6.0;       // metres: beyond this, blades thin out
-uniform float thin_end = 40.0;        // metres: at this distance one blade in 8 is kept
-uniform float min_px = 1.5;           // survivors never narrower than this many pixels
-uniform vec3 col_root : source_color = vec3(0.30, 0.40, 0.14);
-uniform vec3 col_mid : source_color = vec3(0.45, 0.64, 0.22);
-uniform vec3 col_tip : source_color = vec3(0.68, 0.74, 0.34);
-uniform vec3 col_old : source_color = vec3(0.66, 0.60, 0.36);    // aged, epiphyte-dusted tips
+uniform float thin_start = 4.0;       // metres: beyond this, blades thin out
+uniform float thin_end = 20.0;        // metres: at this distance one blade in 8 is kept; GrassField swaps to its far set here
+uniform float set_share = 1.0;        // share of all blades this MultiMesh holds (GrassField's far set: 0.125)
+uniform float min_px = 2.5;           // survivors never narrower than this many pixels (thinner lines alias into noise at half res)
+uniform vec3 col_root : source_color = vec3(0.13, 0.27, 0.10);   // key frame v7c meadow: deep green roots
+uniform vec3 col_mid : source_color = vec3(0.22, 0.45, 0.16);    // a calm mid green, not lime
+uniform vec3 col_tip : source_color = vec3(0.40, 0.58, 0.24);
+uniform vec3 col_old : source_color = vec3(0.50, 0.52, 0.28);    // aged, epiphyte-dusted tips
 uniform float caustic_strength : hint_range(0.0, 3.0) = 1.0;
 // key frame look (tools/lagoon_dress/kf_paint.py grass + the rig's add_sway): every blade droops, pale margins, browning tips
 uniform float droop = 0.42;           // share of blade length the tip hangs over at rest (stiffness 1); the key frame meadow droops
-uniform float tile_col_mix = 0.6;     // how much the dressing's own vertex colour sets the base (0 = palette only)
-uniform float saturation = 1.2;       // kf_paint: saturation 1.2
+uniform float tile_col_mix = 0.35;     // how much the dressing's own vertex colour sets the base (0 = palette only)
+uniform float saturation = 1.0;       // kf_paint used 1.2; the Mac read lime and noisy (Gary 28 Nov), so the palette carries it
 uniform vec3 col_margin : source_color = vec3(0.851, 0.902, 0.627);   // #d9e6a0 leaf margins
 uniform vec3 col_brown : source_color = vec3(0.435, 0.416, 0.227);    // #6f6a3a age browning toward the tip
 
@@ -56,9 +57,9 @@ void vertex() {
 	float dist = length(root - CAMERA_POSITION_WORLD);
 	// distance thinning: keep share k of blades, widen the rest by 1/sqrt(k) (coverage kept), and never below min_px
 	float k = mix(1.0, 0.125, smoothstep(thin_start, thin_end, dist));
-	float keep = step(hash11(INSTANCE_CUSTOM.x * 3.17 + 0.5), k);
+	float keep = step(hash11(INSTANCE_CUSTOM.x * 3.17 + 0.5), k / set_share);
 	float px = dist * 2.0 / (abs(PROJECTION_MATRIX[1][1]) * VIEWPORT_SIZE.y);    // metres per pixel at the blade
-	float w0 = 0.008;                                                              // blade mesh width (m)
+	float w0 = 0.012;   // blade mesh width (m), GrassField.BLADE_W
 	float widen = max(1.0 / sqrt(k), min_px * px / w0);
 	vec3 side = normalize(MODEL_MATRIX[0].xyz);
 	vec3 wp = VERTEX + side * dot(VERTEX - root, side) * (widen - 1.0);        // VERTEX is already world here
@@ -82,7 +83,7 @@ void vertex() {
 		float r = p.w + 0.5 * L;
 		float dl = length(d.xz);
 		float s = clamp(1.0 - length(d) / r, 0.0, 1.0);
-		if (s > 0.0) off += (dl > 1e-3 ? d.xz / dl : vec2(1.0, 0.0)) * s * s * L * 1.6;
+		if (s > 0.0) off += (dl > 1e-3 ? d.xz / dl : vec2(1.0, 0.0)) * s * (2.0 - s) * L * 1.6;   // firm near her, soft at the rim
 	}
 	float ol = length(off);
 	if (ol > 0.92 * L) off *= 0.92 * L / ol;                                       // at most a near-flat blade
@@ -108,9 +109,9 @@ void fragment() {
 	// kf_paint.grass: saturation 1.2, age browning toward the tip, pale warm margins
 	float l2 = dot(c, vec3(0.299, 0.587, 0.114));
 	c = max(mix(vec3(l2), c, saturation), vec3(0.0));
-	c = mix(c, col_brown, age * smoothstep(0.55, 1.0, h01) * 0.7);
+	c = mix(c, col_brown, age * smoothstep(0.6, 1.0, h01) * 0.45);
 	float edge = 1.0 - smoothstep(0.0, 0.10, min(edge_u, 1.0 - edge_u));
-	c = mix(c, col_margin, 0.55 * edge * 0.85);
+	c = mix(c, col_margin, 0.25 * edge);
 	ALBEDO = c;
 	ROUGHNESS = 0.55;
 	SPECULAR = 0.25;

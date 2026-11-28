@@ -55,6 +55,7 @@ func _ready() -> void:
 	# grass 0.1.0: instanced blades in place of the seagrass tile meshes (switch "grass_v2"; off = the tiles as before)
 	grass = GrassField.new(); grass.name = "Grass"; add_child(grass)
 	grass.girl_fn = func(): return game.girl.centre()
+	grass.girl_capsule_fn = func(): return [game.girl.capsule.centre, game.girl.capsule.axis, game.girl.capsule.half_len] if not game.girl.pose.is_empty() else [game.girl.centre(), Vector3.UP, 0.3]
 	grass.schools = game.school_nodes
 	grass.adopt(game.lagoon)
 	if OS.get_environment("AO_GRASS") == "0": grass.set_enabled(false)
@@ -337,6 +338,8 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	var win0 := DisplayServer.window_get_size()
 	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_RESIZE_DISABLED, true)
+	await get_tree().process_frame
+	if DisplayServer.window_get_size() != win0: DisplayServer.window_set_size(win0)
 	teleport(1)
 	await get_tree().create_timer(settle * 2.0).timeout
 	var rows := []
@@ -364,7 +367,11 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 		rows.append({"case": ("%s on" % n) if not on else ("%s off" % n), "r": r, "paired_ms": snappedf(am, 0.01),
 			"aba_spread_ms": snappedf(absf(a.frame_ms - a2.frame_ms), 0.01),
 			"saves_ms": snappedf(am - r.frame_ms, 0.01), "saves_gpu_ms": snappedf((a.gpu_ms + a2.gpu_ms) * 0.5 - r.gpu_ms, 0.01)})
-		if DisplayServer.window_get_size() != win0: rows[-1]["window_changed"] = true
+		if DisplayServer.window_get_size() != win0:
+			rows[-1]["window_changed"] = true
+			# macOS can change the content size when the resize flag flips (title bar re-layout): put it back before the next row
+			DisplayServer.window_set_size(win0)
+			await get_tree().create_timer(settle).timeout
 	for n in BENCH_SWITCHES:
 		if not n in ["half_res", "lagoon", "grass_v2"]: set_toggle(n, false)
 	await get_tree().create_timer(settle).timeout
