@@ -166,3 +166,13 @@ func _process(delta: float) -> void:
 	while arr.size() < PUSHERS: arr.append(Vector4.ZERO)
 	arr.resize(PUSHERS)
 	material.set_shader_parameter("pushers", PackedVector4Array(arr))
+	# bounding sphere of the active pushers (most blades are far from all of them and skip the per-pusher loop)
+	var lo := Vector3.INF; var hi := -Vector3.INF; var rmax := 0.0
+	for v in arr:
+		if v.w <= 0.0: continue
+		lo = lo.min(Vector3(v.x, v.y, v.z)); hi = hi.max(Vector3(v.x, v.y, v.z)); rmax = maxf(rmax, v.w)
+	if rmax > 0.0:
+		var c := (lo + hi) * 0.5
+		material.set_shader_parameter("push_bound", Vector4(c.x, c.y, c.z, (hi - lo).length() * 0.5 + rmax))
+	else:
+		material.set_shader_parameter("push_bound", Vector4(0, -1e6, 0, 0))

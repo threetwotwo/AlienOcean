@@ -141,8 +141,8 @@ func set_toggle(n: String, on: bool) -> void:
 		"ssil": wr.env.ssil_enabled = on
 		"shadows": wr.light.shadow_enabled = on
 		"half_res":
-			# half the pixels each way, upscaled by AMD FSR 1 (spatial: safe with the AgX and water post effects)
-			get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR if on else Viewport.SCALING_3D_MODE_BILINEAR
+			# half the pixels each way, upscaled (upscaler(): Apple MetalFX temporal on Macs that have it, else AMD FSR 1)
+			get_viewport().scaling_3d_mode = upscaler() if on else Viewport.SCALING_3D_MODE_BILINEAR
 			get_viewport().scaling_3d_scale = 0.5 if on else 1.0
 		"grass_v2": if grass: grass.set_enabled(on)
 		"schools":
@@ -156,6 +156,19 @@ func set_toggle(n: String, on: bool) -> void:
 		"collider": _set_collider(on)
 		_: push_error("TestLevel: unknown toggle " + n); return
 	_relight()
+
+## The upscaler behind half_res. AO_UPSCALER = fsr | fsr2 | metalfx | metalfx_temporal picks one; by default MetalFX temporal
+## where the GPU has it (Apple silicon), else FSR 1. A temporal upscaler does its own anti-aliasing (TAA stays off).
+func upscaler() -> int:
+	var rd := RenderingServer.get_rendering_device()
+	var mfx_t := rd != null and rd.has_feature(RenderingDevice.SUPPORTS_METALFX_TEMPORAL)
+	var mfx_s := rd != null and rd.has_feature(RenderingDevice.SUPPORTS_METALFX_SPATIAL)
+	match OS.get_environment("AO_UPSCALER"):
+		"fsr": return Viewport.SCALING_3D_MODE_FSR
+		"fsr2": return Viewport.SCALING_3D_MODE_FSR2
+		"metalfx": return Viewport.SCALING_3D_MODE_METALFX_SPATIAL if mfx_s else Viewport.SCALING_3D_MODE_FSR
+		"metalfx_temporal": return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR
+	return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR
 
 func _set_collider(on: bool) -> void:
 	_show_collider = on
@@ -277,7 +290,7 @@ func stats() -> Dictionary:
 
 # ---- benchmark (F9 in the panel, or AO_BENCH=1 at start: run_benchmark.command): the cost of each system on this machine ----
 
-const BENCH_SWITCHES := ["sdfgi", "ssao", "ssil", "shadows", "god_rays", "caustics", "agx", "grass_v2", "sea", "schools", "lagoon", "half_res"]
+const BENCH_SWITCHES := ["ssao", "ssil", "shadows", "god_rays", "caustics", "agx", "grass_v2", "sea", "schools", "lagoon", "half_res", "sdfgi"]   # sdfgi last: it rebuilds for seconds after it comes back
 var bench_running := false
 signal bench_done(path: String)
 
@@ -305,29 +318,42 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 	bench_running = true
 	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 	var s0 := get_state()
+	# a fair run (Mac thread, 28 Nov): no vsync (it rounds frame times to 16.7 ms steps), and a window that can't change size
+	# mid-run (macOS resized it to the full Retina size once, which made a whole run invalid)
+	var vs0 := DisplayServer.window_get_vsync_mode()
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	var win0 := DisplayServer.window_get_size()
+	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_RESIZE_DISABLED, true)
 	teleport(1)
 	await get_tree().create_timer(settle * 2.0).timeout
 	var rows := []
 	var base: Dictionary = await _bench_measure(secs)
 	rows.append({"case": "everything on", "r": base})
+	# each switch is measured as a pair (its normal state, then flipped) so slow drift (heat, GI settling) cancels out
 	for n in BENCH_SWITCHES:
 		var on: bool = get_toggle(n)             # flip from the current state (half_res is on by default on Retina screens)
+		var a: Dictionary = await _bench_measure(secs * 0.5)
 		set_toggle(n, not on)
 		await get_tree().create_timer(settle).timeout
 		var r: Dictionary = await _bench_measure(secs)
-		rows.append({"case": ("%s on" % n) if not on else ("%s off" % n), "r": r, "saves_ms": snappedf(base.frame_ms - r.frame_ms, 0.01),
-			"saves_gpu_ms": snappedf(base.gpu_ms - r.gpu_ms, 0.01)})
+		rows.append({"case": ("%s on" % n) if not on else ("%s off" % n), "r": r, "paired_ms": a.frame_ms,
+			"saves_ms": snappedf(a.frame_ms - r.frame_ms, 0.01), "saves_gpu_ms": snappedf(a.gpu_ms - r.gpu_ms, 0.01)})
 		set_toggle(n, on)
+		await get_tree().create_timer(settle * (3.0 if n == "sdfgi" else 1.0)).timeout
+		if DisplayServer.window_get_size() != win0: rows[-1]["window_changed"] = true
 	for n in BENCH_SWITCHES:
 		if not n in ["half_res", "lagoon", "grass_v2"]: set_toggle(n, false)
 	await get_tree().create_timer(settle).timeout
 	rows.append({"case": "all effects off (lagoon kept)", "r": await _bench_measure(secs)})
 	apply_state(s0)
+	DisplayServer.window_set_vsync_mode(vs0)
+	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_RESIZE_DISABLED, false)
 	var P := Performance
 	var out := {"utc": Time.get_datetime_string_from_system(true), "version": IssueReport._version(),
 		"machine": {"os": OS.get_name(), "cpu": OS.get_processor_name(), "gpu": RenderingServer.get_video_adapter_name(),
 			"driver": RenderingServer.get_video_adapter_api_version(), "resolution": get_viewport().get_visible_rect().size,
-			"screen_scale": DisplayServer.screen_get_scale(), "vsync": DisplayServer.window_get_vsync_mode()},
+			"screen_scale": DisplayServer.screen_get_scale(), "vsync_during_run": "off", "window": win0,
+			"render_scale": get_viewport().scaling_3d_scale, "upscaler": get_viewport().scaling_3d_mode},
 		"view": "Key-frame view", "rows": rows, "video_mem_mb": P.get_monitor(P.RENDER_VIDEO_MEM_USED) / 1048576.0}
 	var dir := IssueReport.root_dir()
 	DirAccess.make_dir_recursive_absolute(dir)

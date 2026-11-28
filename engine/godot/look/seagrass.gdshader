@@ -15,7 +15,8 @@ render_mode blend_mix, cull_disabled, diffuse_lambert, specular_schlick_ggx, wor
 #include "res://look/caustics.gdshaderinc"
 
 #define PUSHERS 24
-uniform vec4 pushers[PUSHERS];        // xyz world, w = radius x strength (0 = unused); written by GrassField each frame
+uniform vec4 pushers[PUSHERS];
+uniform vec4 push_bound = vec4(0.0, -1e6, 0.0, 0.0);   // a sphere around every active pusher: blades outside it skip the loop        // xyz world, w = radius x strength (0 = unused); written by GrassField each frame
 uniform float sway_amp = 0.045;       // metres at the tip (Thalassa aMat.y scale for short grass)
 uniform vec2 current_dir = vec2(0.8, 0.6);
 uniform float current_lean = 0.07;    // metres of tip lean down the current
@@ -59,7 +60,7 @@ void vertex() {
 	off.y += cos(TIME * 1.05 + root.x * 0.13 * 6.0 + root.y * 0.15 + INSTANCE_CUSTOM.x) * sway_amp * 0.7 / stiff;
 	off += normalize(current_dir) * current_lean * (0.7 + 0.6 * hash11(INSTANCE_CUSTOM.x));
 	vec3 tip = root + vec3(0.0, L, 0.0);
-	for (int i = 0; i < PUSHERS; i++) {
+	if (length(tip - push_bound.xyz) < push_bound.w + L) for (int i = 0; i < PUSHERS; i++) {
 		vec4 p = pushers[i];
 		if (p.w <= 0.0) continue;
 		vec3 d = tip - p.xyz;
