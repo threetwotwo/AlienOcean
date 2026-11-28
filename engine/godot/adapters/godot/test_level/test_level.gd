@@ -19,6 +19,7 @@ const DAY_SPEEDS := {"hold": 0.0, "24 min day": 24.0 / (24.0 * 60.0), "2 min day
 const FRAME_HISTORY := 600
 
 var game: GameRoot
+var grass: GrassField
 var ready_done := false
 var missing_assets: Array[String] = []
 var teleports: Array = []             # [{name, feet: Vector3, yaw, swim}]
@@ -51,6 +52,12 @@ func _ready() -> void:
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	if game.dress_manifest != "": game.seat_dress()
+	# grass 0.1.0: instanced blades in place of the seagrass tile meshes (switch "grass_v2"; off = the tiles as before)
+	grass = GrassField.new(); grass.name = "Grass"; add_child(grass)
+	grass.girl_fn = func(): return game.girl.centre()
+	grass.schools = game.school_nodes
+	grass.adopt(game.lagoon)
+	if OS.get_environment("AO_GRASS") == "0": grass.set_enabled(false)
 	_make_teleports()
 	ready_done = true
 
@@ -96,7 +103,7 @@ func worst_frame_ms(seconds := 10.0) -> float:
 # ---- switches: every one has a getter and a setter, so the test can prove each one returns to where it was ----
 
 func toggle_names() -> Array:
-	return ["sdfgi", "god_rays", "caustics", "agx", "taa", "ssao", "ssil", "schools", "sea", "lagoon", "tide", "collider"]
+	return ["sdfgi", "god_rays", "caustics", "agx", "taa", "ssao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider"]
 
 func get_toggle(n: String) -> bool:
 	var wr := game.world_root
@@ -108,6 +115,9 @@ func get_toggle(n: String) -> bool:
 		"taa": return get_viewport().use_taa
 		"ssao": return wr.env.ssao_enabled
 		"ssil": return wr.env.ssil_enabled
+		"shadows": return wr.light.shadow_enabled
+		"half_res": return get_viewport().scaling_3d_scale < 0.99
+		"grass_v2": return grass != null and grass.enabled
 		"schools": return game.mounts.is_mounted("fauna")
 		"sea": return game.mounts.is_mounted("sea")
 		"lagoon": return game.mounts.is_mounted("lagoon")
@@ -125,11 +135,16 @@ func set_toggle(n: String, on: bool) -> void:
 		"taa": get_viewport().use_taa = on
 		"ssao": wr.env.ssao_enabled = on
 		"ssil": wr.env.ssil_enabled = on
+		"shadows": wr.light.shadow_enabled = on
+		"half_res": get_viewport().scaling_3d_scale = 0.5 if on else 1.0
+		"grass_v2": if grass: grass.set_enabled(on)
 		"schools":
 			game.mounts.set_mount("fauna", on)
 			for s in game.school_nodes: s.visible = on
 		"sea": game.mounts.set_mount("sea", on)
-		"lagoon": game.mounts.set_mount("lagoon", on)
+		"lagoon":
+			game.mounts.set_mount("lagoon", on)
+			if grass: grass.visible = on
 		"tide": wr.tide_on = on; game.tide_on = on
 		"collider": _set_collider(on)
 		_: push_error("TestLevel: unknown toggle " + n); return
@@ -252,3 +267,67 @@ func stats() -> Dictionary:
 		"school_main_ms": game.school_nodes.reduce(func(a, s): return a + float(s.main_ms), 0.0),
 		"school_step_ms": game.school_nodes.reduce(func(a, s): return maxf(a, float(s.step_ms)), 0.0),
 	}
+
+# ---- benchmark (F9 in the panel, or AO_BENCH=1 at start: run_benchmark.command): the cost of each system on this machine ----
+
+const BENCH_SWITCHES := ["sdfgi", "ssao", "ssil", "shadows", "god_rays", "caustics", "agx", "grass_v2", "sea", "schools", "lagoon", "half_res"]
+var bench_running := false
+signal bench_done(path: String)
+
+func _bench_measure(secs: float) -> Dictionary:
+	var vp := get_viewport().get_viewport_rid()
+	var fr := []; var gpu := []; var cpu := []
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < int(secs * 1000.0):
+		await get_tree().process_frame
+		fr.append(frame_ms[frame_ms.size() - 1] if frame_ms.size() > 0 else 0.0)
+		gpu.append(RenderingServer.viewport_get_measured_render_time_gpu(vp))
+		cpu.append(RenderingServer.viewport_get_measured_render_time_cpu(vp) + RenderingServer.get_frame_setup_time_cpu())
+	var mean := func(a: Array) -> float: return a.reduce(func(s, x): return s + x, 0.0) / maxf(a.size(), 1)
+	var srt := fr.duplicate(); srt.sort()
+	var P := Performance
+	return {"frame_ms": snappedf(mean.call(fr), 0.01), "gpu_ms": snappedf(mean.call(gpu), 0.01), "cpu_render_ms": snappedf(mean.call(cpu), 0.01),
+		"p95_frame_ms": snappedf(srt[int(srt.size() * 0.95)] if srt.size() > 0 else 0.0, 0.01), "frames": fr.size(),
+		"tick_ms": snappedf(game.stats.tick_ms, 0.01), "draw_calls": P.get_monitor(P.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+		"triangles": P.get_monitor(P.RENDER_TOTAL_PRIMITIVES_IN_FRAME)}
+
+## Stand at the key-frame view; measure everything on, then each system off in turn (back on after), then all of them off.
+## Writes playtest_reports/bench_<utc>.json (IssueReport.root_dir) and returns its path.
+func run_bench(settle := 2.0, secs := 4.0) -> String:
+	if bench_running: return ""
+	bench_running = true
+	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+	var s0 := get_state()
+	teleport(1)
+	await get_tree().create_timer(settle * 2.0).timeout
+	var rows := []
+	var base: Dictionary = await _bench_measure(secs)
+	rows.append({"case": "everything on", "r": base})
+	for n in BENCH_SWITCHES:
+		var on: bool = n != "half_res"            # half_res is the one switch that is off in the normal state
+		set_toggle(n, not on)
+		await get_tree().create_timer(settle).timeout
+		var r: Dictionary = await _bench_measure(secs)
+		rows.append({"case": ("%s on" % n) if not on else ("%s off" % n), "r": r, "saves_ms": snappedf(base.frame_ms - r.frame_ms, 0.01),
+			"saves_gpu_ms": snappedf(base.gpu_ms - r.gpu_ms, 0.01)})
+		set_toggle(n, on)
+	for n in BENCH_SWITCHES:
+		if not n in ["half_res", "lagoon", "grass_v2"]: set_toggle(n, false)
+	await get_tree().create_timer(settle).timeout
+	rows.append({"case": "all effects off (lagoon kept)", "r": await _bench_measure(secs)})
+	apply_state(s0)
+	var P := Performance
+	var out := {"utc": Time.get_datetime_string_from_system(true), "version": IssueReport._version(),
+		"machine": {"os": OS.get_name(), "cpu": OS.get_processor_name(), "gpu": RenderingServer.get_video_adapter_name(),
+			"driver": RenderingServer.get_video_adapter_api_version(), "resolution": get_viewport().get_visible_rect().size,
+			"screen_scale": DisplayServer.screen_get_scale(), "vsync": DisplayServer.window_get_vsync_mode()},
+		"view": "Key-frame view", "rows": rows, "video_mem_mb": P.get_monitor(P.RENDER_VIDEO_MEM_USED) / 1048576.0}
+	var dir := IssueReport.root_dir()
+	DirAccess.make_dir_recursive_absolute(dir)
+	var path := dir.path_join("bench_%s.json" % Time.get_datetime_string_from_system(true).replace(":", "-"))
+	var f := FileAccess.open(path, FileAccess.WRITE); f.store_string(JSON.stringify(out, "  ")); f.close()
+	print("BENCH ", path)
+	for r in rows: print("BENCH %-30s frame %7.2f ms  gpu %7.2f ms  saves %s ms" % [r.case, r.r.frame_ms, r.r.gpu_ms, str(r.get("saves_ms", "-"))])
+	bench_running = false
+	bench_done.emit(path)
+	return path

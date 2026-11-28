@@ -23,7 +23,7 @@ func _ready() -> void:
 	panel = PanelContainer.new(); panel.position = Vector2(12, 40); panel.visible = false; add_child(panel)
 	var sc := ScrollContainer.new(); sc.custom_minimum_size = Vector2(430, 640); panel.add_child(sc)
 	var v := VBoxContainer.new(); v.size_flags_horizontal = Control.SIZE_EXPAND_FILL; sc.add_child(v)
-	_title(v, "Test level  (F1 hide, F8 report, click to look with the mouse, Esc frees it)")
+	_title(v, "Test level  (F1 hide, F8 report, F9 benchmark, click to look with the mouse, Esc frees it)")
 	stats_label = Label.new(); stats_label.add_theme_font_size_override("font_size", 13); v.add_child(stats_label)
 	_title(v, "Switches")
 	var grid := GridContainer.new(); grid.columns = 3; v.add_child(grid)
@@ -69,6 +69,9 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_F1: set_open(not panel.visible); get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_F8: report(); get_viewport().set_input_as_handled()
+		elif event.keycode == KEY_F9 and not level.bench_running:
+			hud.text = "Benchmark running (about 1 minute)..."; status.text = "Benchmark running..."
+			var path: String = await level.run_bench(); status.text = "Benchmark saved: " + path; _sync()
 		elif event.keycode == KEY_ESCAPE and level.mouse_captured: level.set_mouse_captured(false); get_viewport().set_input_as_handled()
 		elif panel.visible and not note_edit.has_focus() and event.keycode >= KEY_1 and event.keycode <= KEY_9:
 			var i: int = event.keycode - KEY_1
