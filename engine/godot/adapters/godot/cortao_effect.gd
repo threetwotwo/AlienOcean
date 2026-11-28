@@ -20,10 +20,18 @@ var filter_normal := 16.0           # CORTAO default 128; 16 with shape normals:
 var animate := false              # force a new seed every frame; otherwise it follows the viewport (TAA / FSR 2 / MetalFX temporal); constant without one: no flicker
 var invert_flip := false          # checks only: the planted fault (AO lands mirrored)
 var depth_normals := true         # the shape's normal from depth, not the materials' detail normal (see cortao_prepass.glsl)
+var light_weighted := false       # (trial, off by default) each open ray counts by the water's light from its direction (above: light_down, below: light_up)
+var light_down := 1.0             # luminance of the upper half of the field (WorldRoot: Ek), any unit
+var light_up := 1.0               # luminance of the lower half (WorldRoot: Eu, the sand's bounce)
 var rays := int(OS.get_environment("CORTAO_RAYS")) if OS.get_environment("CORTAO_RAYS") != "" else 16   # 16 or 32 (lookup table per count)
 var samples := int(OS.get_environment("CORTAO_SAMPLES")) if OS.get_environment("CORTAO_SAMPLES") != "" else 16
-var filter_passes_temporal := 1   # with TAA / FSR 2 / MetalFX temporal the upscaler averages frames: one pass, as CORTAO intends
-var filter_passes := 3            # the filter 3 times: our renders have no temporal filter (TAA off, FSR 1 is spatial). cortao_check C5: grain 0.030 (1 pass) -> 0.016
+# CORTAO's filter taps sit 3 pixels apart, so one pass only blends pixels 3 apart: 9 interleaved noise lattices, the dotted
+# "screen door" (cortao_check: residual correlation at a 3 px lag 0.66, and 0.93 after 3 such passes). CORTAO leaves the rest to TAA.
+# The last pass here is the same filter with 1-pixel taps (fine), which blends the lattices into each other.
+var filter_passes_temporal := 2   # with TAA / FSR 2 / MetalFX temporal: CORTAO's pass + the fine pass; the upscaler averages frames
+var filter_passes := 2            # without one (TAA off, FSR 1 is spatial) the same: cortao_check C5 grain 0.009 (3 coarse) -> 0.003, C6 0.84 -> 0.25
+                                  # (2 coarse + fine: C6 0.39, two coarse passes deepen the lattice more than one fine pass undoes)
+var fine_last := OS.get_environment("CORTAO_FAULT_COARSE") == ""   # checks only: env CORTAO_FAULT_COARSE=1 plants the old lattice (cortao_check --fault coarse)
 var capture_next := false         # checks: copy the next result into `captured` (stalls the GPU; tests only)
 var captured: Image
 var gpu_ms := 0.0                 # the three passes' GPU time, last frame read back (RD timestamps; 0 until measured)
@@ -48,6 +56,7 @@ var raw: RID
 var raw2: RID
 var shape_n: RID
 var ubo: RID
+var ubo_main: RID
 var out: RID
 var tex := Texture2DRD.new()      # main thread side of `out`
 var frame := 0
@@ -62,11 +71,11 @@ func _init() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and rd:
-		for r in packed_mips + [packed, raw, raw2, shape_n, out, ubo, lut, smp_border, smp_clamp, pl_pre, pl_main, pl_filt, pl_filt2, sh_pre, sh_main, sh_filt, sh_filt2]:
+		for r in packed_mips + [packed, raw, raw2, shape_n, out, ubo, ubo_main, lut, smp_border, smp_clamp, pl_pre, pl_main, pl_filt, pl_filt2, sh_pre, sh_main, sh_filt, sh_filt2]:
 			if r.is_valid(): rd.free_rid(r)
 
 ## CORTAO's shaders #include its headers; Godot's GLSL compiler has no include path, so the headers are inlined here
-static func load_glsl(path: String, defines := "") -> String:
+static func load_glsl(path: String, defines := "", fine := false) -> String:
 	var s := FileAccess.get_file_as_string(path)
 	var re := RegEx.new(); re.compile("#include\\s*[<\"](CORTAO\\w+\\.h)[>\"]")
 	var guard := 0
@@ -76,6 +85,8 @@ static func load_glsl(path: String, defines := "") -> String:
 		if m == null: break
 		var h := m.get_string(1)
 		var body := "" if seen.has(h) else FileAccess.get_file_as_string(DIR + h).replace("#pragma once", "")
+		if fine and h == "CORTAOFilterPass.h":
+			body = _fine_taps(body)
 		seen[h] = true
 		s = s.substr(0, m.get_start()) + body + s.substr(m.get_end())
 		guard += 1
@@ -84,9 +95,20 @@ static func load_glsl(path: String, defines := "") -> String:
 		s = s.substr(0, nl + 1) + defines + s.substr(nl + 1)
 	return s
 
-func _compile(path: String, defines := "") -> RID:
+## the fine filter: CORTAO's tap offsets (multiples of 3) divided by 3. Edits the header text at load, so the vendored file stays
+## unchanged; an update that renames the offsets fails loudly here (and cortao_check C6 catches a lattice that comes back)
+static func _fine_taps(body: String) -> String:
+	var re := RegEx.new(); re.compile("offsets\\[(\\d)\\] = cortao_int2\\((-?\\d+), (-?\\d+)\\);")
+	var hits := re.search_all(body)
+	if hits.size() != 8: push_error("CORTAO fine filter: expected 8 tap offsets in CORTAOFilterPass.h, found %d" % hits.size())
+	for i in range(hits.size() - 1, -1, -1):
+		var m: RegExMatch = hits[i]
+		body = body.substr(0, m.get_start()) + "offsets[%s] = cortao_int2(%d, %d);" % [m.get_string(1), int(m.get_string(2)) / 3, int(m.get_string(3)) / 3] + body.substr(m.get_end())
+	return body
+
+func _compile(path: String, defines := "", fine := false) -> RID:
 	var src := RDShaderSource.new(); src.language = RenderingDevice.SHADER_LANGUAGE_GLSL
-	src.source_compute = load_glsl(path, defines)
+	src.source_compute = load_glsl(path, defines, fine)
 	var spirv := rd.shader_compile_spirv_from_source(src)
 	if spirv.compile_error_compute != "":
 		push_error("CORTAO %s: %s" % [path, spirv.compile_error_compute]); return RID()
@@ -97,7 +119,7 @@ func _init_compute() -> void:
 	if rd == null: return
 	sh_pre = _compile("res://look/cortao/cortao_prepass.glsl")
 	sh_main = _compile("res://look/cortao/cortao_main.glsl", "#define CORTAO_SAMPLES %d\n#define CORTAO_RAYS %d\n" % [samples, rays])
-	sh_filt = _compile("res://look/cortao/cortao_filter.glsl")
+	sh_filt = _compile("res://look/cortao/cortao_filter.glsl", "", fine_last)   # the last pass: fine taps
 	sh_filt2 = _compile("res://look/cortao/cortao_filter.glsl", "#define CORTAO_OUT_PACKED 1\n")
 	if not (sh_pre.is_valid() and sh_main.is_valid() and sh_filt.is_valid() and sh_filt2.is_valid()): return
 	pl_pre = rd.compute_pipeline_create(sh_pre)
@@ -123,6 +145,7 @@ func _init_compute() -> void:
 	tf.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
 	lut = rd.texture_create(tf, RDTextureView.new(), [FileAccess.get_file_as_bytes(DIR + ("occluder_24x24x16_r32ui.bin" if rays == 32 else "occluder_24x24x16_r16ui.bin"))])
 	ubo = rd.uniform_buffer_create(48)
+	ubo_main = rd.uniform_buffer_create(32)
 	ok = lut.is_valid()
 
 func _free_targets() -> void:
@@ -223,6 +246,10 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	var ub := PackedFloat32Array([mp.decode_float(16), mp.decode_float(20), mp.decode_float(24), mp.decode_float(28),
 		1.0 / sz.x, 1.0 / sz.y, 0.0, 0.0, 1.0 if depth_normals else 0.0, 0.0, 0.0, 0.0]).to_byte_array()
 	rd.buffer_update(ubo, 0, ub.size(), ub)
+	# world up in view space, for the light weighting
+	var upv: Vector3 = rsd.get_cam_transform().basis.inverse() * Vector3.UP
+	var um := PackedFloat32Array([upv.x, upv.y, upv.z, 1.0 if light_weighted else 0.0, maxf(light_down, 0.0), maxf(light_up, 0.0), 0.0, 0.0]).to_byte_array()
+	rd.buffer_update(ubo_main, 0, um.size(), um)
 	_read_time()
 	rd.capture_timestamp("CORTAO begin")
 	var U := RenderingDevice
@@ -242,7 +269,8 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_border, packed]),
 		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_clamp, shape_n]),
 		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [smp_clamp, lut]),
-		_u(U.UNIFORM_TYPE_IMAGE, 3, [raw])]), 0)
+		_u(U.UNIFORM_TYPE_IMAGE, 3, [raw]),
+		_u(U.UNIFORM_TYPE_UNIFORM_BUFFER, 4, [ubo_main])]), 0)
 	rd.compute_list_set_push_constant(cl, mp, mp.size())
 	rd.compute_list_dispatch(cl, (sz.x + 15) / 16, (sz.y + 15) / 16, 1)
 	rd.compute_list_add_barrier(cl)
