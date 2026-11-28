@@ -96,5 +96,6 @@ void fragment() {
 	if (use_normal_tex > 0.5) { NORMAL_MAP = texture(normal_tex, UV).rgb; NORMAL_MAP_DEPTH = normal_scale; }
 	cl_fill = creature_fill(cl_wpos, (INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	ALBEDO *= cl_fill;
+	AO = min(AO, screen_ao(SCREEN_UV));   // CORTAO when on (look/screen_ao.gdshaderinc)
 	ALBEDO = creature_debug_albedo(ALBEDO, TIME, INV_VIEW_MATRIX, PROJECTION_MATRIX, VIEWPORT_SIZE);
 }

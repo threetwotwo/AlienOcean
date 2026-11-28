@@ -1,4 +1,5 @@
 // Ported lagoon water physics (under_model.py / lagoonwater PHYS_CODE + UNDER_PHYS). Shared by every water shader.
+#include "res://look/screen_ao.gdshaderinc"   // CORTAO screen AO for every lit material (ao thread 28 Nov)
 global uniform float water_y;
 global uniform float water_floor_y;
 global uniform vec3 water_a;

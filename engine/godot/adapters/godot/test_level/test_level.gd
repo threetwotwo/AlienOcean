@@ -107,7 +107,7 @@ func worst_frame_ms(seconds := 10.0) -> float:
 # ---- switches: every one has a getter and a setter, so the test can prove each one returns to where it was ----
 
 func toggle_names() -> Array:
-	return ["sdfgi", "god_rays", "caustics", "agx", "taa", "ssao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider"]
+	return ["sdfgi", "god_rays", "caustics", "agx", "taa", "ssao", "cortao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider"]
 
 func get_toggle(n: String) -> bool:
 	var wr := game.world_root
@@ -118,6 +118,7 @@ func get_toggle(n: String) -> bool:
 		"agx": return wr.agx_fx.enabled
 		"taa": return get_viewport().use_taa
 		"ssao": return wr.env.ssao_enabled
+		"cortao": return wr.ao_mode == "cortao"
 		"ssil": return wr.env.ssil_enabled
 		"shadows": return wr.light.shadow_enabled
 		"half_res": return get_viewport().scaling_3d_scale < 0.99
@@ -137,7 +138,8 @@ func set_toggle(n: String, on: bool) -> void:
 		"caustics": wr.caustics.enabled = on
 		"agx": wr.set_agx(on)
 		"taa": get_viewport().use_taa = on
-		"ssao": wr.env.ssao_enabled = on
+		"ssao": wr.set_ao("ssao" if on else ("off" if wr.ao_mode != "cortao" else "cortao"))
+		"cortao": wr.set_ao("cortao" if on else "ssao")   # CORTAO in place of SSAO (ao thread 28 Nov); off = back to SSAO
 		"ssil": wr.env.ssil_enabled = on
 		"shadows": wr.light.shadow_enabled = on
 		"half_res":
@@ -277,7 +279,7 @@ func stats() -> Dictionary:
 
 # ---- benchmark (F9 in the panel, or AO_BENCH=1 at start: run_benchmark.command): the cost of each system on this machine ----
 
-const BENCH_SWITCHES := ["sdfgi", "ssao", "ssil", "shadows", "god_rays", "caustics", "agx", "grass_v2", "sea", "schools", "lagoon", "half_res"]
+const BENCH_SWITCHES := ["sdfgi", "ssao", "cortao", "ssil", "shadows", "god_rays", "caustics", "agx", "grass_v2", "sea", "schools", "lagoon", "half_res"]
 var bench_running := false
 signal bench_done(path: String)
 
@@ -319,7 +321,7 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 			"saves_gpu_ms": snappedf(base.gpu_ms - r.gpu_ms, 0.01)})
 		set_toggle(n, on)
 	for n in BENCH_SWITCHES:
-		if not n in ["half_res", "lagoon", "grass_v2"]: set_toggle(n, false)
+		if not n in ["half_res", "lagoon", "grass_v2", "cortao"]: set_toggle(n, false)
 	await get_tree().create_timer(settle).timeout
 	rows.append({"case": "all effects off (lagoon kept)", "r": await _bench_measure(secs)})
 	apply_state(s0)
