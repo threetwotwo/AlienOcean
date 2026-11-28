@@ -95,6 +95,7 @@ glbpatch.patch(glb, node_extras={'rig': {'alien_ocean': dict(swim=SW['extras'], 
                anim_extras={n: dict(loop=True) for n in ('swim_loop', 'breathe_loop')})
 tris = sum(sum(len(p.vertices) - 2 for p in o.data.polygons) for o in [body] + list(fin_obs.values()))
 stats = dict(glb=os.path.basename(glb), kb=round(os.path.getsize(glb) / 1024), tris=tris, bones=len(rig.data.bones),
-             hulls=len(HUL), swim_loop_closure_BL=SW['loop_err'], beat_Hz=SW['extras']['clips']['swim_loop']['beat_Hz'])
+             hulls=len(HUL), swim_loop_closure_BL=SW['loop_err'], beat_Hz=SW['extras']['clips']['swim_loop']['beat_Hz'],
+             swim_keys_hz=round(SW['swim_fps'], 1), jitter=SW['extras']['jitter'])
 json.dump(stats, open(os.path.join(OUT, 'blockout_glb.json'), 'w'), indent=1)
 print('BLOCKOUT_GLB', json.dumps(stats))
