@@ -26,7 +26,7 @@ global uniform vec3 water_sun_air;
 global uniform float water_sun_lux;
 #include "res://look/sea_foam_shade.gdshaderinc"   // the whitecaps' look (after the lines above: it uses them)
 global uniform float water_sky_nits;   // the clear sky as a uniform dome, nits (sky lux / pi)
-uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear;   // read at mip 0 only: no mip chain (sea speed thread: Godot builds the screen copy's mips only when a shader asks for them)
 // The water's own colour, seen through the surface (28 Nov, Gary: "unify them, for seamless transitions"): the
 // shallow-water reflectance model (Maritorena et al. 1994, Lee et al. 1998): what comes up through the surface is the
 // floor, dimmed by the water on the way, plus the deep water's own light, Rrs x Ed, in the share the floor no longer

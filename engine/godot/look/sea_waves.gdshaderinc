@@ -1,4 +1,4 @@
-// Sea waves 0.1.0 (water surface thread): reading the FFT sea (adapters/godot/fft_sea.gd) for the sea mesh and its
+// Sea waves 0.2.0 (water surface thread; 0.2.0 sea speed thread: taps along the view only where needed): reading the FFT sea (adapters/godot/fft_sea.gd) for the sea mesh and its
 // shading. Ported from lagoonwater v98:
 //   sea_vertex_world()  = LW_VS_HLSL: nested square rings round the camera (snap 0.25 m), each vertex moved by every
 //                         cascade its spacing can carry (fade from 4 to 8 vertices per shortest wave), morph between
@@ -26,6 +26,8 @@ const float SEA_CURVE_M = 2.0e5;    // v6: the open water's planet radius
 const float SEA_CHOP = 1.0;
 const float SEA_MOD = 2.0;          // the tank's RipplesOnSwell
 const float SEA_SHARP = 1.0;        // v96: the true value for 4 taps
+const float SEA_TAP1 = 1.0;         // 0.2.0: 1 tap under this many mip texels of stretch along the view
+const float SEA_TAP2 = 2.0;         // 0.2.0: 2 taps under this many, else 4 (sea_taps)
 
 vec3 sea_isl(vec3 g) { return vec3(g.x, -g.z, g.y); }
 vec3 sea_gdt(vec3 i) { return vec3(i.x, i.z, -i.y); }
@@ -79,6 +81,16 @@ vec3 sea_vertex_world(vec2 lp, vec3 cam, float surf, float nq, out vec2 still) {
 	return world;
 }
 
+// 0.2.0 (sea speed thread, 28 Nov): how many of the 4 taps along the view a cascade needs. The taps stand in for the
+// footprint's stretch along the view (the mip already covers it across). Where that stretch is under two texels of the
+// mip being read, 4 taps read the same texels again: then 2 taps (under 2 texels) or 1 (under 1). 4 taps stay wherever
+// the stretch is 2 texels or more, so the grazing sea is drawn exactly as before. along = the stretch (m), fpa = the
+// footprint across the view (m): the read's mip texel is max(fpa, L / 256).
+int sea_taps(float along, float fpa, float L) {
+	float r = along / max(fpa, L / 256.0);
+	return r < SEA_TAP1 ? 1 : (r < SEA_TAP2 ? 2 : 4);
+}
+
 // the drawn slope at a pixel: (dh/dx, dh/dy) island, and the slope variance the pixel does not draw.
 // x = the pixel's island xy, Xl = its still-water point, cam = island camera, P = island pixel point.
 vec3 sea_slope(vec2 x, vec2 Xl, vec3 P, vec3 cam, float fine3) {
@@ -90,6 +102,7 @@ vec3 sea_slope(vec2 x, vec2 Xl, vec3 P, vec3 cam, float fine3) {
 	float mu = max(abs(vu.z), 0.02);
 	float fpa = vl * pa;                                  // m across the view
 	vec2 alongv = vu.xy * (fpa / mu);
+	float alongl = length(alongv);
 	float fp = max(max(fpa, 0.25 * fpa / mu), 1e-5);
 	vec3 tbw = caus_tb_weights(x);
 	float sx = 0.0, sy = 0.0, dxx = 0.0, dyy = 0.0, dxy = 0.0, vxx = 0.0, vyy = 0.0;
@@ -106,6 +119,8 @@ vec3 sea_slope(vec2 x, vec2 Xl, vec3 P, vec3 cam, float fine3) {
 		}
 		float gm = c >= 2 ? md * (c == 3 ? clamp(fine3, 0.0, 1.0) : 1.0) : 1.0;
 		float lod = max(log2(max(fpa, 1e-5) * 256.0 / L), 0.0);
+		int nk = sea_taps(alongl, fpa, L);
+		float fk = 1.0 / float(nk);
 		vec3 a = vec3(0.0), b = vec3(0.0);
 		if (w > 0.0 || c < 2) {
 			for (int v = 0; v < 3; v++) {
@@ -114,13 +129,14 @@ vec3 sea_slope(vec2 x, vec2 Xl, vec3 P, vec3 cam, float fine3) {
 					vec2 rc = v == 0 ? vec2(1.0, 0.0) : (v == 1 ? vec2(0.8, 0.6) : vec2(0.28, 0.96));
 					vec3 av = vec3(0.0), bv = vec3(0.0);
 					for (int k = 0; k < 4; k++) {
-						vec2 xk = Xl + alongv * ((float(k) + 0.5) * 0.25 - 0.5);
+						if (k >= nk) break;
+						vec2 xk = Xl + alongv * ((float(k) + 0.5) * fk - 0.5);
 						vec2 xv = (c < 2 || v == 0) ? xk : (v == 1 ? caus_tb_x1(xk) : caus_tb_x2(xk));
 						vec3 uk = vec3(xv / L, float(c));
 						vec4 g4 = textureLod(sea_deriv, uk, lod);
 						float dxy_ = textureLod(sea_disp, uk, lod).w;
-						av += 0.25 * g4.xyz;
-						bv += 0.25 * vec3(g4.w, dxy_, 0.0);
+						av += fk * g4.xyz;
+						bv += fk * vec3(g4.w, dxy_, 0.0);
 					}
 					if (c >= 2 && v > 0) {
 						// each copy's slope and squeeze turned back into the world (g' = R^T g, J' = R^T J R)
