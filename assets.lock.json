@@ -59,7 +59,7 @@
   },
   {
    "path": "engine/godot/assets/world/lagoon_keyframe/SB_Skirt_0_v18c.glb",
-   "md5": "594c3b4f659f55b79420075023d35fd6",
+   "md5": "ae945522d918de1e8656d5f900acf636",
    "bytes": 553408,
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py"
@@ -96,7 +96,7 @@
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py",
    "path": "engine/godot/assets/world/lagoon_keyframe/SB_Skirt_4_bank.glb",
-   "md5": "421508d14f19affd3af23ccd89b4bed7",
+   "md5": "593e62dac6b95d7f4abafea9195f85db",
    "bytes": 113840
   },
   {
