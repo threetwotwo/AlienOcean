@@ -6,6 +6,12 @@
 ## cost (S10). --fault plants a known bug (the swept guard off and rock push off) and S3 must FAIL.
 extends SceneTree
 
+# S16 bars (set 28 Nov from the measured raw vs zero-twitch drawing; see PASS.md)
+const JERK_MAX := 40.0
+const BEND_STEP_MAX := 0.06
+const FLIPS_MAX := 6.0
+const LAG_MAX := 20.0
+
 const Worlds := preload("res://tests/harness/test_worlds.gd")
 const Species := preload("res://core/m31_school/school_species.gd")
 
@@ -357,7 +363,7 @@ func _run() -> void:
 			# on the U_min table; a cruising fish (2 BL/s) beats all the time on its own speed's table
 			var nd := FishSchool.new(); nd.asset = a; nd._draw_dt = 1.0 / 60.0
 			nd._d_s = PackedFloat64Array([0.0, 0.0]); nd._swim_ph = PackedFloat64Array([0.0, 0.0])
-			nd._bc_t = PackedFloat64Array([0.0, 0.0]); nd._bc_k = PackedFloat64Array([1.0, 1.0])
+			nd._bc_t = PackedFloat64Array([0.0, 0.0]); nd._bc_k = PackedFloat64Array([1.0, 1.0]); nd.look_coast = PackedByteArray([0, 0])
 			var um: float = CM.u_min(sw)
 			var glide := [0, 0]; var ub := [0.0, 0.0]; var steps := 600
 			for t in steps:
@@ -392,6 +398,55 @@ func _run() -> void:
 				roll_ok = roll_ok and bl.y.dot(left) > 0.25 and bl.y.dot(b0.y) > cos(0.3) - 1e-3
 		_add("S15", "fish drawn upright for every heading and pitch, right-handed (not mirrored), rolling into the turn", worst_up > 0.999 and worst_hand > 0.999 and worst_head > 0.999 and roll_ok,
 			{"worst_up": snappedf(worst_up, 0.0001), "handedness": snappedf(worst_hand, 0.0001), "heading": snappedf(worst_head, 0.0001), "roll_into_turn": roll_ok})
+	# S16: no twitching (Gary 28 Nov: "trevally school swims funny, twitching around"). The drawn fish (what the viewer
+	# sees: heading, body bend, swim table, amplitude, steady/phrase mode) over 10 s at 60 fps, 120 trevally, drawn raw
+	# (the old look) and with the zero-twitch drawing. Measured per fish per frame: turn jerk (change of drawn turn rate,
+	# rad/s^2), bend change, swim-speed change; mode flips per fish-minute; and how far the drawn heading trails the sim.
+	if _want("S16"):
+		var res := {}
+		for smooth in [false, true]:
+			_new_world(); await _settle_physics()
+			# built here, not with _school(): this check draws the export when present (the swim phrase logic is the export's)
+			var s := FishSchool.new()
+			s.species_id = "trevally"; s.count = 120; s.seed_ = 7; s.home = Vector3(0, -8, 0); s.tethered = true; s.threaded = true
+			s.process_mode = Node.PROCESS_MODE_DISABLED; s.smooth_look = smooth
+			world.add_child(s)
+			var dt := 1.0 / 60.0
+			var n: int = s.sim.N
+			var prev_w := PackedFloat64Array(); prev_w.resize(n)
+			var prev_f := PackedVector3Array(); prev_f.resize(n)
+			var prev_b := PackedFloat64Array(); prev_b.resize(n)
+			var prev_u := PackedFloat64Array(); prev_u.resize(n)
+			var prev_c := PackedByteArray(); prev_c.resize(n)
+			var jerk := []; var dbend := []; var du := []; var lag := []; var flips := 0
+			var frames := 600
+			for fr in frames:
+				s.advance(dt)
+				if s.threaded: s.sync()
+				for i in n:
+					var f: Vector3 = s.look_fwd[i]
+					if fr >= 2:
+						var hp := Vector2(prev_f[i].x, prev_f[i].z); var hf := Vector2(f.x, f.z)
+						var w := -hp.angle_to(hf) / dt if hp.length() > 1e-4 and hf.length() > 1e-4 else 0.0
+						if fr >= 3:
+							jerk.append(absf(w - prev_w[i]) / dt)
+							dbend.append(absf(s.look_bend[i] - prev_b[i]))
+							du.append(absf(s.look_u[i] - prev_u[i]) / dt)
+							if s.look_coast[i] != prev_c[i]: flips += 1
+						prev_w[i] = w
+						var simf: Vector3 = s.sim.e[i]
+						lag.append(rad_to_deg(f.angle_to(simf.normalized())))
+					prev_f[i] = f; prev_b[i] = s.look_bend[i]; prev_u[i] = s.look_u[i]; prev_c[i] = s.look_coast[i]
+			jerk.sort(); dbend.sort(); du.sort(); lag.sort()
+			var q := func(a: Array, p: float) -> float: return a[int(p * (a.size() - 1))] if a.size() > 0 else 0.0
+			res["smooth" if smooth else "raw"] = {"turn_jerk_p95": snappedf(q.call(jerk, 0.95), 0.1), "turn_jerk_p50": snappedf(q.call(jerk, 0.5), 0.1),
+				"bend_step_p95": snappedf(q.call(dbend, 0.95), 0.0001), "swim_u_rate_p95": snappedf(q.call(du, 0.95), 0.01),
+				"mode_flips_per_fish_min": snappedf(flips / float(n) / (frames * dt / 60.0), 0.1), "heading_lag_deg_p95": snappedf(q.call(lag, 0.95), 0.1),
+				"export": not s.asset.is_empty()}
+			s.queue_free(); await process_frame
+		var sm: Dictionary = res.smooth; var rw: Dictionary = res.raw
+		var ok: bool = sm.turn_jerk_p95 <= JERK_MAX and sm.bend_step_p95 <= BEND_STEP_MAX and sm.mode_flips_per_fish_min <= FLIPS_MAX and sm.heading_lag_deg_p95 <= LAG_MAX
+		_add("S16", "no twitching: drawn turn jerk p95 <= %.0f rad/s^2, bend step p95 <= %.3f, <= %.0f mode flips per fish-minute, drawn heading within %.0f deg of the sim (p95)" % [JERK_MAX, BEND_STEP_MAX, FLIPS_MAX, LAG_MAX], ok, res)
 	if _want("S10"):
 		_new_world(); await _settle_physics()
 		var s := _school("lagoon_baitfish", 120, 2, Vector3(0, -6, 0), true, true)
