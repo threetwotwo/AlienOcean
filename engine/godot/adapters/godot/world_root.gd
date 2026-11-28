@@ -82,6 +82,7 @@ static var glow_ms := float(OS.get_environment("AO_GLOW_MS")) if OS.get_environm
 	set(v):
 		god_rays = v
 		if under_mat: under_mat.set_shader_parameter("god_k", 1.0 if v else 0.0)
+		_sea_god()
 @export var depth_colour_share := DEPTH_WB   # art direction lever (27 Nov: Gary 'art direction trumps'); Unreal 0.25
 const DEPTH_WB := 0.25                # the share given back
 const DEPTH_WB_PATH := 1.2            # m of water per m of depth (sky light)
@@ -115,6 +116,7 @@ var last := {}
 var _gi_reset := 0   # frames left with SDFGI off to drop its cache after a jump in the light (apply)
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
+var waterline_fx: WaterlineEffect     # the per-pixel waterline at the lens (look/waterline_post.glsl), before AgX
 var cortao_fx: CortaoEffect      # CORTAO screen AO (adapters/godot/cortao_effect.gd); set_ao picks it or Godot's SSAO
 var ao_mode := "cortao"   # Gary picked CORTAO (Style choices, 28 Nov 08:42Z); "ssao" = Godot's, the look before
 var _surface: SeaSurface          # make_surface's: its floor map is captured again when the light changes (apply)
@@ -188,7 +190,8 @@ func _init() -> void:
 	env.glow_enabled = true; env.glow_intensity = 0.3
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
 	agx_fx = AgxEffect.new(); cortao_fx = CortaoEffect.new(); cortao_fx.enabled = true
-	var comp := Compositor.new(); comp.compositor_effects = [cortao_fx, agx_fx]; we.compositor = comp
+	var comp := Compositor.new(); waterline_fx = WaterlineEffect.new()
+	comp.compositor_effects = [cortao_fx, waterline_fx, agx_fx]; we.compositor = comp
 	set_ao(ao_mode)
 	set_agx(true)
 	cam_attr = CameraAttributesPhysical.new(); cam_attr.auto_exposure_enabled = false
@@ -220,21 +223,32 @@ func attach_camera(cam: Camera3D) -> void:
 	var qm := QuadMesh.new(); qm.size = Vector2(2, 2); q.mesh = qm
 	var qmat := ShaderMaterial.new(); qmat.shader = load("res://look/underwater_view.gdshader"); q.material_override = qmat
 	under_mat = qmat; qmat.set_shader_parameter("god_k", 1.0 if god_rays else 0.0)
+	SeaSurface.globals(); _sea_god()
 	q.gi_mode = GeometryInstance3D.GI_MODE_DISABLED   # a screen pass, not a solid: never in SDFGI / VoxelGI
 	q.extra_cull_margin = 16384.0; q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; q.layers = 1 << 3   # layer 4: the eye's own quads (the sea floor map's captures skip it)
 	cam.add_child(q)
 	if motes and get_node_or_null("Motes") == null: add_child(Motes.new())   # marine snow around the eye (adapters/godot/motes.gd)
 
 func _process(_dt: float) -> void:
+	if waterline_fx: waterline_fx.water_y = water.level
 	## the god rays' start point moves on each frame only where TAA averages it (Unreal: StateFrameIndexMod8 under TSR);
 	## without TAA it holds still, or the shafts would boil. A temporal upscaler (FSR 2, MetalFX temporal) averages frames as TAA does.
 	if under_mat == null: return
 	var vp := get_viewport()
 	under_mat.set_shader_parameter("god_frame", float(Engine.get_frames_drawn() % 8) if vp and temporal(vp) else 0.0)
+	_sea_god()
+
+func _sea_god() -> void:
+	## the same god-ray switch and frame for the sea's underside, which adds the eye's water path itself (look/sea_under 0.4.0)
+	if under_mat == null: return
+	var vp := get_viewport()
+	var tmp := vp != null and temporal(vp)
+	RenderingServer.global_shader_parameter_set(&"sea_god", Vector4(1.0 if god_rays else 0.0, float(Engine.get_frames_drawn() % 8) if tmp else 0.0, 1.0 if tmp else 0.0, 0.0))
 
 func set_eye_wave(h: float) -> void:
 	## the wave's height over the still level at the eye (m): the under-water view treats the surface as there (GameRoot)
 	if under_mat: under_mat.set_shader_parameter("eye_wave", h)
+	if under_mat: RenderingServer.global_shader_parameter_set(&"sea_eye_wave", h)
 
 static func temporal(vp: Viewport) -> bool:
 	## frames are averaged on this viewport (TAA, FSR 2 or MetalFX temporal), so per-frame noise may move on each frame
@@ -425,7 +439,9 @@ static func declare_globals() -> void:
 		"water_amb_ref": [V, Vector3.ONE], "water_fill_ao": [F, 1.0], "water_amb_sky": [F, 0.0],
 		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "sky_turbidity": [F, turbidity], "sky_overcast": [F, 0.0], "sky_oc_zenith": [F, 0.0], "sky_rayleigh": [V, rayleigh], "sky_horizon_k": [F, horizon_k], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0],
 		# CORTAO screen AO (look/screen_ao.gdshaderinc): the result texture and 1 = on
-		"cortao_ao": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()], "cortao_on": [F, 0.0]}   # set_ao turns it on once the effect runs
+		"cortao_ao": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()], "cortao_on": [F, 0.0],
+		# stress-shot switch (look/hot_probe.gdshaderinc): paint pixels over this many exposed units (or non-finite) in their shader's tag colour; 0 = off
+		"hot_probe": [F, float(OS.get_environment("AO_HOT_PROBE")) if OS.get_environment("AO_HOT_PROBE") != "" else 0.0]}   # set_ao turns it on once the effect runs
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)

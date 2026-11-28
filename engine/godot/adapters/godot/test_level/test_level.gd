@@ -415,6 +415,15 @@ func _bench_invalid(rows: Array) -> String:
 		var fm: float = r.r.frame_ms
 		lo = minf(lo, fm); hi = maxf(hi, fm)
 	if rows.size() > 3 and hi - lo <= 0.4: return "flat frame times (%.2f-%.2f ms across all rows)" % [lo, hi]
+	# a GPU that stops drawing mid-run (Metal, 28 Nov: 3 of 8 Mac runs) leaves SOME rows at one fixed short time (7.2-7.3 ms: the
+	# CPU loop alone) while the rest are real; the log often has no fence line. Two or more rows within 0.12 ms of the shortest,
+	# with the median row over twice as long, can't be real costs.
+	var fms := []
+	for r in rows: fms.append(float(r.r.frame_ms))
+	fms.sort()
+	var stuck := fms.filter(func(v): return v <= lo + 0.12)
+	if rows.size() > 3 and stuck.size() >= 2 and fms[fms.size() / 2] > 2.0 * lo:
+		return "frozen GPU rows: %d rows at %.2f ms (the CPU loop alone) against a median of %.2f ms" % [stuck.size(), lo, fms[fms.size() / 2]]
 	var logp := "user://logs/godot.log"
 	if FileAccess.file_exists(logp):
 		var t := FileAccess.get_file_as_string(logp)

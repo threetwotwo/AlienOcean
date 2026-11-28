@@ -146,6 +146,9 @@ func tick(dt: float, inp, env, t: float) -> void:
 			motor.enable_current(func(p, tt): return env.current(p, tt))   # tt, not t: a lambda keeps the spawn-time t forever
 	var wy: float = env.water_y(s.pos.x, s.pos.z, t) if env.level > -999.0 else -1000.0
 	motor.step(dt, inp, _env_dict, wy)
+	# seated, lying or riding the act places her: the shape must not snag the seat or be pushed out of it
+	var held: bool = motor.act.holding()
+	if col.disabled != held: col.disabled = held
 	# swim branch moved the eye but its collision callback already placed the body; keep them in step
 	_set_swim_shape(not s.shore_grounded)
 	global_position = s.pos - Vector3(0, _eye_off(), 0)

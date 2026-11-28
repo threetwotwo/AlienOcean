@@ -1,4 +1,4 @@
-// Sea seen from below 0.3.2 (water surface thread; 0.2.0 engine thread's stand-in): the ported lagoon underside,
+// Sea seen from below 0.4.0 (water surface thread; 0.2.0 engine thread's stand-in): the ported lagoon underside,
 // lagoonwater v98 WINDOW_HLSL with its saved settings (UnderPhys 1, SunPhys 1, SkyFree 1, Fringe 0, SunTrue 0,
 // Mirror 1, FloorNet 8 = the net as its mean in the mirror), on the FFT sea (look/sea_waves.gdshaderinc).
 //  Snell's window: the share of the pixel's wave facets inside the critical angle (their slope spread + the pixel),
@@ -11,8 +11,15 @@
 // The mirror's floor comes from adapters/godot/sea_floor_map.gd (colour and top height under the eye, from above).
 // 0.3.1 (27 Nov, storm stress test): past the critical angle the refracted ray is held at the grazing ray instead of
 // snapping to straight up (v98 did the same snap; on calm water it never showed, on storm waves it drew hard blobs).
+// 0.4.0 (28 Nov, Gary's playtest 3: "from underwater, body turns invisible when breached"): the underside drew only the
+// sky in Snell's window, so whatever stood above the water (her body breaching, a post, a rock) vanished behind it.
+// It now reads the scene behind it: inside the window the refracted ray meets what stands above the water there
+// (bent, x n^2 like the sky, its sun hidden behind it); outside the window (the mirror) such a thing shows faintly
+// (sea_under_ghost, an art lever: 0 = physical, the mirror only). Reading the screen puts the underside in the
+// transparent pass after the underwater view's quad, so it adds the eye's own water path itself (as the quad does
+// for a ray that ends on geometry; keep the two in step) and writes depth for what draws after it.
 shader_type spatial;
-render_mode unshaded, cull_front, world_vertex_coords, fog_disabled, shadows_disabled;
+render_mode unshaded, cull_front, world_vertex_coords, fog_disabled, shadows_disabled, depth_draw_always;
 #include "res://look/water_physics.gdshaderinc"
 #include "res://look/caustics.gdshaderinc"
 #include "res://look/sky_dome.gdshaderinc"
@@ -21,11 +28,20 @@ render_mode unshaded, cull_front, world_vertex_coords, fog_disabled, shadows_dis
 global uniform vec3 water_sun_air;      // toward the key body in air (Godot y-up)
 global uniform float water_sun_lux;     // its beam, lux on a surface facing it
 #include "res://look/sea_foam_shade.gdshaderinc"   // the whitecaps' look (after the lines above: it uses them)
+#include "res://look/god_rays.gdshaderinc"
+#include "res://look/sea_march.gdshaderinc"
+uniform sampler2D screen_tex : hint_screen_texture, filter_linear;
+uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
+global uniform float sea_eye_wave;      // the wave over the still level at the eye (WorldRoot.set_eye_wave; underwater_view's eye_wave)
+global uniform vec4 sea_god;            // god rays on (1/0), frame mod 8, frames averaged 1/0 (WorldRoot, as underwater_view's god_k / god_frame)
+uniform float sea_under_ghost = 0.0;    // art lever: what stands above the water shows this much through the mirror (0 = physical, the default)
+uniform float max_path = 400.0;
 uniform float nq = 32.0;                // quads per ring (the mesh's)
 uniform float fine3 = 1.0;              // v89: the finest cascade, underside only
 uniform float sun_size = 1.0;           // x the real sun's disc (0.533 deg)
 uniform float mirror_k = 1.0;
 #include "res://look/sea_floor_map.gdshaderinc"
+#include "res://look/hot_probe.gdshaderinc"
 varying vec2 still;
 varying vec3 wi;                        // island world point
 
@@ -72,8 +88,34 @@ void fragment() {
 	float cni = dot(Nm, I);
 	vec3 Tn = normalize(1.33 * I - (1.33 * cni + sqrt(max(1.0 - 1.7689 * (1.0 - cni * cni), 0.0))) * Nm);
 	float tok = 1.0;
-	// the sky along the refracted ray, x n^2 (v92 SkyFree 1: the sky's own brightness)
-	acc += tr * sky_dome_nits(sea_gdt(Tn)) * 1.776889;
+	// 0.4.0: what stands above the water along the refracted ray: the ray marched up out of the water through the screen's
+	// depth (look/sea_march.gdshaderinc, the same march the top side uses), inside Snell's window only (outside it Tn is
+	// the held grazing ray). A miss is the sky, which is right there: an occluded miss too (what hides the ray is under the
+	// water, the wrong medium). The screen copy predates the underwater view, so what it shows is unfogged; the eye's path
+	// is added once, below
+	float obj = 0.0;
+	vec3 obj_c = vec3(0.0);
+	if (cov > 0.02) {
+		vec2 ou; vec3 oocc;
+		float jit = sea_god.z > 0.5 ? sea_ign(FRAGCOORD.xy + 5.588238 * sea_god.y) : 0.5;
+		float to = sea_march(wi, Tn, min(4.0 / max(Tn.z, 0.1), 30.0), 8, jit, PROJECTION_MATRIX * VIEW_MATRIX, INV_PROJECTION_MATRIX, depth_tex, ou, oocc);
+		if (to > 0.0) { obj = 1.0; obj_c = textureLod(screen_tex, ou, 0.0).rgb / max(water_exposure, 1e-6); }
+	}
+	// art lever (sea_under_ghost, 0 = physical): outside the window what stands just above the water shows faintly
+	float ghost = 0.0;
+	vec3 ghost_c = vec3(0.0);
+	if (sea_under_ghost > 0.0) {
+		float d0 = textureLod(depth_tex, SCREEN_UV, 0.0).r;
+		if (d0 > 1e-7) {
+			vec4 v0 = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, d0, 1.0);
+			float h0 = sea_isl((INV_VIEW_MATRIX * vec4(v0.xyz / v0.w, 1.0)).xyz).z - wi.z;
+			ghost = sea_under_ghost * smoothstep(0.0, 0.08, h0) * (1.0 - smoothstep(2.0, 4.0, h0));
+			ghost_c = textureLod(screen_tex, clamp(SCREEN_UV + S.xy * 0.03, vec2(0.0), vec2(1.0)), 0.0).rgb / max(water_exposure, 1e-6);
+		}
+	}
+	tok = 1.0 - obj;
+	// the sky along the refracted ray, x n^2 (v92 SkyFree 1: the sky's own brightness); 0.4.0: or what stands there
+	acc += tr * mix(sky_dome_nits(sea_gdt(Tn)), obj_c, obj) * 1.776889;
 	{   // v24: the sun through the facets, its disc widened by the facets' spread
 		float ang_i = sqrt(max(2.0 * (1.0 - dot(Tn, Ls)), 0.0));
 		float bl_i = max(max(sqrt(0.014 * max(S.z, 0.004)), 1.5 * fwidth(ang_i)), 2e-3);
@@ -117,7 +159,29 @@ void fragment() {
 	vec3 rg = sea_gdt(normalize(Rr));
 	vec3 glow = w_glow(rg, 0.0, uL);
 	vec3 u_mir = glow + f_lit * exp(-c * uL);
-	acc += (1.0 - tr) * mirror_k * u_mir;
+	acc += (1.0 - tr) * mirror_k * mix(u_mir, ghost_c, ghost);
 	acc = sea_foam_under_haze(fo, acc);                     // the bubble cloud under breaking water: a bright haze
-	ALBEDO = min(acc * water_exposure, vec3(30000.0));
+	// 0.4.0: the eye's own water path to here (underwater_view's ray-on-geometry branch, which this pixel draws over)
+	vec3 col = acc * water_exposure;
+	vec3 eye = CAMERA_POSITION_WORLD - vec3(0.0, sea_eye_wave, 0.0);
+	if (eye.y < water_y) {
+		vec3 pw = sea_gdt(wi);
+		float L = min(length(pw - CAMERA_POSITION_WORLD), max_path);
+		vec3 d = normalize(pw - CAMERA_POSITION_WORLD);
+		float z0 = water_y - eye.y;
+		float ocean = sea_bathy_ss(20.0, 120.0, sea_bathy_depth(eye.xz));
+		float fd = w_floor_dist(d, z0);
+		vec2 probe = eye.xz + d.xz * (fd > 0.0 ? fd : 1e5);
+		bool has_floor = z0 < water_y - water_floor_y - 0.05;
+		vec2 fuv = clamp((probe - water_floor_org.xy) / water_floor_org.z + 0.5, vec2(0.002), vec2(0.998));
+		if (has_floor && water_floor_org.w > 0.5) has_floor = textureLod(water_floor_height, fuv, 0.0).a > 0.5;
+		float zend = z0 + max(-d.y, 0.0) * L;
+		float kd = has_floor ? clamp((zend - (water_y - water_floor_y)) / 10.0, 0.0, 1.0) : 1.0;
+		vec3 glow = w_glow(d, z0, L);
+		if (kd > 0.0) glow = mix(glow, w_deep_o(d, z0, L, ocean), kd);
+		vec3 god = sea_god.x > 0.5 ? god_rays(eye, d, L, FRAGCOORD.xy, sea_god.y) : vec3(0.0);
+		col = max(col * exp(-(water_a + water_b) * L) + (glow + god) * water_exposure, vec3(0.0));
+	}
+	ALBEDO = hot_probe_paint(col, vec3(1.0, 0.0, 0.0));   // stress-shot switch (look/hot_probe), off in play
+	if (hot_probe <= 0.0) ALBEDO = min(ALBEDO, vec3(30000.0));
 }
