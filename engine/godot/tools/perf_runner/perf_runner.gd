@@ -50,7 +50,8 @@ func _initialize() -> void:
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	# Pin the window: a window the OS or a person enlarges mid-run (seen 28 Nov: 960x540 -> 2704x1696 halfway through a
 	# benchmark) changes the pixel count and makes every later number meaningless. Each station also records its size.
-	if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_WINDOWED:
+	# (only for an explicit --resolution window: the test level goes full screen by default, and a locked window can't)
+	if "--resolution" in OS.get_cmdline_args():
 		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_RESIZE_DISABLED, true)
 	Engine.max_fps = 0
 	var main = load("res://scenes/test_level.tscn").instantiate()
@@ -135,6 +136,7 @@ func _save() -> void:
 func _station(st: Dictionary, shot: bool, secs := -1.0, retp := true) -> Dictionary:
 	if secs < 0.0: secs = measure_s
 	lvl.set_sea_state(st.get("sea", "lagoon"))
+	for t in st.get("toggles", {}): lvl.set_toggle(t, bool(st.toggles[t]))   # optional per-station switches, e.g. {"sea": false}
 	lvl.set_hour(float(st.get("hour", 12.0)))
 	if retp: lvl.teleport(_tp_index(st))
 	_burn_ms = 40.0 if (fault == "slow" and st.name == "keyframe_view") else 0.0

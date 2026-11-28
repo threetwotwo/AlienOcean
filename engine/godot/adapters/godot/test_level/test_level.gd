@@ -32,6 +32,8 @@ var mouse_captured := false
 var _mouse_acc := Vector2.ZERO
 var _show_collider := false
 var _collider_mesh: MeshInstance3D = null
+var ui: PlayerUI                      # gamepad layer: pause menu, interact prompt, rumble (adapters/godot/ui/player_ui.gd)
+var samples := {}                     # school id -> DNA samples taken (the slice's interact)
 
 func _ready() -> void:
 	name = "TestLevel"
@@ -60,6 +62,12 @@ func _ready() -> void:
 	grass.adopt(game.lagoon)
 	if OS.get_environment("AO_GRASS") == "0": grass.set_enabled(false)
 	_make_teleports()
+	# player UI 0.1.0: pause (Options / Esc), interact (Square / X / E, hold to sample a fish), rumble, remap
+	ui = PlayerUI.new(); ui.name = "PlayerUI"; ui.game = game; ui.reader = game.reader
+	ui.targets_fn = interact_targets
+	ui.on_pause = func(on): if on: set_mouse_captured(false)
+	ui.interacted.connect(_on_interact)
+	add_child(ui)
 	# Full screen by default (Gary 28 Nov: "make it fullscreen, for a more accurate reading and look"), so benches and the look
 	# are judged at the real screen size. AO_WINDOWED=1, or an explicit --resolution (cloud shots, the perf runner's window
 	# profile), keeps a window.
@@ -70,6 +78,26 @@ func _ready() -> void:
 	if DisplayServer.get_name() != "headless" and DisplayServer.screen_get_scale() >= 1.99 and OS.get_environment("AO_FULL_RES") != "1":
 		set_toggle("half_res", true)
 	ready_done = true
+
+## What the girl can act on now: the nearest fish of each school (hold to take a DNA sample). One id per school, so the
+## prompt stays on the school while the nearest fish changes inside it.
+func interact_targets() -> Array:
+	var out := []
+	var eye: Vector3 = game.girl.eye_point()
+	for i in game.school_nodes.size():
+		var sn = game.school_nodes[i]
+		var best := Vector3.ZERO
+		var bd := INF
+		for p in sn._cur:
+			var d: float = p.distance_squared_to(eye)
+			if d < bd: bd = d; best = p
+		if bd < INF:
+			out.append({"id": "school:%d" % i, "pos": best, "verb": "Sample DNA", "range": 3.0, "hold": 0.8})
+	return out
+
+func _on_interact(id: String) -> void:
+	samples[id] = samples.get(id, 0) + 1
+	ui.toast("Trevally sample logged  (%d from this school)" % samples[id])
 
 func _asset_dir(p: String) -> String:
 	if DirAccess.dir_exists_absolute(p): return p
@@ -340,6 +368,20 @@ func _bench_floor(secs: float) -> Dictionary:
 
 ## Stand at the key-frame view; measure everything on, then each system off in turn (back on after), then all of them off.
 ## Writes playtest_reports/bench_<utc>.json (IssueReport.root_dir) and returns its path.
+## A bench run is invalid when the GPU hung (Godot 4.7 on Metal logs "timeout waiting for fence"; afterwards every frame
+## reads a flat ~6.9-7.3 ms) or when every row's frame time sits within +-0.2 ms (no switch changed anything = not measuring).
+func _bench_invalid(rows: Array) -> String:
+	var lo := INF; var hi := -INF
+	for r in rows:
+		var fm: float = r.r.frame_ms
+		lo = minf(lo, fm); hi = maxf(hi, fm)
+	if rows.size() > 3 and hi - lo <= 0.4: return "flat frame times (%.2f-%.2f ms across all rows)" % [lo, hi]
+	var logp := "user://logs/godot.log"
+	if FileAccess.file_exists(logp):
+		var t := FileAccess.get_file_as_string(logp)
+		if "timeout waiting for fence" in t: return "GPU hang in this session's log (timeout waiting for fence)"
+	return ""
+
 func run_bench(settle := 2.0, secs := 4.0) -> String:
 	if bench_running: return ""
 	bench_running = true
@@ -415,6 +457,9 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 			"screen_scale": DisplayServer.screen_get_scale(), "vsync_during_run": "off", "window": win0,
 			"render_scale": get_viewport().scaling_3d_scale, "upscaler": get_viewport().scaling_3d_mode},
 		"view": "Key-frame view", "rows": rows, "video_mem_mb": P.get_monitor(P.RENDER_VIDEO_MEM_USED) / 1048576.0}
+	var inval := _bench_invalid(rows)
+	out["valid"] = inval.is_empty()
+	if not inval.is_empty(): out["invalid_reason"] = inval; print("BENCH INVALID: ", inval)
 	var dir := IssueReport.root_dir()
 	DirAccess.make_dir_recursive_absolute(dir)
 	var path := dir.path_join("bench_%s.json" % Time.get_datetime_string_from_system(true).replace(":", "-"))

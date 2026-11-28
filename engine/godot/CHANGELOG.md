@@ -1,5 +1,25 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, player UI): gamepad-playable test level: pause menu, interact, rumble, remap
+- Gary 28 Nov 07:27Z: plan the player UI and controls port, gamepad first, test gamepad gameplay soon. Swim and camera on the
+  pad were already ported (M01 input 0.1.0, Thalassa v20.19 input.js); this adds what the slice lacked.
+- Pause menu (adapters/godot/ui/player_ui.gd PlayerUI 0.1.0): Options / Esc pauses the game clock; Resume, Options (look speed,
+  invert Y, vibration on/off + strength), Controls (remap pad buttons; Create/PS refused, duplicates refused, reset), Test tools
+  (opens the debug panel, which no longer sits on Options), Save issue report, Quit. Focus navigation on every pad: D-pad /
+  left stick move, Cross-A confirms, Circle-B backs out (InputReader now adds the pad buttons to ui_accept / ui_cancel, which
+  Godot ships with keys only). Resume waits for the confirm button's release so it never reaches the game as a jump.
+- Interact (core/m33_interact/interact_picker.gd 0.1.0, port of Thalassa getInteractionPrompt + hud-overlay prompt timing):
+  the camera picks the target (distance + view centre), hysteresis so a prompt never flickers (no jitter rule), tap or hold
+  with a fill ring. Test level: hold Square / X / E 0.8 s beside a trevally school to take a DNA sample (toast).
+- Prompt drawn beside the target in the world (Thalassa's bottom banner kept as prompt_style "banner"; a style choice), with
+  Thalassa's button badges (adapters/godot/ui/glyph_badge.gd) for PlayStation, Xbox, Nintendo and keyboard, swapped by the
+  last used device. Anchor follows through a critically damped spring at frame rate.
+- Rumble (core/m01_input/haptics.gd 0.1.0): Thalassa playHaptic events and rules (pad only, 42 ms gap, 20-420 ms) for
+  interact, hold ticks, sample done, flipper-kick burst, breach, splash, controller connected, menu moves; through
+  Input.start_joy_vibration on the last used pad. R3 toggles first / third person.
+- Controller loss pauses with "Controller disconnected. Reconnect it, then choose Resume."
+- Checks: tests/test_player_ui.gd U0-U8 23/23 (in run_all.sh via tests/run_player_ui.sh); planted faults flicker and nolatch
+  caught; test_input 16/16; test level checks unchanged.
 ## 0.6.0-dev (28 Nov 2026, blockout kit 0.2.0): rideable creature stand-ins that swim like their animal
 - Gary 28 Nov 07:20Z: vary creature sizes and swimming motion for riding stress tests ("a dolphin swims differently from a
   whale"). blockout/blockout_species.gd: dolphin 2.6 m (up-down body wave, ~1 Hz), humpback 14 m (up-down, 0.24 Hz),
