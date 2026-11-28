@@ -111,6 +111,7 @@ static func _limb(r_top: float, r_mid: float, r_bot: float) -> ArrayMesh:
 	return m.mesh()
 
 func _ready() -> void:
+	SeaFloorMap.mark_mover(self)   # moves: never frozen into the sea floor map (the water drew stale copies, Gary 28 Nov)
 	mat.vertex_color_use_as_albedo = true
 	mat.roughness = 0.62
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED

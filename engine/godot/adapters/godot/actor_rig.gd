@@ -29,6 +29,7 @@ func _init() -> void:
 	body = Body.new(); body.name = "PlayerBody"
 
 func _ready() -> void:
+	SeaFloorMap.mark_mover(self)   # moves: never frozen into the sea floor map (the water drew stale copies, Gary 28 Nov)
 	add_child(body)
 	# treading floats her with the head out of the water (eye 8 cm above the waterline, chin at it), not Thalassa's eye 14 cm under
 	body.motor.swimmer.config["tread_eye"] = 0.08

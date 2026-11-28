@@ -91,6 +91,7 @@ var _bc_k := PackedFloat64Array()        # burst-and-coast: drawn amplitude fact
 const BC_BEATS := 2.0                    # beats per burst (export r2: below U_min the engine swims beats then a glide)
 
 func _ready() -> void:
+	SeaFloorMap.mark_mover(self)   # moves: never frozen into the sea floor map (the water drew stale copies, Gary 28 Nov)
 	var aid: String = Species.params(species_id).get("asset", "")
 	if use_asset and CreatureMesh.available(aid):
 		asset = CreatureMesh.load_species(aid, look)
