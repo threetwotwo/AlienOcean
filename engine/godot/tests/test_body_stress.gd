@@ -1011,8 +1011,13 @@ func _film_frame(pose: Dictionary) -> void:
 		br.y = 0.0
 		if br.length() < 0.1: br = Vector3.RIGHT
 		br = br.normalized()
+		var act_rest: bool = cur.opts.has("rest") and body.motor.act.kind == "rest" and body.motor.act.holding()
+		if act_rest:     # seated / lying: out in the room in front of the seat, a little to one side (her right may be a wall)
+			var st: Transform3D = body.motor.act.spec.seat
+			var fr: Vector3 = -st.basis.z; fr.y = 0.0
+			br = (fr.normalized() * 0.82 + st.basis.x.normalized() * 0.57).normalized()
 		if cam_side == Vector3.ZERO or frame_i == 0: cam_side = br
-		if cam_side.dot(br) < 0.0: br = -br     # (keep the same side when she reverses)
+		if cam_side.dot(br) < 0.0 and not act_rest: br = -br     # (keep the same side when she reverses)
 		cam_side = cam_side.slerp(br, 0.06).normalized()
 		tgt = pel + Vector3(0, 0.08, 0)
 		var cp := tgt + cam_side * 2.6 + Vector3(0, 0.10, 0)
