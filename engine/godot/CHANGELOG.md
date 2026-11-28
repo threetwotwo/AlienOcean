@@ -131,6 +131,12 @@
   mode, and runs motor cases inside the gym: 72/72 at 30/60/120 fps and at a 30/120 Hz tick, rates agree to 0.0 cm, planted
   faults (seats 5 cm low, grey mode dropping collision) caught (tests/run_blockout.sh, in run_all.sh).
 
+## 0.6.0-dev (28 Nov 2026, lagoon dressing): bank skirt edges under the sand
+- AO thread: CORTAO (default since #149) drew a stair-step line on the sand left of the table coral: the outer edge of the patch
+  rock's bank skirt (5 cm grid, 5 mm under a sand that undulates). Past the bank (0 beyond 0.45 m) the bank skirts now ramp down
+  4 cm to their 0.6 m edge (SKIRT_EDGE_DROP), so the drawn sand covers the edge. SB_Skirt_4_bank and SB_Skirt_0_v18c re-exported;
+  the AO/normal buffer at the key camera shows no line.
+
 ## 0.6.0-dev (28 Nov 2026, lagoon dressing): lighter coral rubble
 - Test level thread: kf_coral_rubble was 462k tris, 94 MB (flat-shaded, unshared verts) with a full-detail concave copy as its
   collider (the second mesh seen on the Mac). Now one drawn mesh decimated to 80k tris (RUBBLE_TRIS), smooth by angle 40 deg so

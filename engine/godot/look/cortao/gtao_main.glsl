@@ -30,6 +30,9 @@ layout(push_constant, std430) uniform Params {
 layout(set = 0, binding = 0) uniform usampler2D packedDataBuffer;   // NEAREST, clamp to border (0 = sky)
 layout(set = 0, binding = 1) uniform sampler2D normalBuffer;        // shape normal * 0.5 + 0.5
 layout(r32ui, set = 0, binding = 3) uniform restrict writeonly uimage2D outputBuffer;
+#ifdef CORTAO_HALF
+layout(r32ui, set = 0, binding = 5) uniform restrict writeonly uimage2D halfPacked;   // see cortao_main.glsl
+#endif
 
 const float PI = 3.14159265358979;
 const float HALF_PI = 1.5707963267949;
@@ -58,8 +61,15 @@ void main() {
 	if (pix.x >= res.x || pix.y >= res.y) return;
 	vec2 uv = (vec2(pix) + 0.5) * P.inv_res;
 	float z = lin_depth(uv, 0.0);
+#ifdef CORTAO_HALF
+	imageStore(halfPacked, pix, uvec4(texelFetch(packedDataBuffer, pix * 2 + 1, 0).r, 0u, 0u, 0u));
+#endif
 	if (z == 0.0) return;   // sky
+#ifdef CORTAO_HALF
+	vec3 N = normalize(texelFetch(normalBuffer, pix * 2 + 1, 0).xyz * 2.0 - 1.0);   // half res: computed at full pixel 2p + 1
+#else
 	vec3 N = normalize(texelFetch(normalBuffer, pix, 0).xyz * 2.0 - 1.0);
+#endif
 	vec3 C = view_pos(uv, z * 0.99999);
 	vec3 V = normalize(-C);
 

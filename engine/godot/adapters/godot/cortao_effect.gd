@@ -42,6 +42,10 @@ var gtao_slices := 4.0            # XeGTAO "high" is 3 slices x 3 steps; budget 
 var gtao_steps := 6.0
 var gtao_power := 2.2             # XeGTAO FinalValuePower default
 var vbao_thickness := 0.4         # m: how deep an occluder is assumed to be (bitmask)
+# Half resolution (Mac bench 28 Nov, FSR 1 + TAA: CORTAO full res +4 to 6 ms over Godot's SSAO, which itself runs at half size
+# by default): the occlusion pass and its filter run on a quarter of the pixels, then cortao_upsample.glsl brings the result back
+# with depth-aware weights. Chosen when the shaders compile: env CORTAO_HALF=0 keeps full resolution.
+var half_res_ao := OS.get_environment("CORTAO_HALF") != "0"
 var capture_next := false         # checks: copy the next result into `captured` (stalls the GPU; tests only)
 var captured: Image
 var gpu_ms := 0.0                 # the three passes' GPU time, last frame read back (RD timestamps; 0 until measured)
@@ -56,6 +60,10 @@ var pl_main: RID
 var pl_filt: RID
 var pl_filt2: RID
 var sh_gtao: RID
+var sh_filt3: RID
+var sh_up: RID
+var pl_filt3: RID
+var pl_up: RID
 var sh_vbao: RID
 var pl_gtao: RID
 var pl_vbao: RID
@@ -68,6 +76,7 @@ var packed: RID
 var packed_mips: Array[RID] = []
 var raw: RID
 var raw2: RID
+var half_packed: RID              # half_res_ao: depth / normal at the occlusion pass's resolution, for the filter
 var shape_n: RID
 var ubo: RID
 var ubo_main: RID
@@ -85,7 +94,7 @@ func _init() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and rd:
-		for r in packed_mips + [packed, raw, raw2, shape_n, out, ubo, ubo_main, lut, smp_border, smp_clamp, pl_pre, pl_main, pl_filt, pl_filt2, pl_gtao, pl_vbao, sh_pre, sh_main, sh_filt, sh_filt2, sh_gtao, sh_vbao]:
+		for r in packed_mips + [packed, raw, raw2, half_packed, shape_n, out, ubo, ubo_main, lut, smp_border, smp_clamp, pl_pre, pl_main, pl_filt, pl_filt2, pl_gtao, pl_vbao, pl_filt3, pl_up, sh_pre, sh_main, sh_filt, sh_filt2, sh_gtao, sh_vbao, sh_filt3, sh_up]:
 			if r.is_valid(): rd.free_rid(r)
 
 ## CORTAO's shaders #include its headers; Godot's GLSL compiler has no include path, so the headers are inlined here
@@ -132,12 +141,17 @@ func _init_compute() -> void:
 	rd = RenderingServer.get_rendering_device()
 	if rd == null: return
 	sh_pre = _compile("res://look/cortao/cortao_prepass.glsl")
-	sh_main = _compile("res://look/cortao/cortao_main.glsl", "#define CORTAO_SAMPLES %d\n#define CORTAO_RAYS %d\n" % [samples, rays])
+	var hd := "#define CORTAO_HALF 1\n" if half_res_ao else ""
+	sh_main = _compile("res://look/cortao/cortao_main.glsl", "#define CORTAO_SAMPLES %d\n#define CORTAO_RAYS %d\n" % [samples, rays] + hd)
 	sh_filt = _compile("res://look/cortao/cortao_filter.glsl", "", fine_last)   # the last pass: fine taps
 	sh_filt2 = _compile("res://look/cortao/cortao_filter.glsl", "#define CORTAO_OUT_PACKED 1\n")
-	sh_gtao = _compile("res://look/cortao/gtao_main.glsl")
-	sh_vbao = _compile("res://look/cortao/gtao_main.glsl", "#define GTAO_BITMASK 1\n")
-	if not (sh_pre.is_valid() and sh_main.is_valid() and sh_filt.is_valid() and sh_filt2.is_valid() and sh_gtao.is_valid() and sh_vbao.is_valid()): return
+	sh_gtao = _compile("res://look/cortao/gtao_main.glsl", hd)
+	sh_vbao = _compile("res://look/cortao/gtao_main.glsl", "#define GTAO_BITMASK 1\n" + hd)
+	sh_filt3 = _compile("res://look/cortao/cortao_filter.glsl", "#define CORTAO_OUT_PACKED 1\n", fine_last)   # half res: the last pass, packed
+	sh_up = _compile("res://look/cortao/cortao_upsample.glsl")
+	if not (sh_pre.is_valid() and sh_main.is_valid() and sh_filt.is_valid() and sh_filt2.is_valid() and sh_gtao.is_valid() and sh_vbao.is_valid() and sh_filt3.is_valid() and sh_up.is_valid()): return
+	pl_filt3 = rd.compute_pipeline_create(sh_filt3)
+	pl_up = rd.compute_pipeline_create(sh_up)
 	pl_gtao = rd.compute_pipeline_create(sh_gtao)
 	pl_vbao = rd.compute_pipeline_create(sh_vbao)
 	pl_pre = rd.compute_pipeline_create(sh_pre)
@@ -170,9 +184,9 @@ func _free_targets() -> void:
 	for r in packed_mips:
 		if r.is_valid(): rd.free_rid(r)
 	packed_mips.clear()
-	for r in [packed, raw, raw2, shape_n, out]:
+	for r in [packed, raw, raw2, half_packed, shape_n, out]:
 		if r.is_valid(): rd.free_rid(r)
-	packed = RID(); raw = RID(); raw2 = RID(); shape_n = RID(); out = RID()
+	packed = RID(); raw = RID(); raw2 = RID(); half_packed = RID(); shape_n = RID(); out = RID()
 
 func _make_targets(sz: Vector2i) -> void:
 	_free_targets()
@@ -185,14 +199,22 @@ func _make_targets(sz: Vector2i) -> void:
 	for m in 8:
 		packed_mips.append(rd.texture_create_shared_from_slice(RDTextureView.new(), packed, 0, mini(m, mips - 1), 1))
 	f.mipmaps = 1
+	var ws := _work_size(sz)
+	f.width = ws.x; f.height = ws.y
 	raw = rd.texture_create(f, RDTextureView.new())
 	raw2 = rd.texture_create(f, RDTextureView.new())
+	half_packed = rd.texture_create(f, RDTextureView.new())
+	f.width = sz.x; f.height = sz.y
 	f.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
 	shape_n = rd.texture_create(f, RDTextureView.new())
 	f.format = RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM
 	f.usage_bits |= RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	out = rd.texture_create(f, RDTextureView.new())
 	_publish.call_deferred(out)
+
+func _work_size(sz: Vector2i) -> Vector2i:
+	## where the occlusion and filter passes run: half of each side with half_res_ao (half pixel h sits at full pixel 2h + 1)
+	return Vector2i(sz.x / 2, sz.y / 2) if half_res_ao else sz
 
 func _publish(r: RID) -> void:
 	tex.texture_rd_rid = r
@@ -236,6 +258,8 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	var seed := (frame * 2654435761) & 0xFFFFFFFF if (animate or _temporal(rsb)) else 0x9E3779B9
 	frame += 1
 	var res := sz.x | (sz.y << 16)
+	var ws := _work_size(sz)
+	var wres := ws.x | (ws.y << 16)
 	# Godot hands over the projection already corrected for Vulkan (measured 28 Nov: Y flipped, reverse-Z remapped to 0..1:
 	# d = P[3][2] / zlin - P[2][2]). So linear depth 1 / zlin = d / P[3][2] + P[2][2] / P[3][2], read from the matrix itself, and
 	# CORTAO's flipY is needed only if a projection ever arrives unflipped (P[1][1] > 0).
@@ -247,8 +271,8 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	var projX: float = P[0][0]; var projY: float = P[1][1]; var pox: float = P[2][0]; var poy: float = P[2][1]
 	var invX: float = I[0][0]; var invY: float = I[1][1]; var iox: float = I[3][0]; var ioy: float = I[3][1]
 	var mp := PackedByteArray(); mp.resize(80)
-	mp.encode_u32(0, res); mp.encode_u32(4, seed)
-	mp.encode_float(8, invX / float(sz.x) * sqrt(2.0)); mp.encode_float(12, radius)
+	mp.encode_u32(0, wres); mp.encode_u32(4, seed)
+	mp.encode_float(8, invX / float(ws.x) * sqrt(2.0)); mp.encode_float(12, radius)
 	var ys := -1.0 if flip_y else 1.0
 	mp.encode_float(16, 2.0 * invX); mp.encode_float(20, ys * 2.0 * invY)
 	mp.encode_float(24, -invX + iox); mp.encode_float(28, -ys * invY + ioy)
@@ -256,10 +280,10 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	mp.encode_float(40, -0.5 + 0.5 * pox); mp.encode_float(44, -0.5 + ys * 0.5 * poy)
 	var mac := absf(invY) * screen_radius * 2.0
 	mp.encode_float(48, mac / sqrt(mac * mac + 1.0))
-	mp.encode_float(52, log(absf(projY) * float(sz.y) * 0.5) / log(2.0) + mip_bias)
+	mp.encode_float(52, log(absf(projY) * float(ws.y) * 0.5) / log(2.0) + mip_bias)
 	mp.encode_float(56, 1.0 / max_slope_comp); mp.encode_float(60, backface_threshold); mp.encode_float(64, backface_boost)
 	var fp := PackedByteArray(); fp.resize(16)
-	fp.encode_u32(0, res); fp.encode_float(4, filter_depth); fp.encode_float(8, filter_normal)
+	fp.encode_u32(0, wres); fp.encode_float(4, filter_depth); fp.encode_float(8, filter_normal)
 
 	var ub := PackedFloat32Array([mp.decode_float(16), mp.decode_float(20), mp.decode_float(24), mp.decode_float(28),
 		1.0 / sz.x, 1.0 / sz.y, 0.0, 0.0, 1.0 if depth_normals else 0.0, 0.0, 0.0, 0.0]).to_byte_array()
@@ -288,14 +312,14 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 		rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(shg, 0, [
 			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_border, packed]),
 			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_clamp, shape_n]),
-			_u(U.UNIFORM_TYPE_IMAGE, 3, [raw])]), 0)
+			_u(U.UNIFORM_TYPE_IMAGE, 3, [raw])] + ([_u(U.UNIFORM_TYPE_IMAGE, 5, [half_packed])] if half_res_ao else [])), 0)
 		var gp := PackedByteArray(); gp.resize(64)
 		for i in 4: gp.encode_float(i * 4, mp.decode_float(16 + i * 4))   # CORTAO's unprojectParams
-		gp.encode_float(16, 1.0 / sz.x); gp.encode_float(20, 1.0 / sz.y); gp.encode_u32(24, res); gp.encode_u32(28, seed)
-		gp.encode_float(32, radius); gp.encode_float(36, screen_radius * sz.y); gp.encode_float(40, vbao_thickness)
+		gp.encode_float(16, 1.0 / ws.x); gp.encode_float(20, 1.0 / ws.y); gp.encode_u32(24, wres); gp.encode_u32(28, seed)
+		gp.encode_float(32, radius); gp.encode_float(36, screen_radius * ws.y); gp.encode_float(40, vbao_thickness)
 		gp.encode_float(44, gtao_slices); gp.encode_float(48, gtao_steps); gp.encode_float(52, gtao_power)
 		rd.compute_list_set_push_constant(cl, gp, gp.size())
-		rd.compute_list_dispatch(cl, (sz.x + 7) / 8, (sz.y + 7) / 8, 1)
+		rd.compute_list_dispatch(cl, (ws.x + 7) / 8, (ws.y + 7) / 8, 1)
 	else:
 		rd.compute_list_bind_compute_pipeline(cl, pl_main)
 		rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_main, 0, [
@@ -303,30 +327,51 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_clamp, shape_n]),
 			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, [smp_clamp, lut]),
 			_u(U.UNIFORM_TYPE_IMAGE, 3, [raw]),
-			_u(U.UNIFORM_TYPE_UNIFORM_BUFFER, 4, [ubo_main])]), 0)
+			_u(U.UNIFORM_TYPE_UNIFORM_BUFFER, 4, [ubo_main])] + ([_u(U.UNIFORM_TYPE_IMAGE, 5, [half_packed])] if half_res_ao else [])), 0)
 		rd.compute_list_set_push_constant(cl, mp, mp.size())
-		rd.compute_list_dispatch(cl, (sz.x + 15) / 16, (sz.y + 15) / 16, 1)
+		rd.compute_list_dispatch(cl, (ws.x + 15) / 16, (ws.y + 15) / 16, 1)
 	rd.compute_list_add_barrier(cl)
+	var fpk: RID = half_packed if half_res_ao else packed   # the filter's depth / normal at the resolution it runs at
 	var src := raw
 	var tmp := _temporal(rsb)
 	for k in (filter_passes_temporal if tmp else filter_passes) - 1:   # extra passes ping-pong raw <-> raw2
 		var dst := raw2 if src == raw else raw
 		rd.compute_list_bind_compute_pipeline(cl, pl_filt2)
 		rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_filt2, 0, [
-			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_border, packed]),
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_border, fpk]),
 			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_border, src]),
 			_u(U.UNIFORM_TYPE_IMAGE, 2, [dst])]), 0)
 		rd.compute_list_set_push_constant(cl, fp, fp.size())
-		rd.compute_list_dispatch(cl, (sz.x / 2 + 8) / 8, (sz.y / 2 + 8) / 8, 1)
+		rd.compute_list_dispatch(cl, (ws.x / 2 + 8) / 8, (ws.y / 2 + 8) / 8, 1)
 		rd.compute_list_add_barrier(cl)
 		src = dst
-	rd.compute_list_bind_compute_pipeline(cl, pl_filt)
-	rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_filt, 0, [
-		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_border, packed]),
-		_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_border, src]),
-		_u(U.UNIFORM_TYPE_IMAGE, 2, [out])]), 0)
-	rd.compute_list_set_push_constant(cl, fp, fp.size())
-	rd.compute_list_dispatch(cl, (sz.x / 2 + 8) / 8, (sz.y / 2 + 8) / 8, 1)
+	if half_res_ao:   # last filter pass (fine taps) at half res, then the depth-aware upsample to full res
+		var dst2 := raw2 if src == raw else raw
+		rd.compute_list_bind_compute_pipeline(cl, pl_filt3)
+		rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_filt3, 0, [
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_border, fpk]),
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_border, src]),
+			_u(U.UNIFORM_TYPE_IMAGE, 2, [dst2])]), 0)
+		rd.compute_list_set_push_constant(cl, fp, fp.size())
+		rd.compute_list_dispatch(cl, (ws.x / 2 + 8) / 8, (ws.y / 2 + 8) / 8, 1)
+		rd.compute_list_add_barrier(cl)
+		rd.compute_list_bind_compute_pipeline(cl, pl_up)
+		rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_up, 0, [
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_clamp, packed]),
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_clamp, dst2]),
+			_u(U.UNIFORM_TYPE_IMAGE, 2, [out])]), 0)
+		var up := PackedByteArray(); up.resize(32)
+		up.encode_s32(0, sz.x); up.encode_s32(4, sz.y); up.encode_s32(8, ws.x); up.encode_s32(12, ws.y); up.encode_float(16, 64.0)
+		rd.compute_list_set_push_constant(cl, up, up.size())
+		rd.compute_list_dispatch(cl, (sz.x + 7) / 8, (sz.y + 7) / 8, 1)
+	else:
+		rd.compute_list_bind_compute_pipeline(cl, pl_filt)
+		rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(sh_filt, 0, [
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, [smp_border, packed]),
+			_u(U.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, [smp_border, src]),
+			_u(U.UNIFORM_TYPE_IMAGE, 2, [out])]), 0)
+		rd.compute_list_set_push_constant(cl, fp, fp.size())
+		rd.compute_list_dispatch(cl, (sz.x / 2 + 8) / 8, (sz.y / 2 + 8) / 8, 1)
 	rd.compute_list_end()
 	rd.capture_timestamp("CORTAO end")
 	if capture_next:
