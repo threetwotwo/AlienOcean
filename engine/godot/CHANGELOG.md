@@ -43,6 +43,7 @@
 - Open: no in-game sound sources yet (ActorRig.hear is the entry); the brain reads the registry and camera one tick old
   (player phase runs before the actors commit, as in Thalassa); breath drives no body motion beyond what Thalassa's rig did
   (next steps).
+
 ## 0.6.0-dev (28 Nov 2026, player UI): gamepad-playable test level: pause menu, interact, rumble, remap
 - Gary 28 Nov 07:27Z: plan the player UI and controls port, gamepad first, test gamepad gameplay soon. Swim and camera on the
   pad were already ported (M01 input 0.1.0, Thalassa v20.19 input.js); this adds what the slice lacked.
@@ -63,6 +64,7 @@
 - Controller loss pauses with "Controller disconnected. Reconnect it, then choose Resume."
 - Checks: tests/test_player_ui.gd U0-U8 23/23 (in run_all.sh via tests/run_player_ui.sh); planted faults flicker and nolatch
   caught; test_input 16/16; test level checks unchanged.
+
 ## 0.6.0-dev (28 Nov 2026, blockout kit 0.2.0): rideable creature stand-ins that swim like their animal
 - Gary 28 Nov 07:20Z: vary creature sizes and swimming motion for riding stress tests ("a dolphin swims differently from a
   whale"). blockout/blockout_species.gd: dolphin 2.6 m (up-down body wave, ~1 Hz), humpback 14 m (up-down, 0.24 Hz),
