@@ -343,10 +343,12 @@ func apply(cam_y: float) -> Dictionary:
 		"ev100": ev, "bias": bias, "under": under, "night_w": nw, "overcast": st.overcast, "beam_k": st.oc_beam_k, "oc_zenith": oc_zenith}
 	return last
 
+var sdfgi_wanted := true    # the user's SDFGI switch (test level): a GI reset in flight turns it back on only if wanted
+
 func _gi_reset_tick() -> void:
 	_gi_reset -= 1
 	if _gi_reset <= 0:
-		RenderingServer.frame_post_draw.disconnect(_gi_reset_tick); env.sdfgi_enabled = true
+		RenderingServer.frame_post_draw.disconnect(_gi_reset_tick); env.sdfgi_enabled = sdfgi_wanted
 
 func _art_k(k: Vector3) -> Vector3:
 	## light_neutral: the light's per-band loss pulled toward its luminance-weighted mean (colour only)

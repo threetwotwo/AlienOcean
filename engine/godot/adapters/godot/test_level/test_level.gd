@@ -108,7 +108,7 @@ func toggle_names() -> Array:
 func get_toggle(n: String) -> bool:
 	var wr := game.world_root
 	match n:
-		"sdfgi": return wr.env.sdfgi_enabled
+		"sdfgi": return wr.sdfgi_wanted
 		"god_rays": return wr.god_rays
 		"caustics": return wr.caustics.enabled
 		"agx": return wr.agx_fx.enabled
@@ -128,7 +128,7 @@ func get_toggle(n: String) -> bool:
 func set_toggle(n: String, on: bool) -> void:
 	var wr := game.world_root
 	match n:
-		"sdfgi": wr.env.sdfgi_enabled = on
+		"sdfgi": wr.sdfgi_wanted = on; wr.env.sdfgi_enabled = on
 		"god_rays": wr.god_rays = on
 		"caustics": wr.caustics.enabled = on
 		"agx": wr.set_agx(on)
