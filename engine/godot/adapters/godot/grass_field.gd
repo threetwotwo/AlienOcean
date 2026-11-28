@@ -9,11 +9,12 @@ extends Node3D
 
 const SHADER := "res://look/seagrass.gdshader"
 const PUSHERS := 24
-const TRAIL_N := 12                 # girl trail samples (the grass closes back in behind her)
-const TRAIL_DT := 0.08              # seconds between trail samples
-const TRAIL_TAU := 0.6              # trail fade (s)
+const TRAIL_N := 16                 # girl trail samples (the grass closes back in behind her)
+const TRAIL_DT := 0.12              # seconds between trail samples
+const TRAIL_TAU := 1.2              # trail fade (s)
 const FISH_N := 10
-const BLADE_W := 0.012              # 12 mm ribbons: turtle grass is 4-12 mm; the wide end reads clean at half resolution
+const BLADE_W := 0.016              # 16 mm ribbons (Gary 28 Nov: "longer and slightly wider, more velvety, not short hair")
+const LENGTH_GAIN := 1.6            # blades this much longer than the tiles' (Gary 28 Nov: longer, velvety)
 const FAR_SHARE := 0.125            # the far set holds one blade in 8 (the shader's thinning floor at thin_end)
 const FISH_R := 12.0                # metres from the camera: only fish this near push grass
 
@@ -41,7 +42,7 @@ static func blade_mesh(segments := 4) -> ArrayMesh:
 	var rows := []
 	for i in segments + 1:
 		var h := float(i) / segments
-		var w := BLADE_W * (1.0 - 0.30 * h) * (1.0 if i < segments else 0.0)
+		var w := BLADE_W * (1.0 - 0.30 * h) * (1.0 if i < segments else 0.45)   # blunt rounded tip: a point goes sub-pixel and dithers
 		rows.append([h, w, 0.16 * h * h])
 	for i in segments:
 		var a: Array = rows[i]; var b: Array = rows[i + 1]
@@ -139,7 +140,7 @@ func _roots(mi: MeshInstance3D) -> Array:
 		var ys := PackedFloat32Array()
 		for i in range(0, n, 7): ys.append(v[i].y)
 		ys.sort()
-		var tile_h := clampf((ys[int(ys.size() * 0.95)] - ys[int(ys.size() * 0.05)]) * xf.basis.get_scale().y, 0.15, 0.6)
+		var tile_h := LENGTH_GAIN * clampf((ys[int(ys.size() * 0.95)] - ys[int(ys.size() * 0.05)]) * xf.basis.get_scale().y, 0.15, 0.6)
 		var start := 0
 		for i in range(1, n + 1):
 			if i < n and v[i].distance_squared_to(v[i - 1]) < 0.0009: continue

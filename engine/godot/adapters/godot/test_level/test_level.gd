@@ -93,8 +93,13 @@ func set_mouse_captured(on: bool) -> void:
 	if DisplayServer.get_name() != "headless":
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE
 
-func _process(delta: float) -> void:
-	frame_ms.append(delta * 1000.0)
+var _last_us := 0
+func _process(_delta: float) -> void:
+	# clock time between frames: _process delta is smoothed and snaps to the display refresh step (read 6.94 ms on a 144 Hz
+	# Mac for every bench row while real frames took 8-13 ms)
+	var now := Time.get_ticks_usec()
+	if _last_us > 0: frame_ms.append((now - _last_us) / 1000.0)
+	_last_us = now
 	if frame_ms.size() > FRAME_HISTORY: frame_ms = frame_ms.slice(frame_ms.size() - FRAME_HISTORY)
 	if _collider_mesh != null: _collider_mesh.global_position = game.girl.body.global_position + game.girl.body.col.position
 

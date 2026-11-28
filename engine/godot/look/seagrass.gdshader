@@ -59,7 +59,7 @@ void vertex() {
 	float k = mix(1.0, 0.125, smoothstep(thin_start, thin_end, dist));
 	float keep = step(hash11(INSTANCE_CUSTOM.x * 3.17 + 0.5), k / set_share);
 	float px = dist * 2.0 / (abs(PROJECTION_MATRIX[1][1]) * VIEWPORT_SIZE.y);    // metres per pixel at the blade
-	float w0 = 0.012;   // blade mesh width (m), GrassField.BLADE_W
+	float w0 = 0.016;   // blade mesh width (m), GrassField.BLADE_W
 	float widen = max(1.0 / sqrt(k), min_px * px / w0);
 	vec3 side = normalize(MODEL_MATRIX[0].xyz);
 	vec3 wp = VERTEX + side * dot(VERTEX - root, side) * (widen - 1.0);        // VERTEX is already world here
@@ -94,7 +94,7 @@ void vertex() {
 	wpos = wp;
 	VERTEX = wp;
 	// soft normal: the blade face bent toward up, so a meadow lights as a volume, not as 6 mm mirrors
-	NORMAL = normalize(mix(normalize(NORMAL), vec3(0.0, 1.0, 0.0), 0.55));
+	NORMAL = normalize(mix(normalize(NORMAL), vec3(0.0, 1.0, 0.0), 0.72));   // velvet: the mass lights as one soft surface
 }
 
 void fragment() {
@@ -113,8 +113,9 @@ void fragment() {
 	float edge = 1.0 - smoothstep(0.0, 0.10, min(edge_u, 1.0 - edge_u));
 	c = mix(c, col_margin, 0.25 * edge);
 	ALBEDO = c;
-	ROUGHNESS = 0.55;
-	SPECULAR = 0.25;
+	ROUGHNESS = 0.7;
+	SPECULAR = 0.15;
+	RIM = 0.35; RIM_TINT = 0.6;                                     // velvet sheen at grazing angles
 	BACKLIGHT = c * vec3(0.55, 0.75, 0.30) * (0.3 + 0.7 * h01);   // light through the blade
 	AO = mix(0.6, 1.0, smoothstep(0.0, 0.7, h01));                 // the meadow's own shade at the roots
 	AO_LIGHT_AFFECT = 0.6;
