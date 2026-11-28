@@ -187,8 +187,8 @@
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py",
    "path": "engine/godot/assets/world/lagoon_keyframe/kf_coral_rubble.glb",
-   "md5": "8a2f7728f002a0a27f0ab6dd4faf5b7c",
-   "bytes": 94231064
+   "md5": "56209d227b38c6fd741dbfa1a66f3705",
+   "bytes": 2456916
   },
   {
    "path": "engine/godot/assets/world/lagoon_keyframe/kf_finger_4.glb",
@@ -215,8 +215,8 @@
    "store": "project files assets/world/lagoon_keyframe/",
    "built_by": "engine/godot/tools/lagoon_dress/export_pieces.py",
    "path": "engine/godot/assets/world/lagoon_keyframe/pieces.json",
-   "md5": "1fd897812cd01b3d78cfcd6c09c20602",
-   "bytes": 6368
+   "md5": "c1f0d86539c7bcec5488520024da22bb",
+   "bytes": 6367
   },
   {
    "store": "project files assets/world/lagoon_keyframe/",
