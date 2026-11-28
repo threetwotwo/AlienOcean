@@ -3,7 +3,7 @@
 ## ceiling at the level; from above: low over the water toward the sun and away, and high over it (tile check).
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/surface_shots.gd -- <pieces_dir> <fish.glb> <out_dir> [w h]
 ## Env as lagoon_shots, plus AO_TIDE=1 (let the tide move the level; default pinned at the mean so frames compare),
-## AO_SEA=B0..B12 (the open sea at that Beaufort force, no floor: shots o1-o5 over the crests and under the troughs), AO_DRESS (lagoon_shots': adds s8_arch_mirror, the key frame's arch in the ceiling), AO_SEA_T (the waves' clock, s; default 37.0, held), AO_HOUR_THEN (the clock jumps there just before each shot, the eye still), AO_SURF_SHOTS (two-character prefixes, e.g. s1,s4; AO_SHOTS
+## AO_SEA=B0..B12 (the open sea at that Beaufort force, no floor: shots o1-o5 over the crests and under the troughs), AO_DRESS (lagoon_shots': adds s8_arch_mirror, the key frame's arch in the ceiling), AO_SEA_T (the waves' clock, s; default 37.0, held), AO_HOUR_THEN (the clock jumps there just before each shot, the eye still), AO_FILM=<frames> (videos: the waves run, frames to <out>/<shot>/, use --fixed-fps 30), AO_SURF_SHOTS (two-character prefixes, e.g. s1,s4; AO_SHOTS
 ## filters lagoon_shots' own list and must stay unset here).
 extends "res://tools/lagoon_shots.gd"
 
@@ -60,7 +60,27 @@ func _setup():
 	i = -1
 	_next()
 
+var _film := -1                 # AO_FILM: frames left to write for this shot (-1 = not filming)
+var _film_n := 0
+
 func _process(d):
+	# AO_FILM=<frames> (videos, run with --fixed-fps 30): each shot, once settled, lets the waves run and writes one frame
+	# per step to <out>/<shot>/f_0000.png ... (the camera holds still), then moves on
+	var film_n := int(OS.get_environment("AO_FILM")) if OS.get_environment("AO_FILM") != "" else 0
+	if film_n > 0 and i >= 0 and i < shots.size():
+		if _film < 0 and wait == 23:
+			_film = film_n; _film_n = 0
+			DirAccess.make_dir_recursive_absolute(args[2].path_join(shots[i][0]))
+			var fs := root.find_child("FftSea", true, false)
+			if fs: fs.hold = false
+		if _film >= 0:
+			if _film_n > 0: root.get_texture().get_image().save_png(args[2].path_join(shots[i][0]).path_join("f_%04d.png" % (_film_n - 1)))
+			_film_n += 1; _film -= 1
+			if _film < 0:
+				var fs2 := root.find_child("FftSea", true, false)
+				if fs2: fs2.hold = true
+				print("FILM ", shots[i][0], " ", film_n, " frames"); _next()
+			return false
 	# AO_HOUR_THEN (check): the clock jumps to this hour 6 frames before each shot, without the eye moving (as the test
 	# level's hour slider does), so whatever was captured under the old light must follow
 	if OS.get_environment("AO_HOUR_THEN") != "" and wait == 18:
