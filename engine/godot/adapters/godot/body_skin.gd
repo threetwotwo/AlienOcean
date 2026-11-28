@@ -1,6 +1,6 @@
 ## M04 Body, Godot adapter: the girl as ONE skinned body (Skeleton3D + a single skinned mesh) driven by the rig's full
-## skeleton (core/m04_body/body_rig.gd _skeleton: pelvis, spine_01..03, neck, head, clavicles, arms, hands, legs, feet,
-## toes). Same proportions and ceramic stand-in look as the rigid mannequin (adapters/godot/mannequin.gd), but the torso
+## skeleton (core/m04_body/body_rig.gd _skeleton: pelvis, spine_01..03, neck_lower, neck_upper, head, eyes, upper lids,
+## jaw, clavicles, arms, hands, legs, feet, toes: 28 bones). Same proportions and ceramic stand-in look as the rigid mannequin (adapters/godot/mannequin.gd), but the torso
 ## is one loft along the spine and every limb blends into its neighbours at the joint, so bends are smooth instead of
 ## pieces meeting at beads. The mesh is built around the first pose it is given and bound to it.
 extends Node3D
@@ -10,7 +10,7 @@ const CERAMIC_MID := Color(0.86, 0.865, 0.865)
 const SOLE_SLATE := Color(0.34, 0.41, 0.46)
 const FACE_BAND := Color(0.24, 0.30, 0.35)
 
-const BONES := ["pelvis", "spine_01", "spine_02", "spine_03", "neck", "head",
+const BONES := ["pelvis", "spine_01", "spine_02", "spine_03", "neck_lower", "neck_upper", "head", "eye_l", "eye_r", "lid_l", "lid_r", "jaw",
 	"clavicle_l", "upperarm_l", "lowerarm_l", "hand_l", "clavicle_r", "upperarm_r", "lowerarm_r", "hand_r",
 	"thigh_l", "calf_l", "foot_l", "ball_l", "thigh_r", "calf_r", "foot_r", "ball_r"]
 
@@ -157,14 +157,16 @@ func _bind(bones: Dictionary) -> void:
 		_ring("spine_03", -0.040, 0.108, 0.078, 0.076, {"spine_02": 0.3, "spine_03": 0.7}),
 		_ring("spine_03", 0.032, 0.126, 0.080, 0.078, {"spine_03": 1.0}),
 		_ring("spine_03", 0.082, 0.112, 0.068, 0.068, {"spine_03": 1.0}),
-		_ring("spine_03", 0.110, 0.058, 0.052, 0.052, {"spine_03": 0.8, "neck": 0.2})]
+		_ring("spine_03", 0.110, 0.058, 0.052, 0.052, {"spine_03": 0.8, "neck_lower": 0.2})]
 	_tube(torso, 20, 3)
 	# neck into the head
-	var n0 := _ring("spine_03", 0.095, 0.050, 0.047, 0.047, {"spine_03": 0.8, "neck": 0.2})
+	# (head upgrade) two neck bones: the lower carries the tilt, the upper the nod and turn
+	var n0 := _ring("spine_03", 0.095, 0.050, 0.047, 0.047, {"spine_03": 0.8, "neck_lower": 0.2})
 	var hd: Transform3D = B["head"]
-	var n1 := {"c": hd * Vector3(0, -0.02, 0.004), "x": hd.basis.x, "z": hd.basis.z, "rx": 0.042, "rzf": 0.042, "rzb": 0.042, "w": {"neck": 0.3, "head": 0.7}, "col": CERAMIC_MID}
-	var nm := {"c": n0.c.lerp(n1.c, 0.5), "x": n0.x.slerp(n1.x, 0.5), "z": n0.z.slerp(n1.z, 0.5), "rx": 0.042, "rzf": 0.041, "rzb": 0.041, "w": {"spine_03": 0.2, "neck": 0.6, "head": 0.2}, "col": CERAMIC_MID}
-	_tube([n0, nm, n1], 14, 2)
+	var n1 := {"c": hd * Vector3(0, -0.02, 0.004), "x": hd.basis.x, "z": hd.basis.z, "rx": 0.042, "rzf": 0.042, "rzb": 0.042, "w": {"neck_upper": 0.3, "head": 0.7}, "col": CERAMIC_MID}
+	var na := {"c": n0.c.lerp(n1.c, 0.33), "x": n0.x.slerp(n1.x, 0.33), "z": n0.z.slerp(n1.z, 0.33), "rx": 0.044, "rzf": 0.042, "rzb": 0.042, "w": {"spine_03": 0.15, "neck_lower": 0.7, "neck_upper": 0.15}, "col": CERAMIC_MID}
+	var nb := {"c": n0.c.lerp(n1.c, 0.67), "x": n0.x.slerp(n1.x, 0.67), "z": n0.z.slerp(n1.z, 0.67), "rx": 0.042, "rzf": 0.041, "rzb": 0.041, "w": {"neck_lower": 0.2, "neck_upper": 0.65, "head": 0.15}, "col": CERAMIC_MID}
+	_tube([n0, na, nb, n1], 14, 2)
 	# head (the rigid mannequin's head loft, on the head bone)
 	var head_st := [[-0.024, 0.042, 0.042, 0.042, 0.004], [0.016, 0.068, 0.076, 0.066, -0.004], [0.066, 0.092, 0.098, 0.094, -0.002],
 		[0.118, 0.102, 0.104, 0.108, 0.002], [0.168, 0.098, 0.096, 0.104, 0.004], [0.208, 0.074, 0.072, 0.078, 0.004], [0.230, 0.020, 0.020, 0.020, 0.004]]
@@ -175,7 +177,8 @@ func _bind(bones: Dictionary) -> void:
 		hr.append({"c": hd * Vector3(0, h[0], h[4]), "x": hd.basis.x, "z": hd.basis.z, "rx": h[1], "rzf": h[2], "rzb": h[3], "w": {"head": 1.0},
 			"col": CERAMIC_LIGHT})
 	_tube(hr, 22, 2)
-	_blob("head", Vector3(0, 0.118, -0.098), Vector3(0.07, 0.016, 0.012), FACE_BAND, 14, 4)     # brow band: facing reads
+	_blob("head", Vector3(0, 0.136, -0.097), Vector3(0.062, 0.007, 0.010), FACE_BAND, 14, 4)     # brow band (above the eyes now)
+	_face()     # (head upgrade) eyes, lids, mouth and chin
 	# arms and legs
 	for sd in ["l", "r"]:
 		var ua: Transform3D = B["upperarm_" + sd]
@@ -209,6 +212,81 @@ func _bind(bones: Dictionary) -> void:
 	mi.skin = skin
 	mi.skeleton = mi.get_path_to(skel)
 	bound = true
+
+# ------------------------------------------------------------------ head upgrade BEGIN: the face (stand-in)
+const SCLERA := Color(0.95, 0.95, 0.93)
+const IRIS := Color(0.20, 0.33, 0.42)
+const PUPIL := Color(0.03, 0.03, 0.04)
+const LASH := Color(0.16, 0.18, 0.21)
+const MOUTH := Color(0.30, 0.13, 0.13)
+const RIG := preload("res://core/m04_body/body_rig.gd")
+
+## eyes (spheres with the pole at the pupil, so the iris and pupil are clean circles), upper lids (shells round each
+## eye on the lid bones, a lash line on the edge), lower lids (fixed shells on the head), the mouth (its lower half on
+## the jaw, so it opens) and the chin (on the jaw)
+func _face() -> void:
+	for sd in ["l", "r"]:
+		var e: Transform3D = B["eye_" + sd]
+		var rings := [[0.0, PUPIL], [0.17, PUPIL], [0.21, IRIS], [0.38, IRIS], [0.43, SCLERA], [0.75, SCLERA], [1.1, SCLERA], [1.6, SCLERA], [2.2, SCLERA], [PI, SCLERA]]
+		var segs := 20
+		var base := nv
+		for rg in rings:
+			for k in segs:
+				var th := TAU * k / segs
+				var ph: float = rg[0]
+				_v(e * (Vector3(sin(ph) * cos(th), sin(ph) * sin(th), -cos(ph)) * RIG.EYE_RADIUS), rg[1], {"eye_" + sd: 1.0})
+		for i in rings.size() - 1:
+			for k in segs:
+				var a := base + i * segs + k
+				var b := base + i * segs + (k + 1) % segs
+				_quad(a, a + segs, b + segs, b)
+		# upper lid: edge (elevation 0 in the lid frame) up over the top; lower lid: from the closed edge down, on the head
+		_shell("lid_" + sd, B["lid_" + sd], 0.0, 2.2, {"lid_" + sd: 1.0}, true)
+		var ec: Vector3 = (B["head"] as Transform3D) * (RIG.EYE_L if sd == "l" else RIG.EYE_R)
+		_shell("head", Transform3D((B["head"] as Transform3D).basis, ec), RIG.LID_CLOSED, -1.9, {"head": 1.0}, true)
+	var hd: Transform3D = B["head"]
+	var jw: Transform3D = B["jaw"]
+	_blob("jaw", jw.affine_inverse() * (hd * Vector3(0, 0.016, -0.056)), Vector3(0.036, 0.017, 0.024), CERAMIC_LIGHT, 14, 8)
+	# mouth: a dark lens on the face, upper half on the head, lower half on the jaw
+	var base2 := nv
+	var mc := Vector3(0, 0.041, -0.084)
+	var mr := Vector3(0.019, 0.0045, 0.007)
+	for ri in 7:
+		var phi := float(ri) / 6.0 * PI
+		for si in 12:
+			var th := float(si) / 12.0 * TAU
+			var nn := Vector3(sin(phi) * cos(th), cos(phi), sin(phi) * sin(th))
+			var wj := clampf(0.5 - nn.y * 0.9, 0.0, 1.0)
+			_v(hd * (mc + nn * mr), MOUTH, {"head": 1.0 - wj + 1e-4, "jaw": wj + 1e-4})
+	for ri in 6:
+		for si in 12:
+			var a := base2 + ri * 12 + si
+			var b := base2 + ri * 12 + (si + 1) % 12
+			_quad(a, a + 12, b + 12, b)
+
+## a spherical shell of LID_RADIUS round the frame's origin, from elevation e0 to e1 (frame's front = -z), the front
+## +-100 deg; the e0 row is the lash line. Both faces (it is thin).
+func _shell(bone: String, fr: Transform3D, e0: float, e1: float, w: Dictionary, lash: bool) -> void:
+	var rows := 9
+	var segs := 16
+	for face in [0, 1]:
+		var r: float = RIG.LID_RADIUS if face == 0 else RIG.LID_RADIUS - 0.0004
+		var base := nv
+		for i in rows + 1:
+			var el := lerpf(e0, e1, float(i) / rows)
+			var col: Color = LASH if (lash and i == 0) else CERAMIC_MID
+			for k in segs + 1:
+				var az := lerpf(-1.75, 1.75, float(k) / segs)
+				_v(fr * (Vector3(sin(az) * cos(el), sin(el), -cos(az) * cos(el)) * r), col, w)
+		for i in rows:
+			for k in segs:
+				var a := base + i * (segs + 1) + k
+				var b := a + 1
+				var c := a + segs + 1
+				var d := c + 1
+				if (face == 0) == (e1 > e0): _quad(a, c, d, b)
+				else: _quad(a, b, d, c)
+# ------------------------------------------------------------------ head upgrade END
 
 ## the hip: a pelvis-coloured cuff that wraps the top of the thigh into the pelvis floor (weights shared, so it stretches, no seam)
 func _hip(sd: String, th: Transform3D) -> void:
