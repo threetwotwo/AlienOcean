@@ -203,8 +203,10 @@ func solve(dt: float, act, s, total_time: float, env: Dictionary) -> Dictionary:
 	var chest_pos: Vector3 = chest_anchor
 	if phase == "latch":
 		chest_pos = rig.push_clear((s.pos - Vector3(0, 0.14, 0)).lerp(chest_anchor, latch_w), 0.125, surf, 0.55)
-	var waist_wave := sin(wing_ph - 1.38) * (0.056 if is_dolphin else (0.044 if is_manta else (0.020 if is_whale else 0.026))) * spd_n
-	var pelvis_wave := sin(wing_ph - 2.05) * (0.095 if is_dolphin else (0.078 if is_manta else (0.036 if is_whale else 0.046))) * spd_n
+	# ADAPT (art direction): the dolphin's own amplitudes (0.056 / 0.095) flapped her legs up ~55 deg each tail beat, the
+	# creature's back clipping the downward half; halved
+	var waist_wave := sin(wing_ph - 1.38) * (0.028 if is_dolphin else (0.044 if is_manta else (0.020 if is_whale else 0.026))) * spd_n
+	var pelvis_wave := sin(wing_ph - 2.05) * (0.046 if is_dolphin else (0.078 if is_manta else (0.036 if is_whale else 0.046))) * spd_n
 	# FIX spine (as the rest poses): Thalassa's 0.175 / 0.155 ride spine against the standing 0.195 / 0.160
 	var raw_waist := chest_pos + spine_down * 0.195 + body_back * (0.032 + waist_wave) + body_right * (sm_drift * 0.40 + cos(wing_ph * 0.5) * 0.015)
 	var cl_waist: Vector3 = rig.push_clear(raw_waist, 0.115, surf, 0.55)
