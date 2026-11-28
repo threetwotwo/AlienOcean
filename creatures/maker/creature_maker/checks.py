@@ -7,6 +7,8 @@ Cage checks (no Blender):
   P5  skin UV: area with stretch in [0.8, 1.25] >= 95 %, no folded UV faces, no texel under two skin faces
   IC1 every part the record names exists; input faults and defaults listed
   EY1 eye rim radius within 5 % of the record eye
+  EA1 the skin round the eye (best plane of the 1.6-2.4 eye radii ring) faces no further up than the scans' line for the eye's height + 8 deg
+  EA2 the eye's own aim lies in the range real eye discs keep to (up -6..12, forward 4..26 deg), and the eye sits true in its rim
   OP1 openings are topology: genus 2 (mouth -> throat -> two gill exits), 2 border loops (eyes), consistent winding,
       and the lips reach each gill slit through interior faces only
   OP2 every interior-only vertex lies inside the body (signed distance < -0.1 % SL)
@@ -128,6 +130,48 @@ def uv_overlap(C, res=UV_OVERLAP_RES):
     return int((cnt > 1).sum())
 
 
+# ---- eye aim. Source: the Species thread's 79 CC0 photogrammetry scans, plans/species_system/gapfill/README.md "Eye aim,
+# round 1" and eye_aim_r1/skin_targets.json + gaze_report.json (meta).
+EA1_LINE = (-57.4, 103.8)    # skin ring degrees above horizontal = a + b x eye height in the local body depth (79 species, r 0.84)
+EA1_TOL = 8.0                # leave-one-out error of that line (7.7 over all scans, 8.0 inside the board's eye heights)
+EA2_UP = (-6.0, 12.0)        # eye disc, degrees above horizontal: scan median 2, spread 8-10 (regression error 10.7; "noise 10-17 on dead scans")
+EA2_FWD = (4.0, 26.0)        # eye disc, degrees toward the snout: scan median 14.3, IQR 10.2-19.6, error 7.8 -> median +- 1.5 errors
+EA2_STATED_TOL = 3.0         # DEFAULT: a record that states its own aim (skeleton.eye.aim, or a gaze that is not the stand-in) is held to it within 3 deg
+EA2_SEAT_MAX = 6.0           # DEFAULT: the rim's best plane within 6 deg of the aim. At 6 deg the iris shell's edge (1.12 eye radii) stands
+                             # 0.12 eye radii off the rim, about what the exporter seats it under the rim (0.4 % SL): more shows as a cocked eye
+
+
+def eye_aim_checks(C, V, form, rec):
+    """EA1 the skin round the eye, EA2 the eye's own aim. Angles as the scans give them: up = degrees above horizontal,
+    fwd = degrees toward the snout (x runs snout to tail, y up, z left)."""
+    R = {}; E = rec['eye']
+    up, fwd, _, h = form.skin_ring()
+    tgt = E['skin_up'] if E.get('skin_up') is not None else EA1_LINE[0] + EA1_LINE[1] * h
+    R['EA1_skin_up_deg'] = round(up, 1); R['EA1_skin_fwd_deg'] = round(fwd, 1); R['EA1_eye_height'] = round(h, 3)
+    R['EA1_target_deg'] = round(float(tgt), 1); R['EA1_target_source'] = 'record skeleton.eye.skin_up' if E.get('skin_up') is not None else 'scan line from eye height'
+    R['EA1_dev_deg'] = round(up - float(tgt), 1)
+    # the fault is skin that faces further up than real skin at that eye height: the head falls away round the eye. Skin
+    # under the band is listed, not failed: the line is no lower limit (same-genus scans sit up to 20 deg under it:
+    # Caranx 2.2 at a line value of 14, Diodon 6.9 at 25, Chlorurus 8.7 at 23; a flat-sided head with a high eye is real)
+    R['EA1_under_band'] = bool(R['EA1_dev_deg'] < -EA1_TOL)
+    R['EA1_pass'] = bool(R['EA1_dev_deg'] <= EA1_TOL)
+    ups, fwds, seat = [], [], []
+    for e, rings in zip(C['eyes'], C['openings']['eye_rings']):
+        n = np.array(e['n'], float); n /= np.linalg.norm(n); sg = e['side']
+        ups.append(math.degrees(math.asin(n[1]))); fwds.append(math.degrees(math.atan2(-n[0], sg * n[2])))
+        P = V[rings[-2]]; rn = np.linalg.svd(P - P.mean(0))[2][2]                  # the rim ring: the opening the shells sit in
+        seat.append(math.degrees(math.acos(min(abs(float(rn @ n)), 1.0))))
+    R['EA2_aim_up_deg'] = [round(v, 1) for v in ups]; R['EA2_aim_fwd_deg'] = [round(v, 1) for v in fwds]
+    R['EA2_below_skin_deg'] = round(up - float(np.mean(ups)), 1)                   # scans: the disc aims 7.5 deg below the skin ring (median, n 48)
+    R['EA2_seat_deg'] = [round(v, 1) for v in seat]
+    st = E.get('aim') or {}
+    bu = (st['up'] - EA2_STATED_TOL, st['up'] + EA2_STATED_TOL) if st.get('up') is not None else EA2_UP
+    bf = (st['fwd'] - EA2_STATED_TOL, st['fwd'] + EA2_STATED_TOL) if st.get('fwd') is not None else EA2_FWD
+    R['EA2_band_up'] = list(bu); R['EA2_band_fwd'] = list(bf)
+    R['EA2_pass'] = bool(all(bu[0] <= v <= bu[1] for v in ups) and all(bf[0] <= v <= bf[1] for v in fwds) and max(seat) <= EA2_SEAT_MAX)
+    return R
+
+
 def cage_checks(C, V, form, rec):
     R = {}; faces, tags = C['faces'], C['ftag']
     skin = [k for k, t in enumerate(tags) if t in SKIN_TAGS]
@@ -174,6 +218,7 @@ def cage_checks(C, V, form, rec):
     R['IC1_pass'] = not R['IC1_missing'] and not R['IC1_input_faults']
     er = rec['eye']['d'] / 2; built = np.mean([e.get('r_side', e['r']) for e in C['eyes']])
     R['EY1_eye_radius_ratio'] = round(float(built / er), 3); R['EY1_pass'] = abs(built / er - 1) <= 0.05
+    R.update(eye_aim_checks(C, V, form, rec))
     tp = topology(C); ps = passages(C)
     R['OP1_topology'] = tp; R['OP1_lips_reach_each_gill'] = ps
     R['OP1_pass'] = tp['genus'] == 2 and tp['border_loops'] == 2 and tp['nonmanifold'] == 0 and tp['winding_faults'] == 0 and len(ps) == 2 and all(ps)
@@ -303,6 +348,16 @@ def planted(C0, V0, VN0, form, rec):
     for key in ('faces', 'ftag', 'uv'): c[key] = [c[key][i] for i in keep]
     PL['P3 (tail cap deleted)'] = not run(c, V0)['P3_pass']
     c = copy.deepcopy(C0); c['eyes'] = [dict(e, r=e['r'] * 0.8, r_side=e.get('r_side', e['r']) * 0.8) for e in c['eyes']]; PL['EY1 (eye 20 % small)'] = not run(c, V0)['EY1_pass']
+    # EA2: the eye shells aimed 25 deg further up, as when the aim was the rim's own plane on a head that falls away
+    def tip(n, a_=math.radians(25)): n = np.array(n, float); h_ = math.hypot(n[0], n[2]); e_ = math.atan2(n[1], h_) + a_; return [n[0] / h_ * math.cos(e_), math.sin(e_), n[2] / h_ * math.cos(e_)]
+    c = copy.deepcopy(C0); c['eyes'] = [dict(e, n=tip(e['n'])) for e in c['eyes']]; PL['EA2 (eyes aimed 25 deg further up)'] = not eye_aim_checks(c, V0, form, rec)['EA2_pass']
+    # EA1: the head leaning in round the eye (narrower above it, wider below: no volume round the eye), the skin's slope steeper by tan 40 deg
+    class Leaning:
+        def __init__(s_, f): s_.f = f
+        def __getattr__(s_, k): return getattr(s_.f, k)
+        def z_on(s_, x, y): return s_.f.z_on(x, y) - math.tan(math.radians(40)) * (y - s_.f.eyy)
+        def skin_ring(s_): return type(s_.f).skin_ring(s_)
+    PL['EA1 (head leaning in round the eye)'] = not eye_aim_checks(C0, V0, Leaning(form), rec)['EA1_pass']
     c = copy.deepcopy(C0); c['uv'] = [(np.array(u) * np.array([1, 1.6])).tolist() if i % 3 == 0 else u for i, u in enumerate(c['uv'])]
     PL['P5 (UV stretched 1.6x on 1/3 of faces)'] = not run(c, V0)['P5_pass']
     c = copy.deepcopy(C0); c['uv'][sk] = c['uv'][sk][::-1]; PL['P5 (one UV face folded)'] = run(c, V0)['P5_uv_folded_faces'] > 0

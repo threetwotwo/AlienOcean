@@ -23,6 +23,8 @@ JAW_MIN = 0.003    # DEFAULT: least thickness of each jaw at the mouth line (SL)
 JAW_K = 0.002      # DEFAULT: the outline is carried round the mouth line over this height (SL), no crease
 HW_MIN = 0.002    # DEFAULT: least half-width of a cross-section (SL). A traced top view can close to a point at the snout
                   # while the side view still has height there; a zero width is a section with no inside (the loft divided by it)
+RING_R = (1.6, 2.4)          # DEFAULT: the skin ring round the eye (x eye radius) whose best plane is "the skin's facing": the ring the Species
+                             # thread's scans are measured on (plans/species_system/gapfill/README.md "Eye aim, round 1", eyedir.py)
 PLATE_CHAMFER = 0.004   # DEFAULT: the edge of a plate drawn from below rises to full thickness over two cells of the dense form (0.2 % SL each)
 
 
@@ -248,6 +250,19 @@ class Form:
         s2 = q / np.maximum(r2, 1e-6)
         d = d / np.sqrt(1 + ((s2 - s) / h) ** 2)
         return np.maximum(d, np.maximum(-x, x - XEND))
+
+    def skin_ring(self, r=RING_R):
+        """best plane of the skin ring round the left eye, as the scans measure it: (degrees above horizontal, degrees
+        toward the snout, unit normal, eye height in the local body depth)."""
+        ex, eyy, er = self.ex, self.eyy, self.er
+        ph = np.linspace(0, 2 * np.pi, 90, endpoint=False); pts = []
+        for rr in np.linspace(r[0], r[1], 5) * er:
+            qx, qy = ex + rr * np.cos(ph), eyy + rr * np.sin(ph)
+            ok = (qy < self.TOP(qx)) & (qy > self.BOT(qx)) & (qx > 0) & (qx < self.XEND)
+            pts.append(np.stack([qx[ok], qy[ok], self.z_on(qx[ok], qy[ok])], -1))
+        P = np.vstack(pts); n = np.linalg.svd(P - P.mean(0))[2][2]; n = n if n[2] > 0 else -n
+        h = (eyy - float(self.BOT(ex))) / (float(self.TOP(ex)) - float(self.BOT(ex)))
+        return float(np.degrees(np.arcsin(n[1]))), float(np.degrees(np.arctan2(-n[0], n[2]))), n, float(h)
 
     # ---- level 1: bone plates, orbit ring, mouth cleft
     def sd_full(self, P, parts=False, cleft=True):
