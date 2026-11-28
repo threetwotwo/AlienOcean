@@ -328,3 +328,9 @@ def test_lateral_line_height_falls_back_when_the_record_holds_none(tmp_path):
     D = json.load(open(REC)); D['record'].setdefault('scales', {}).setdefault('grow', {})['lateral_line'] = {'ll_frac': None}
     p = str(tmp_path / 'r.json'); json.dump(D, open(p, 'w'))
     assert adapt(p)['scales']['ll_frac'] == LL_FRAC
+
+
+def test_front_reference_marked_as_a_section_is_scored_against_a_slice():
+    from creature_maker.silhouette import section_u
+    assert section_u({}) is None and section_u({'front_kind': 'projection'}) is None
+    assert section_u({'front_kind': 'section', 'front_u': 0.57}) == 0.57

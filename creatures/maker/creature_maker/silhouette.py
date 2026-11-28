@@ -120,7 +120,29 @@ def front_has_fins(ref):
     return not (v is False or (isinstance(v, str) and v.strip().lower().startswith('body only')))
 
 
-def _faces2(C, V, view, fins=True):
+def section_u(ref):
+    """x (SL) of a "front" reference that is one cross-section (sliced from a 3D scan at one station: "front_kind":
+    "section", "front_u"), or None for a head-on projection (a photo: the whole body's outline seen from ahead)."""
+    if ref.get('front_kind') == 'section': return float(ref.get('front_u', ref.get('u')))
+    return None
+
+
+def _slice(C, V, u):
+    """the body cage cut by the plane x = u, as one polygon [(z, y)] (segments ordered by angle round their centre; a fish
+    cross-section is star-shaped about its centre)."""
+    P = []
+    for f, t in zip(C['faces'], C['ftag']):
+        if t not in ('body', 'eye', 'mouth', 'cap'): continue
+        Q = V[f]; d = Q[:, 0] - u
+        for a in range(len(f)):
+            b = (a + 1) % len(f)
+            if (d[a] < 0) != (d[b] < 0):
+                w = d[a] / (d[a] - d[b]); q = Q[a] + w * (Q[b] - Q[a]); P.append((q[2], q[1]))
+    P = np.array(P); c = P.mean(0); return P[np.argsort(np.arctan2(P[:, 1] - c[1], P[:, 0] - c[0]))]
+
+
+def _faces2(C, V, view, fins=True, u=None):
+    if view == 'front' and u is not None: return [_slice(C, V, u)]
     F = [V[f] for f, t in zip(C['faces'], C['ftag']) if t in ('body', 'eye', 'mouth', 'cap')]
     if view == 'front' and fins:
         for k, fn in C.get('fins', {}).items():
@@ -143,7 +165,7 @@ def score2(C, V, ref):
     R = {}
     for view in ('front', 'top'):
         if not ref.get(view): continue
-        P = np.asarray(ref[view], float); F = _faces2(C, V, view, front_has_fins(ref)); box = _box2(np.vstack([P] + F))
+        P = np.asarray(ref[view], float); F = _faces2(C, V, view, front_has_fins(ref), section_u(ref) if view == 'front' else None); box = _box2(np.vstack([P] + F))
         R[f'SIL2_{view}_iou'] = round(iou(mask2(F, box), mask2([P], box)), 3)
     if R: R['SIL2_pass'] = all(v >= SIL2_MIN for v in R.values())
     return R
@@ -158,7 +180,7 @@ def outline2(C, V, view, res=500):
 
 
 def overlay2(C, V, ref, view, out_png):
-    P = np.asarray(ref[view], float); F = _faces2(C, V, view, front_has_fins(ref)); box = _box2(np.vstack([P] + F))
+    P = np.asarray(ref[view], float); F = _faces2(C, V, view, front_has_fins(ref), section_u(ref) if view == 'front' else None); box = _box2(np.vstack([P] + F))
     A, B = mask2(F, box), mask2([P], box)
     img = np.full(A.shape + (3,), 245, np.uint8); img[B & ~A] = (90, 130, 255); img[A & ~B] = (255, 90, 90); img[A & B] = (150, 110, 190)
     Image.fromarray(img).save(out_png)
