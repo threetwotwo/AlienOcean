@@ -1710,6 +1710,38 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		var target := chest_pos + (chest_right * lerpf(walk_l, run_l, rb) + (up * lerpf(walk_u, run_u, rb) + chest_fwd * lerpf(walk_f, run_f, rb)))
 		var jf: float = jmp.elbowFlare
 		var pole := sh + (chest_back * lerpf(lerpf(0.45, 0.72, rb), 0.56, jf) + (chest_right * (side * (lerpf(0.16, 0.26, wade_b) + jf * 0.34)) + up * lerpf(lerpf(-0.46, -0.34, wade_b), -0.30, jf)))
+		if not thalassa_exact:
+			# ROOT (Gary: arms "look like a dance" running): the hand was placed by an offset from the chest that grew
+			# with the swing, so at the front of each swing the arm reached out nearly straight at shoulder height and
+			# at the back the elbow stuck out sideways. Arms swing from the shoulder with the elbow held bent: the upper
+			# arm pendulums fore and aft, the elbow bends more at the front of the swing than at the back, and the
+			# forearm points forward and a little across the body. The hand target comes from those angles (forward
+			# kinematics), so the two-bone solve returns exactly that arm. Wading keeps its pose.
+			var ph := clampf(sw.z / 0.25, -1.0, 1.0)                                          # swing: +1 front, -1 back
+			var fl := lerpf(lerpf(0.30, 0.42, ph * 0.5 + 0.5) * ph, lerpf(0.62, 0.48, ph * 0.5 + 0.5) * ph, rb)     # shoulder flexion (rad)
+			fl = clampf(fl, -0.62, 0.48) if rb > 0.5 else fl
+			var abd := lerpf(0.10, 0.16, rb) + maxf(0.0, -ph) * 0.06                        # out from the side; a touch more on the backswing
+			var elb := lerpf(lerpf(0.30, 0.55, ph * 0.5 + 0.5), lerpf(1.25, 1.75, ph * 0.5 + 0.5), rb)  # elbow flexion (rad): bends more in front
+			# in the air the jump's arm offsets (lift, reach, flare) become angles on the same bent arm: lift raises
+			# the arm forward and opens the elbow a little, flare takes it out to the side
+			var lift_a := clampf(sw.y, -0.1, 0.45)
+			fl = lerpf(fl, clampf(ph * 0.45 + lift_a * 2.4, -0.6, 1.5), air_b)
+			elb = lerpf(elb, clampf(1.15 - lift_a * 0.9, 0.45, 1.3), air_b)
+			abd = lerpf(abd, 0.16 + jf * 0.9 + absf(sw.x) * 1.2, air_b)
+			var dn := -up
+			var ua := (Basis(chest_right.normalized(), fl) * dn).normalized()                 # flexion swings it forward (right x down = fwd)
+			ua = (Basis(chest_fwd.normalized(), -side * abd) * ua).normalized()                # abduction: out to her side (fwd x down = -right)
+			var fwd_perp := (chest_fwd - ua * chest_fwd.dot(ua)).normalized()
+			var across := -chest_right * side
+			var bend_dir := (fwd_perp + across * lerpf(0.10, 0.28, rb) * maxf(0.0, ph * 0.5 + 0.5)).normalized()
+			bend_dir = (bend_dir - ua * bend_dir.dot(ua)).normalized()
+			var fa := (ua * cos(elb) + bend_dir * sin(elb)).normalized()
+			var elbow := sh + ua * upper_arm_len
+			var fk_target := elbow + fa * forearm_len
+			var fk_pole := elbow - bend_dir * 0.3 + chest_right * side * 0.05
+			var w_fk := clampf(1.0 - wade_b, 0.0, 1.0)
+			target = target.lerp(fk_target, w_fk)
+			pole = pole.lerp(fk_pole, w_fk)
 		return BM.two_bone(sh, target, pole, upper_arm_len, forearm_len, 0.96, 0.08, 138.0)
 	var arm_l: Dictionary = shore_arm.call(-1.0)
 	var arm_r: Dictionary = shore_arm.call(1.0)
