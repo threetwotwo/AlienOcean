@@ -13,6 +13,7 @@ var tex_b: ImageTexture
 var box := Vector4()         # org xy, span xy (island frame, m)
 var px := Vector2()
 var ms := 0.0
+var cached := false
 
 ## island-frame xy rectangle from Godot-frame meshes: island (x, y) = Godot (x, -z)
 static func island_rect(meshes: Array, margin := 2.0) -> Rect2:
@@ -29,10 +30,22 @@ func bake(host: Node, rect: Rect2, texel := TEXEL) -> void:
 	px = Vector2(n)
 	box = Vector4(rect.position.x, rect.position.y, (n.x - 1) * texel, (n.y - 1) * texel)
 	var imgs := []
-	for which in [0, 1]:
-		imgs.append(await _render(host, n, which))
+	var key := _key(n)
+	for which in [0, 1]:                # cached on disk per bake recipe (shader texts, box, texel): a later start skips the GPU pass
+		var p := "user://sand_bake/%s_%d.res" % [key, which]
+		var img: Image = ResourceLoader.load(p, "", ResourceLoader.CACHE_MODE_IGNORE) if ResourceLoader.exists(p) else null
+		if img == null or img.get_width() != n.x or img.get_height() != n.y:
+			img = await _render(host, n, which)
+			DirAccess.make_dir_recursive_absolute("user://sand_bake")
+			ResourceSaver.save(img, p)
+		else: cached = true
+		imgs.append(img)
 	tex_a = ImageTexture.create_from_image(imgs[0]); tex_b = ImageTexture.create_from_image(imgs[1])
 	ms = (Time.get_ticks_usec() - t0) / 1000.0
+
+func _key(n: Vector2i) -> String:
+	var t := FileAccess.get_file_as_string("res://look/sand_bake.gdshader") + FileAccess.get_file_as_string("res://look/world_surface.gdshaderinc")
+	return (t + str(box) + str(n)).md5_text().substr(0, 16)
 
 func _render(host: Node, n: Vector2i, which: int) -> Image:
 	var vp := SubViewport.new(); vp.size = n; vp.use_hdr_2d = true; vp.transparent_bg = true; vp.disable_3d = true
