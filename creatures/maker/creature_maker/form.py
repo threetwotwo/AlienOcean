@@ -36,6 +36,7 @@ ORBIT_SWELL = 2.0            # DEFAULT: half-length of the dorsal outline's swel
 ROOF_N = 6.0                 # DEFAULT: the boxiest section the tissue may make (superellipse exponent). Art direction: the scans' own roofs are
                              # rounder (gapfill orbit_r1 skeleton.skull.roof_exp 1.25-2.4), a wide forehead is Gary's ask (28 Nov)
 TISSUE_K = 0.04              # DEFAULT: the tissue meets the loft over 4 % of the local half-width, no crease
+LOFT_ITERS = 12      # DEFAULT: false-position steps of loft_point through the tissue; against 40 bisections on the 28 traced fish the worst difference is 4e-7 SL
 PLATE_CHAMFER = 0.004   # DEFAULT: the edge of a plate drawn from below rises to full thickness over two cells of the dense form (0.2 % SL each)
 
 
@@ -264,11 +265,26 @@ class Form:
                 xm, u, v, bm = x_[m], bc(dy / a), bc(dz / b), bc(b)
                 lo = 0.8 * rho[m]; hi = np.minimum(1 / np.maximum(np.abs(u), 1e-9), (1 + self._orb['past'] / bm) / np.maximum(np.abs(v), 1e-9))
                 hi = np.maximum(hi, lo)
-                for _ in range(26):
-                    t = 0.5 * (lo + hi); out = t * self._rnorm0(xm, u, v / self._tissue(xm, t * u)) > 1
-                    lo, hi = np.where(out, lo, t), np.where(out, t, hi)
-                rho[m] = 0.5 * (lo + hi)
+                rho[m] = self._ray_root(lambda t: t * self._rnorm0(xm, u, v / self._tissue(xm, t * u)) - 1, lo, hi)
         return np.stack([x, c + rho * dy, rho * dz], -1)
+
+    @staticmethod
+    def _ray_root(f, lo, hi, n=LOFT_ITERS):
+        """root of f (negative inside the skin, positive outside) between lo and hi: false position with the Illinois
+        halving, which lands within 1e-6 of the bracket in LOFT_ITERS steps where plain bisection took 26 (the cage
+        build asks for some thousands of single points, and the 26 steps were most of its time)."""
+        flo, fhi = f(lo), f(hi); side = np.zeros(np.shape(lo), int)
+        # no crossing inside the bracket: the skin is at the end bisection would have run to
+        lo, hi = np.where(fhi <= 0, hi, lo), np.where(flo >= 0, lo, hi); t = 0.5 * (lo + hi)
+        for _ in range(n):
+            d = fhi - flo; ok = (flo < 0) & (fhi > 0) & (np.abs(d) > 1e-15)
+            t = np.where(ok, (lo * fhi - hi * flo) / np.where(ok, d, 1), 0.5 * (lo + hi))
+            ft = f(t); out = ft > 0
+            # Illinois: an end that stays twice running is halved in weight, so neither end can stall
+            flo, fhi = np.where(out, np.where(side == 1, 0.5 * flo, flo), ft), np.where(out, ft, np.where(side == -1, 0.5 * fhi, fhi))
+            lo, hi, side = np.where(out, lo, t), np.where(out, t, hi), np.where(out, 1, -1)
+            hit = np.abs(ft) < 1e-12; lo, hi = np.where(hit, t, lo), np.where(hit, t, hi)   # found: stay there
+        return t
 
     def theta_of(self, x, y, z):
         c, a, b = self.sec(x); return np.arctan2(z, y - c) % (2 * np.pi)
