@@ -304,6 +304,25 @@ func solve_noclip_leg(hip: Vector3, raw_ankle: Vector3, side: float, pd: Vector3
 					if out == Vector3.ZERO: break
 					noclip_off[side] = noclip_off.get(side, Vector3.ZERO) + out
 					solved = BM.leg(hip, solved.ik.eff + out, side, pd, pf, thigh_len, shin_len, lo)
+				var q_solid2 = surf.get("point_solid")
+				if q_solid2 != null:
+					# FIX (stress B42 at 30 Hz, once the kick followed the breath): with the ankle itself inside the slab the
+					# rays above start in rock and see nothing; rays from the hip to the ankle and the sole plate find the face
+					# between, and the foot comes back to the hip's side of it
+					for _r in 2:
+						var out2 := Vector3.ZERO
+						var fm2: Transform3D = solved.finMat
+						var tips2: Array = [solved.ik.eff]
+						for sp2 in SOLE_PTS: tips2.append(fm2 * sp2)
+						for tip in tips2:
+							if not q_solid2.call(tip): continue
+							var th: Dictionary = surf.ray.call(hip, tip)
+							if not th.is_empty():
+								var o: Vector3 = th.normal * ((tip - th.position).dot(-th.normal) + 0.02)
+								if o.length() > out2.length(): out2 = o
+						if out2 == Vector3.ZERO: break
+						noclip_off[side] = noclip_off.get(side, Vector3.ZERO) + out2
+						solved = BM.leg(hip, solved.ik.eff + out2, side, pd, pf, thigh_len, shin_len, lo)
 	return solved
 
 func solve_head(dt: float, chest_pos: Vector3, neck_anchor: Vector3, c_right: Vector3, c_up: Vector3, c_fwd: Vector3, look_dir: Vector3, lim: Dictionary) -> Dictionary:
@@ -373,6 +392,7 @@ func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense
 	var pose := _update_swim_step(dt, s, _input, total_time, env, sense, on_stroke_pull, on_shore_footstep)
 	if not thalassa_exact:
 		pose = _skeleton(pose, dt, s, env)
+		_breath_hooks(pose, s)     # (breath master clock)
 	return pose
 
 ## M04 skeleton 0.7: the full bone chain the rig's anchors imply (spine_01..03, clavicles, toes), on top of the solved
@@ -550,6 +570,153 @@ static func seg_xf(a: Vector3, b: Vector3, ref: Vector3) -> Transform3D:
 	z = z.normalized()
 	return Transform3D(Basis(y.cross(z), y, z), a)
 
+# ============================================================== breath master clock (M04 breath 0.1, BEGIN)
+## Gary 28 Nov: "Breath is also important. make sure everything syncs to the breath." The brain's breath phase
+## (character_brain.gd) is the one clock the body's secondary motion locks to. All of it is off when thalassa_exact.
+##  - body: _breath_body (skeleton only, like the follow-through): the chest lifts and opens on the inhale, the
+##    clavicles carry the shoulders up a few mm, the head counters the chest's tilt with a slight nod, the belly fills;
+##    depth follows the brain's breath amplitude (deeper with exertion). Prone (swimming) she opens less upward and
+##    more into the water; the body's buoyant pitch bob (update_swim) rides the same breath.
+##  - stroke and kick: _breath_lock pulls the stroke's phase softly onto a whole number of strokes per breath (or one
+##    over two breaths), the kick's onto a whole number of kicks per stroke (rate eased by at most BR_LOCK_MAX, never a
+##    phase step); the brain in turn draws the breath's frequency to the stroke or step cadence.
+##  - hooks: brain_out.exhaleStart / exhaleCount; underwater_exhales counts exhales with the head under water (bubbles).
+const BR_LOCK_K := 0.35           # turns/s of cadence per turn of phase error: the error closes over ~3 s
+const BR_LOCK_MAX := Vector2(0.60, 0.20)     # rate eased at most +-60 % idle (sculling, treading) .. +-20 % full stroke
+const BR_LOCK_RATE := 2.0         # 1/s: the correction itself eases in (no rate step when the ratio changes)
+const BR_EXT := 0.010             # rad: thoracic extension at a full resting inhale, standing (prone 0.006)
+const BR_LIFT := 0.0020           # m: chest lift along its up, standing (prone 0.0010)
+const BR_SHRUG := 0.0030          # m: shoulder rise through the clavicles, standing (prone 0.0018)
+const BR_OPEN := Vector3(0.012, 0.0, 0.028)   # chest scale (x across, z front to back) at a full resting inhale
+const BR_BELLY := 0.020           # spine_01 front-to-back fill at rest (eases to 0.6 x at full exertion)
+const BR_NOD := 0.004             # rad: chin-down nod on the inhale beyond countering the chest's tilt
+var breath_lock := {"arm": {"n": 0.0, "corr": 0.0, "err": 0.0}, "kick": {"n": 0.0, "corr": 0.0, "err": 0.0}}
+var breath_dbg := {}              # last _breath_body: sternum offset (m), depth, signal (tests, films)
+var underwater_exhales := 0       # exhales begun with the head under water (bubble hook)
+var exhale_underwater := false    # this rig update saw one
+var _br_seen_exhales := -1
+var _br_steps := -1               # land cadence from the foot placer's steps
+var _br_step_age := 0.0
+var _br_cad := 0.0
+var _br_arm_hz := 0.0
+
+## breath clock in turns (cycles + phase): continuous, only grows. NAN without the live brain.
+func _breath_turns() -> float:
+	if thalassa_exact or not brain_out.has("breathCycle"): return NAN
+	return float(brain_out.breathCycle) + float(brain_out.breathPhase)
+
+## breath signal centred (-1 exhaled .. 1 full) scaled by depth (amp 1 at rest .. ~1.45 at full exertion); 0 without
+func _breath_wave() -> float:
+	if thalassa_exact or not brain_out.has("breathCentered"): return 0.0
+	return float(brain_out.breathCentered) * float(brain_out.get("breathAmp", 1.0))
+
+## rate (rad/s) of a cyclic phase ph (rad) locked so that ph / TAU - at = n * (breath turns - b_at) (mod 1): the
+## cycle's beat 'at' (turns) falls on the breath's turn 'b_at', n cycles per breath. The rate goes to n x the breath's
+## frequency, less a share of the phase error; the change is held within BR_LOCK_MAX (idle .. full stroke, by 'act')
+## and eased in, so the phase never steps. n is 1/2 (one cycle over two breaths: slow sculling while she still pants)
+## or a whole number, the nearest to the actual ratio, changed only when another is 0.3 nearer in log (hysteresis).
+## The kick locks the same way to the stroke (ref = the arm's turns and frequency), so it follows the breath through it.
+func _breath_lock(rate: float, ph: float, at: float, b_at: float, key: String, w: float, act: float, dt: float, ref_t := NAN, ref_hz := 0.0) -> float:
+	var st: Dictionary = breath_lock[key]
+	var bt := _breath_turns() if key == "arm" else ref_t
+	var bhz: float = float(brain_out.get("breathRate", 0.0)) / TAU if key == "arm" else ref_hz
+	var want := 0.0
+	if is_finite(bt) and bhz > 0.02 and rate > 0.05 and w > 0.0:
+		var ratio := rate / TAU / bhz
+		var best := 0.5 if ratio < 0.7071 else float(clampi(roundi(ratio), 1, 8))
+		if st.n <= 0.0 or absf(log(ratio / float(st.n))) > absf(log(ratio / best)) + 0.3: st.n = best
+		var err := wrapf(ph / TAU - at - float(st.n) * (bt - b_at), -0.5, 0.5)
+		st.err = err
+		var target := TAU * (float(st.n) * bhz - BR_LOCK_K * err)
+		var mx := lerpf(BR_LOCK_MAX.x, BR_LOCK_MAX.y, clampf(act, 0.0, 1.0))
+		want = clampf(target / rate - 1.0, -mx, mx) * clampf(w, 0.0, 1.0)
+	st.corr = lerpf(st.corr, want, BM.expk(BR_LOCK_RATE, dt))
+	return rate * (1.0 + st.corr)
+
+## land cadence (steps per second) from the foot placer's step count while she walks; fades out when the steps stop
+## (a standing foot adjustment is no gait: under 0.35 m/s the count is followed but no cadence comes of it)
+func _breath_cadence(steps: int, speed: float, dt: float) -> float:
+	_br_step_age += dt
+	if speed < 0.35:
+		_br_cad = 0.0
+		_br_steps = steps
+		return 0.0
+	if steps != _br_steps:
+		if _br_steps >= 0 and _br_step_age > 0.15:
+			var hz := clampf(1.0 / _br_step_age, 0.5, 4.5)
+			_br_cad = hz if _br_cad <= 0.0 else lerpf(_br_cad, hz, 0.25)
+		_br_steps = steps
+		_br_step_age = 0.0
+	if _br_step_age > 1.2: _br_cad = 0.0
+	return _br_cad
+
+## after every rig update: count exhales begun (sub-steps included) and flag those with the head under water
+func _breath_hooks(pose: Dictionary, s) -> void:
+	exhale_underwater = false
+	if thalassa_exact or not brain_out.has("exhaleCount"): return
+	var n: int = brain_out.exhaleCount
+	if _br_seen_exhales >= 0 and n > _br_seen_exhales and pose.has("headMat"):
+		if (pose.headMat as Transform3D).origin.y < float(s.config.surface_y) - 0.05:
+			underwater_exhales += n - _br_seen_exhales
+			exhale_underwater = true
+	_br_seen_exhales = n
+	brain_out["exhaleUnderwater"] = exhale_underwater
+
+## the breath in the skeleton (see the header above). Rotations about the chest's own axes, positions carried
+## rigidly, the chest and belly given a small bone scale (skel["breath_scale"], applied by body_skin).
+func _breath_body(skel: Dictionary, dt: float) -> void:
+	if thalassa_exact or not brain_out.has("breathSignal") or dt <= 0.0: return
+	var e: float = clampf(float(brain_out.breathSignal), 0.0, 1.0)
+	var amp: float = float(brain_out.get("breathAmp", 1.0))
+	var ex: float = clampf(float(brain_out.get("exertion", 0.0)), 0.0, 1.0)
+	var depth := clampf(1.0 + (amp - 1.0) * 2.4, 0.6, 2.3)     # 1 at rest, ~2.1 at full exertion
+	var es := e * depth
+	var c: Transform3D = skel["spine_03"]
+	var cx := c.basis.x.normalized()
+	var cy := c.basis.y.normalized()
+	var cz := c.basis.z.normalized()                                  # back
+	var up_w := clampf(cy.dot(Vector3.UP), 0.0, 1.0)                  # 1 standing, 0 prone
+	var ext := lerpf(0.006, BR_EXT, up_w) * es
+	var lift := cy * (lerpf(0.0010, BR_LIFT, up_w) * es)
+	var sternum_l := Vector3(0.0, 0.032, -0.080)                      # spine_03 local: the front of the chest
+	var st0: Vector3 = c * sternum_l
+	# upper body: extend about spine_02 (the top tilts back, the sternum rises), lift along the chest's up
+	var piv: Vector3 = skel["spine_02"].origin
+	var rb := Basis(cx, ext)
+	for b in ["spine_03", "neck", "head", "clavicle_l", "clavicle_r", "upperarm_l", "upperarm_r", "lowerarm_l", "lowerarm_r", "hand_l", "hand_r"]:
+		var x: Transform3D = skel[b]
+		skel[b] = Transform3D(rb * x.basis, piv + rb * (x.origin - piv) + lift)
+	var s2: Transform3D = skel["spine_02"]
+	skel["spine_02"] = Transform3D(Basis(cx, ext * 0.5) * s2.basis, s2.origin + lift * 0.35)
+	# head: counter the chest's tilt and nod a little (the gaze stays where it was)
+	var hx: Transform3D = skel["head"]
+	skel["head"] = Transform3D(Basis(cx, -ext - BR_NOD * es) * hx.basis, hx.origin)
+	# shoulders: each clavicle turns up about its inner end; the arm is carried with the shoulder
+	var shrug := lerpf(0.0018, BR_SHRUG, up_w) * es
+	for sd in ["l", "r"]:
+		var cl: Transform3D = skel["clavicle_" + sd]
+		var sh: Vector3 = skel["upperarm_" + sd].origin
+		var arm := sh - cl.origin
+		var al := arm.length()
+		if al < 0.02: continue
+		var ax := arm.cross(cy)
+		if ax.length() < 1e-5: continue
+		var rq := Basis(ax.normalized(), shrug / al)                    # arm x up: the outer end rises toward the chest's up
+		skel["clavicle_" + sd] = Transform3D(rq * cl.basis, cl.origin)
+		var d: Vector3 = cl.origin + rq * arm - sh
+		for b in ["upperarm_", "lowerarm_", "hand_"]:
+			var bx: Transform3D = skel[b + sd]
+			skel[b + sd] = Transform3D(bx.basis, bx.origin + d)
+	# chest opens, ribs and belly fill (bone scale in each bone's own axes)
+	var sc := {"spine_03": Vector3.ONE + BR_OPEN * es,
+		"spine_02": Vector3.ONE + BR_OPEN * (es * 0.6),
+		"spine_01": Vector3(1.0 + BR_BELLY * 0.3 * es, 1.0, 1.0 + BR_BELLY * lerpf(1.0, 0.6, ex) * es)}
+	skel["breath_scale"] = sc
+	var c1: Transform3D = skel["spine_03"]
+	var st1: Vector3 = c1 * (sternum_l * sc.spine_03)
+	breath_dbg = {"sternum": st1 - st0, "depth": depth, "signal": e, "up_w": up_w, "ext": ext, "shrug": shrug}
+# ============================================================== breath master clock (END)
+
 func _skeleton(pose: Dictionary, dt: float, s, env: Dictionary) -> Dictionary:
 	var skel := {}
 	var pm: Transform3D = pose.pelvisMat
@@ -657,6 +824,7 @@ func _skeleton(pose: Dictionary, dt: float, s, env: Dictionary) -> Dictionary:
 		skel["calf_" + side.to_lower()] = seg_xf(lg.ik.mid, lg.ik.eff, lg.ik.bendAxis)
 		skel["foot_" + side.to_lower()] = Transform3D(_ortho(fm.basis), fm.origin)
 		skel["ball_" + side.to_lower()] = Transform3D(_ortho(toe.basis), toe.origin)
+	_breath_body(skel, dt)     # (breath master clock)
 	_follow_through(skel, dt, s)
 	_soft_arms(skel, dt, s)
 	pose["skel"] = skel
@@ -760,8 +928,8 @@ func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary,
 	var pure_rise := clampf(vert_blend, 0.0, 1.0) * (1.0 - swim_blend)
 	var look_torso := clampf(s.pitch * 0.22, -0.26, 0.28) * (1.0 - swim_blend * 0.78) * (1.0 - near_bottom * 0.80)
 	var base_up := lerpf(1.32, 1.48, tread)
-	var open_up := base_up - look_torso * (1.0 - tread * 0.45) + reverse_blend * 0.88 - str_abs * 0.24 - pure_dive * 0.72 + pure_rise * 0.14 + sin(total_time * 0.55) * 0.025
-	var seabed_horiz := terrain_pitch + 0.06 + sin(total_time * 0.55) * 0.018
+	var open_up := base_up - look_torso * (1.0 - tread * 0.45) + reverse_blend * 0.88 - str_abs * 0.24 - pure_dive * 0.72 + pure_rise * 0.14 + (sin(total_time * 0.55) if thalassa_exact else _breath_wave()) * 0.025     # (breath: buoyant chest rises on the inhale)
+	var seabed_horiz := terrain_pitch + 0.06 + (sin(total_time * 0.55) if thalassa_exact else _breath_wave()) * 0.018
 	var upright := lerpf(open_up, seabed_horiz, near_bottom)
 	var swim_pitch_goal := lerpf(clampf(vel_pitch, -1.36, 1.32), 0.34, tread)
 	var safe_swim_pitch := lerpf(swim_pitch_goal, maxf(swim_pitch_goal, terrain_pitch + 0.05), near_bottom * 0.88)
@@ -776,12 +944,25 @@ func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary,
 	var spine_damp := clampf(spine_ctrl.damping * 0.95, 6.2, 14.0)
 	body_pitch = pitch_spring.step(dt, target_body_pitch, pitch_ka, pitch_ke, spine_damp)
 	var idle_roll := (sin(total_time * 0.50 + 0.8) * 0.032 + cos(total_time * 0.28) * 0.018) * (1.0 - stream_mix * 0.6)
+	if not thalassa_exact and is_finite(_breath_turns()):
+		# (breath master clock) the idle sway rolls one way per breath and back the next, the slow drift over four
+		var bt := _breath_turns()
+		idle_roll = (sin(PI * bt + 0.8) * 0.032 + cos(PI * 0.5 * bt) * 0.018) * (1.0 - stream_mix * 0.6)
 	var carve_roll := clampf(-yaw_vel * lerpf(0.06, 0.24, stream_mix), -0.34, 0.34)
 	var target_roll := clampf(s.roll * 1.25 + strafe_blend * 0.34 + carve_roll + idle_roll, -0.52, 0.52)
 	body_roll = roll_spring.step(dt, target_roll, 16.0 * spine_k, 3.0 * spine_eq, spine_damp, 0.0)
 	var tempo := 1.0 + sin(total_time * 0.48) * 0.055
 	var arm_rate := (lerpf(1.25, 2.65, clampf(active_stroke, 0.0, 1.0)) * (1.0 - glide_blend * 0.45) + sprint_blend * 0.75) * tempo
 	var kick_rate := (lerpf(2.15, 4.45, clampf(active_stroke, 0.0, 1.0)) * (1.0 - glide_blend * 0.42) + sprint_blend * 2.15) * (1.0 + sin(total_time * 0.41 + 2.1) * 0.045)
+	if not thalassa_exact:
+		# (breath master clock) the stroke's pull falls as the exhale begins, the kick's beat on the inhale's start, a
+		# whole number of strokes / kicks per breath: the tempo wobbles above give way to the breath's own pace
+		_br_arm_hz = arm_rate / tempo / TAU
+		var lw := clampf(1.0 - s.ground_walk_blend * 2.0, 0.0, 1.0)
+		var act := clampf(active_stroke + sprint_blend, 0.0, 1.0)
+		arm_rate = _breath_lock(arm_rate / tempo, arm_phase, 0.48, 0.42, "arm", lw, act, dt)
+		kick_rate = _breath_lock(kick_rate / (1.0 + sin(total_time * 0.41 + 2.1) * 0.045), kick_phase, 0.0, 0.0, "kick", lw, act, dt,
+			arm_phase / TAU, arm_rate / TAU)
 	arm_phase += dt * arm_rate
 	kick_phase += dt * kick_rate
 	breath_phase += dt * (1.32 + sin(total_time * 0.24) * 0.10)
@@ -863,6 +1044,7 @@ func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary,
 		hip_r = pelvis_pos + BM.nrm(hip_r - pelvis_pos) * hip_half_w
 
 	var breath_scale := 1.0 + sin(breath_phase) * 0.025
+	if not thalassa_exact and brain_out.has("breathCentered"): breath_scale = 1.0 + _breath_wave() * 0.024     # (the brain's breath, as on land)
 	var chest_axis_y := BM.nrm(neck_pos - waist_pos)
 	var chest_x := BM.nrm(chest_axis_y.cross(body_back))
 	var chest_z := chest_x.cross(chest_axis_y)
@@ -897,6 +1079,7 @@ func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary,
 		# One step per rig step now, in the context she is mostly in (ground walk blend 0.5); the other pose reuses it.
 		brain_ctx["checkLineOfSight"] = sense.get("checkLineOfSight") if sense != null else null
 		brain_ctx["effort"] = clampf(0.45 * active_stroke + 0.55 * sprint_blend, 0.0, 1.0)     # breath drive (see the brain)
+		brain_ctx["cadenceHz"] = _br_arm_hz; brain_ctx["cadenceLock"] = clampf(1.0 - s.ground_walk_blend * 2.0, 0.0, 1.0)     # (breath clock)
 		if s.ground_walk_blend >= 0.5 and not brain_out.is_empty():
 			brain_swim = brain_out
 		else:
@@ -1456,6 +1639,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 	else:
 		walk_ctx["checkLineOfSight"] = sense.get("checkLineOfSight") if sense != null else null
 		walk_ctx["effort"] = clampf((float(loco.speed) - 0.2) / 3.0 + (0.25 if s.shore_is_airborne else 0.0), 0.0, 1.0)
+		walk_ctx["cadenceHz"] = _breath_cadence(int(loco.stepCount), float(loco.speed), sdt); walk_ctx["cadenceLock"] = 1.0     # (breath clock)
 		bo = brain.update(sdt, walk_ctx)
 		_brain_fresh = true
 	brain_out = bo
@@ -2098,6 +2282,19 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 	}
 
 ## ikBlendSwimAndWalkPose (rigid bone lengths: re-solves limbs on the blended anchors)
+## the waist between pelvis p and chest c, l1 from p and l2 from c, on the side the lerped waist w bends to
+static func _blend_waist(p: Vector3, c: Vector3, w: Vector3, l1: float, l2: float) -> Vector3:
+	var pc := c - p
+	var d := pc.length()
+	if d < 1e-4: return w
+	var dir := pc / d
+	var a := clampf((l1 * l1 - l2 * l2 + d * d) / (2.0 * d), 0.0, d) if d < l1 + l2 else d * l1 / (l1 + l2)
+	var h := sqrt(maxf(0.0, l1 * l1 - a * a)) if d < l1 + l2 else 0.0
+	var off := (w - p) - dir * (w - p).dot(dir)
+	# (no side flip as w crosses the line: under 2 cm off it the bend eases onto the line, where the lengths are within
+	# a millimetre anyway, the spine being nearly straight there)
+	return p + dir * a + off * (h / maxf(off.length(), 0.02))
+
 func blend_swim_walk(sp: Dictionary, wp: Dictionary, t_raw: float) -> Dictionary:
 	var t := smoothstep(0.0, 1.0, clampf(t_raw, 0.0, 1.0))
 	var pelvis_pos: Vector3 = sp.pelvisPos.lerp(wp.pelvisPos, t)
@@ -2108,6 +2305,13 @@ func blend_swim_walk(sp: Dictionary, wp: Dictionary, t_raw: float) -> Dictionary
 	var shoulder_r: Vector3 = sp.shoulderR.lerp(wp.shoulderR, t)
 	var hip_l: Vector3 = sp.hipL.lerp(wp.hipL, t)
 	var hip_r: Vector3 = sp.hipR.lerp(wp.hipR, t)
+	if not thalassa_exact:
+		# FIX (stress J2, B18 at 60 Hz once the stroke followed the breath): lerping two rigid spines that bend apart
+		# shortened the pelvis-waist segment up to 22 %; the waist is re-placed so both segments keep their lengths,
+		# bent the way the lerp bends it
+		waist_pos = _blend_waist(pelvis_pos, chest_pos, waist_pos,
+			lerpf(sp.pelvisPos.distance_to(sp.waistPos), wp.pelvisPos.distance_to(wp.waistPos), t),
+			lerpf(sp.waistPos.distance_to(sp.chestPos), wp.waistPos.distance_to(wp.chestPos), t))
 	var axis_y := BM.nrm(neck_pos - pelvis_pos)
 	var back := BM.nrm(sp.bodyBack.lerp(wp.bodyBack, t))
 	var right := BM.nrm(axis_y.cross(back))

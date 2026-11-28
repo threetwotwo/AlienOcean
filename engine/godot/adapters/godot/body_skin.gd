@@ -16,7 +16,7 @@ const BONES := ["pelvis", "spine_01", "spine_02", "spine_03", "neck", "head",
 
 var skel := Skeleton3D.new()
 var mi := MeshInstance3D.new()
-var mat := StandardMaterial3D.new()
+var mat := ShaderMaterial.new()   # look/standin_lit*.gdshader: vertex colour + roughness + the screen AO (CORTAO)
 var bound := false
 var idx := {}
 
@@ -26,8 +26,7 @@ func _ready() -> void:
 	skel.add_child(mi)
 	for b in BONES:
 		idx[b] = skel.add_bone(b)
-	mat.vertex_color_use_as_albedo = true
-	mat.roughness = 0.58
+	mat.shader = load("res://look/standin_lit.gdshader"); mat.set_shader_parameter("roughness_v", 0.58)
 	mi.material_override = mat
 
 func apply(bones: Dictionary) -> void:
@@ -39,6 +38,10 @@ func apply(bones: Dictionary) -> void:
 		var x: Transform3D = inv * bones[b]
 		skel.set_bone_pose_position(idx[b], x.origin)
 		skel.set_bone_pose_rotation(idx[b], x.basis.orthonormalized().get_rotation_quaternion())
+	# breath (body_rig _breath_body): the chest, ribs and belly fill by a small scale in their own axes
+	var bsc: Dictionary = bones.get("breath_scale", {})
+	for b in ["spine_01", "spine_02", "spine_03"]:
+		skel.set_bone_pose_scale(idx[b], bsc.get(b, Vector3.ONE))
 
 # ------------------------------------------------------------------ mesh
 var st := SurfaceTool.new()

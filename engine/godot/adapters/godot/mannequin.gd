@@ -12,7 +12,7 @@ const JOINT_SLATE := Color(0.42, 0.49, 0.54)
 const SOLE_SLATE := Color(0.34, 0.41, 0.46)
 const FACE_BAND := Color(0.24, 0.30, 0.35)
 
-var mat := StandardMaterial3D.new()
+var mat := ShaderMaterial.new()   # look/standin_lit*.gdshader: vertex colour + roughness + the screen AO (CORTAO)
 var parts := {}
 var joints: Array[MeshInstance3D] = []
 var joint_mesh: ArrayMesh
@@ -112,9 +112,7 @@ static func _limb(r_top: float, r_mid: float, r_bot: float) -> ArrayMesh:
 
 func _ready() -> void:
 	SeaFloorMap.mark_mover(self)   # moves: never frozen into the sea floor map (the water drew stale copies, Gary 28 Nov)
-	mat.vertex_color_use_as_albedo = true
-	mat.roughness = 0.62
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.shader = load("res://look/standin_lit_2sided.gdshader"); mat.set_shader_parameter("roughness_v", 0.62)
 	var meshes := {}
 	var jm := MB.new(); jm.sphere(Vector3.ZERO, Vector3.ONE * 0.92, 14, 10, JOINT_SLATE); joint_mesh = jm.mesh()
 	var head := MB.new()

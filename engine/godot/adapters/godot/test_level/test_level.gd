@@ -71,8 +71,10 @@ func _ready() -> void:
 	# Full screen by default (Gary 28 Nov: "make it fullscreen, for a more accurate reading and look"), so benches and the look
 	# are judged at the real screen size. AO_WINDOWED=1, or an explicit --resolution (cloud shots, the perf runner's window
 	# profile), keeps a window.
-	if DisplayServer.get_name() != "headless" and OS.get_environment("AO_WINDOWED") != "1" and not "--resolution" in OS.get_cmdline_args():
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	if DisplayServer.get_name() != "headless":
+		# project.godot opens full screen at window creation (macOS can ignore a switch made after load); a window only on request
+		var want_window := OS.get_environment("AO_WINDOWED") == "1" or "--resolution" in OS.get_cmdline_args() or "--windowed" in OS.get_cmdline_args()
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if want_window else DisplayServer.WINDOW_MODE_FULLSCREEN)
 	# Retina (screen scale 2): render at half resolution, upscaled. Gary's M1 Pro bench, key-frame view at 2704x1696: 83 ms -> 28 ms;
 	# the picture keeps the pixel count of a non-Retina screen of the same size. AO_FULL_RES=1 keeps full resolution.
 	if DisplayServer.get_name() != "headless" and DisplayServer.screen_get_scale() >= 1.99 and OS.get_environment("AO_FULL_RES") != "1":
@@ -179,16 +181,16 @@ func set_toggle(n: String, on: bool) -> void:
 		"caustics": wr.caustics.enabled = on
 		"agx": wr.set_agx(on)
 		"taa": get_viewport().use_taa = on
-		"ssao": wr.set_ao("ssao" if on else ("off" if not wr.ao_mode in ["cortao", "gtao", "vbao"] else wr.ao_mode))
-		"cortao": wr.set_ao("cortao" if on else "ssao")   # CORTAO in place of SSAO (ao thread 28 Nov); off = back to SSAO
-		"gtao": wr.set_ao("gtao" if on else "ssao")       # AO head to head: XeGTAO in CORTAO's place
-		"vbao": wr.set_ao("vbao" if on else "ssao")       # AO head to head: visibility bitmask in CORTAO's place
+		"ssao", "cortao", "gtao", "vbao": _set_ao_toggle(wr, n, on)
 		"ssil": wr.env.ssil_enabled = on
 		"shadows": wr.light.shadow_enabled = on
 		"half_res":
-			# half the pixels each way, upscaled (upscaler(): AMD FSR 1 by default; AO_UPSCALER picks another)
-			get_viewport().scaling_3d_mode = upscaler() if on else Viewport.SCALING_3D_MODE_BILINEAR
+			# half the pixels each way, upscaled (upscaler(): AMD FSR 1 + Godot TAA by default; AO_UPSCALER picks another).
+			# A spatial upscaler brings TAA with it, so thin edges (grass) stay anti-aliased.
+			var m := upscaler()
+			get_viewport().scaling_3d_mode = m if on else Viewport.SCALING_3D_MODE_BILINEAR
 			get_viewport().scaling_3d_scale = 0.5 if on else 1.0
+			if on and needs_taa(m): get_viewport().use_taa = true
 		"grass_v2": if grass: grass.set_enabled(on)
 		"schools":
 			game.mounts.set_mount("fauna", on)
@@ -203,7 +205,7 @@ func set_toggle(n: String, on: bool) -> void:
 	_relight()
 
 ## The upscaler behind half_res. AO_UPSCALER = fsr | fsr2 | metalfx | metalfx_temporal picks one; by default AMD FSR 2, a temporal
-## upscaler that does its own anti-aliasing (TAA stays off); MetalFX temporal where the GPU has it (Apple silicon). FSR 1 was the default (8.8 ms vs MetalFX temporal 11.5 ms on the M1 Pro),
+## upscaler that does its own anti-aliasing (TAA stays off); now FSR 1 + Godot TAA, the best look per ms on the Mac (below). FSR 1 was the default (8.8 ms vs MetalFX temporal 11.5 ms on the M1 Pro),
 ## but it is spatial, with no anti-aliasing: Gary's fullscreen playtest (28 Nov) showed stair-stepped grass, pixelation and shimmer.
 ## At 2704x1756 FSR 2 draws the grass clean where FSR 1 aliases (look thread, plans/godot_look/iq_28nov.jpg); Gary approved the cost.
 static func upscaler() -> int:
@@ -215,9 +217,14 @@ static func upscaler() -> int:
 		"fsr2": return Viewport.SCALING_3D_MODE_FSR2
 		"metalfx": return Viewport.SCALING_3D_MODE_METALFX_SPATIAL if mfx_s else Viewport.SCALING_3D_MODE_FSR
 		"metalfx_temporal": return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR
-	# default: a temporal upscaler (anti-aliased). On Apple silicon MetalFX temporal, Apple's own, run natively; FSR 2 cost 8 ms at
-	# Mac fullscreen (41.3 vs 32.5 ms all on, 28 Nov). Elsewhere FSR 2.
-	return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR2
+	# default FSR 1 + Godot TAA (needs_taa). Mac matrix 28 Nov, 2704x1696 all on, key-frame / floor ms: FSR 1 + TAA 31.7 / 31.1 (soft,
+	# no stair-steps), MetalFX temporal 37.6 / 37.6 (as soft), FSR 2 42.6 / 37.2 (crispest, grainy grass), FSR 1 alone 28.5 / 35.1
+	# (jagged). Best look per ms.
+	return Viewport.SCALING_3D_MODE_FSR
+
+static func needs_taa(mode: int) -> bool:
+	## a spatial upscaler does no anti-aliasing of its own: TAA goes with it
+	return mode == Viewport.SCALING_3D_MODE_FSR or mode == Viewport.SCALING_3D_MODE_METALFX_SPATIAL or mode == Viewport.SCALING_3D_MODE_BILINEAR
 
 func _set_collider(on: bool) -> void:
 	_show_collider = on
@@ -477,3 +484,13 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 	bench_running = false
 	bench_done.emit(path)
 	return path
+
+var _ao_prev := "off"
+func _set_ao_toggle(wr: WorldRoot, mode: String, on: bool) -> void:
+	## the AO switches are one choice (ssao / cortao (default) / gtao / vbao): on = that one, off = back to the one before it
+	if on:
+		if wr.ao_mode != mode: _ao_prev = wr.ao_mode
+		wr.set_ao(mode)
+	elif wr.ao_mode == mode:
+		wr.set_ao(_ao_prev if _ao_prev != mode else "off")
+
