@@ -240,6 +240,7 @@ func apply(cam_y: float) -> Dictionary:
 	rsw.global_shader_parameter_set("water_sky_norm", sky_mat.get_shader_parameter("sky_norm"))
 	rsw.global_shader_parameter_set("sky_turbidity", turbidity)
 	rsw.global_shader_parameter_set("sky_rayleigh", rayleigh)
+	rsw.global_shader_parameter_set("sky_horizon_k", horizon_k)
 	rsw.global_shader_parameter_set("water_sun_air", up_air)
 	rsw.global_shader_parameter_set("water_sun_lux", beam_h / maxf(up_air.y, 0.02) if up_air.y > 0.0 else 0.0)
 	if agx_fx.enabled:
@@ -331,7 +332,7 @@ static func declare_globals() -> void:
 		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)],
 		# the sea surface (water surface thread): the sky dome's shape sun and scale, the key body in air and its beam lux
 		"water_amb_ref": [V, Vector3.ONE], "water_fill_ao": [F, 1.0], "water_amb_sky": [F, 0.0],
-		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "sky_turbidity": [F, turbidity], "sky_rayleigh": [V, rayleigh], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
+		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "sky_turbidity": [F, turbidity], "sky_rayleigh": [V, rayleigh], "sky_horizon_k": [F, horizon_k], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)
@@ -369,6 +370,7 @@ static func _airmass(y: float) -> float:
 # lambda^-4 scattering (680/550/440 nm: 0.105, 0.246, 0.6). Clean tropical sea air (aerosol depth 0.05-0.1) is about
 # turbidity 2.5. Pushed as sky_turbidity / sky_rayleigh. AO_TURB, AO_RAY=0 (Godot's colour) for checks.
 static var turbidity := float(OS.get_environment("AO_TURB")) if OS.get_environment("AO_TURB") != "" else 2.5
+static var horizon_k := float(OS.get_environment("AO_HORIZON_K")) if OS.get_environment("AO_HORIZON_K") != "" else 1.0   # look/sky_dome sky_horizon_ms
 static var rayleigh := Vector3(0.3, 0.405, 0.6) if OS.get_environment("AO_RAY") == "0" else Vector3(0.105, 0.246, 0.6)
 
 static func dome(v: Vector3, s: Vector3) -> Vector3:
@@ -391,7 +393,10 @@ static func dome(v: Vector3, s: Vector3) -> Vector3:
 		var lin := pow(sun_energy * ratio * (1.0 - ext), 1.5)
 		lin *= lerpf(1.0, pow(sun_energy * ratio * ext, 0.5), clampf(pow(1.0 - za, 5.0), 0.0, 1.0))
 		out[i] = lin
-	return out
+	# sky_horizon_ms (look/sky_dome.gdshaderinc): the horizon pulled to pale blue at its luminance, lifted x2.5 (HZ_LIFT)
+	var Y := 0.2126 * out.x + 0.7152 * out.y + 0.0722 * out.z
+	var w := clampf(horizon_k * exp(-maxf(v.y, 0.0) / 0.12), 0.0, 1.0)
+	return out.lerp(Y * Vector3(0.785, 1.038, 1.269) * 2.5, w)
 
 static func ground_lux_of_dome(s: Vector3) -> float:
 	## luminance-weighted horizontal illuminance of the unscaled dome (midpoint rule, 24 x 48)
