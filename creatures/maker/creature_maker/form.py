@@ -275,7 +275,15 @@ class Form:
         c = float(self.sec(np.clip(p[0], 0, self.XEND))[0]); v = np.array([0.0, p[1] - c, p[2]]); n = np.linalg.norm(v)
         return v / n if n > 1e-9 else np.array([0.0, 1.0, 0.0])
 
-    def sd_body(self, P):
+    SD_CHUNK = 100_000   # points per pass: a traced section blends (points x SECT_PHI) tables, 2 M texels x 361 = 5.5 GB per array
+
+    def sd_body(self, P, *a, **k):
+        """pointwise body distance, taken in chunks so memory stays bounded at any map resolution (same values as one pass)."""
+        P = np.asarray(P, float); sh = P.shape[:-1]; Q = P.reshape(-1, 3)
+        if len(Q) <= self.SD_CHUNK: return self._sd_body(P, *a, **k)
+        return np.concatenate([self._sd_body(Q[i:i + self.SD_CHUNK], *a, **k) for i in range(0, len(Q), self.SD_CHUNK)]).reshape(sh)
+
+    def _sd_body(self, P):
         XEND = self.XEND
         x, y, z = P[..., 0], P[..., 1], P[..., 2]
         xc = np.clip(x, 0, XEND); c, a, b = self.sec(xc)
@@ -412,7 +420,11 @@ class Form:
             t = t * np.clip(np.minimum(-poly_sd2(x, az, poly), under(x) - y) / PLATE_CHAMFER, 0, 1)
             plate = np.maximum(d0 - t, -d0 - 0.004)
             nd = smin(d, plate, 0.0006)
-            ids = np.where(nd < d - 1e-5, len(self.PLATES) + k + 1, ids); d = nd
+            # where the chamfer has run t out to 0 the plate IS the body surface, and the smooth union still lowers d there by
+            # its bias: that labelled the whole flank as this plate (maps: no scale relief, metal dimmed; export r5). A point
+            # belongs to the plate only where the plate has thickness. (The 0.15 mm bias itself stays for now: removing it
+            # raised rest crossings 208 -> 333 on the traced board, moorish idol 47 -> 144; round 3 owns that.)
+            ids = np.where((nd < d - 1e-5) & (t > 1e-5), len(self.PLATES) + k + 1, ids); d = nd
         # orbit: circumorbital ring (bone) around the eye opening, a low torus in the side plane
         ex, eyy, er = self.ex, self.eyy, self.er
         ring = np.abs(np.sqrt((x - ex) ** 2 + (y - eyy) ** 2) - max(EY['orbit'], er * 1.08)) - 0.25 * (EY['orbit'] - er * 0.8 + 0.01)

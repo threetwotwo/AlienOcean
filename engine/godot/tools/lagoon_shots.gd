@@ -96,6 +96,7 @@ func _setup():
 	world.add_child(wr)
 	if OS.get_environment("AO_AGX") == "0": wr.set_agx(false)   # Godot's built-in AgX, for before/after
 	if OS.get_environment("AO_AGX_MODE") != "": wr.agx_fx.mode = int(OS.get_environment("AO_AGX_MODE"))
+	if OS.get_environment("AO_SKY_BLUE") != "": wr.agx_fx.sky_blue = float(OS.get_environment("AO_SKY_BLUE"))   # AgX SkyBlue, for checks
 	if OS.get_environment("AO_CAUS") == "pixel": wr.caustics.per_pixel = true   # the light net per pixel instead of from its map (checks)
 	if OS.get_environment("AO_CAUS_T") != "": wr.caustics.frozen_time = float(OS.get_environment("AO_CAUS_T"))   # hold the net at this second
 	if OS.get_environment("AO_GOD") == "0": wr.god_rays = false   # the god rays off (before/after)
@@ -132,6 +133,14 @@ func _setup():
 	if dress and fish:
 		fish.position = dress.on_sand(dress.manifest.hero.at); fish.rotation.y = dress.anchor_xform.basis.get_euler().y + float(dress.manifest.hero.rot)
 	var fp := fish.position if fish else Vector3(1.2, 0.9, -9.6)
+	if OS.get_environment("AO_FOG_CARDS") == "1":   # look check: grey cards (albedo 0.5) along shot 04's view, flat on the sand (x -1) and
+		# standing, facing the camera (x +1), at 3, 6, 10, 15 m: the water must fade both the same at the same distance
+		var gm := StandardMaterial3D.new(); gm.albedo_color = Color(0.5, 0.5, 0.5); gm.roughness = 1.0
+		for d in [3.0, 6.0, 10.0, 15.0]:
+			var flat := MeshInstance3D.new(); var pm := PlaneMesh.new(); pm.size = Vector2(1, 1); flat.mesh = pm
+			flat.material_override = gm; world.add_child(flat); flat.position = Vector3(-1.0, 0.13, 18.0 - d)
+			var up := MeshInstance3D.new(); var qm := QuadMesh.new(); qm.size = Vector2(1, 1); up.mesh = qm
+			up.material_override = gm; world.add_child(up); up.position = Vector3(1.0, 0.6, 18.0 - d)
 	shots = [
 		["01_hero_3p", fp + Vector3(-0.55, 0.18, 0.5), fp, 50.0],
 		["02_reef_wide", Vector3(-6, 2.2, -2), Vector3(2, 0.6, -12), 60.0],

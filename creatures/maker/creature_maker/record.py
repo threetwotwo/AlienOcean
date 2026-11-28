@@ -17,6 +17,15 @@ def get(d, path, default=None, need=True, where=''):
             if default is not None: DEFAULTS.append(dict(input=(where + '.' if where else '') + path, source='DEFAULT', value=default if not isinstance(default, np.ndarray) else default.tolist()))
             return default
     return cur
+LL_FRAC = 0.27       # DEFAULT: lateral line height as a share of depth when the record has none
+SPINE_NOTCH = 0.22   # DEFAULT: membrane dip between spine tips, share of the spine length (seabream/snapper-like; deep-notched fins say so in the record)
+
+def eye_iris(R, E):
+    """iris colour: record paint.eye.iris (hex, read from photos) where present, else skeleton.eye.iris, else the DEFAULT gold."""
+    h = get(R, 'paint.eye.iris', None, need=False)
+    if isinstance(h, str) and h.startswith('#'): return hex_rgb(h)
+    return get(E, 'iris', [0.92, 0.62, 0.18], need=False, where='skeleton.eye')
+
 def dget(d, key, default, where):
     """dict.get that records the default it fell back to."""
     if isinstance(d, dict) and key in d: return d[key]       # a record may hold a bare number where a block is expected (0 = none)
@@ -71,7 +80,7 @@ def adapt(path, style=None):
     P('body loft', 'record.outline top/bot/hw/nUp/nLo (/ outline.end)')
     E = R['skeleton']['eye']
     out['eye'] = dict(x=E['u'] * f, y=E['y'] * f, d=2 * E['R'] * f, orbit=dget(E, 'orbitR', E['R'] / 0.8, 'skeleton.eye') * f,
-                      iris=get(E, 'iris', [0.92, 0.62, 0.18], need=False, where='skeleton.eye'), pupil=get(E, 'pupil', 0.42, need=False, where='skeleton.eye'))
+                      iris=eye_iris(R, E), pupil=get(E, 'pupil', 0.42, need=False, where='skeleton.eye'))
     P('eye opening', 'record.skeleton.eye.u/y/R (R = visible eye, 0.8 orbitR); orbit ring from orbitR')
     # tissue round the eye (form.Form._orbit): record.eye.bulge = how far the periorbital tissue stands the eye's edge proud
     # of the skin, record.eye.over = how far the brow carries on above the eye; record.eye.groove = how far the
@@ -155,15 +164,21 @@ def adapt(path, style=None):
     # a traced fin carries its free edge (ray tips, first ray to last, record units): the card's rays end on it, so the
     # fin's side silhouette is the photo's, not one guessed from heights and a lean (SIL1, Gary 27 Nov)
     fin_edge = lambda m: sc(m['edge']) if isinstance(m, dict) and m.get('edge') else None
+    def fin_elements(m):
+        # h lists every element of the fin, front to back, spines first (record h counts the spines: d1 h == spines), so the
+        # ray count is len(h) and the first `spines` of them are spines. The membrane dips between spine tips by `notch`, a
+        # share of the spine length (record skeleton.median.<fin>.notch when traced; SPINE_NOTCH otherwise)
+        sp = int(dget(m, 'spines', 0, 'skeleton.median.<fin>'))
+        return dict(rays=len(m['h']), spines=sp, notch=float(dget(m, 'notch', SPINE_NOTCH, 'skeleton.median.<fin>')) if sp else 0.0)
     med = []
     for key, top in (('d1', True), ('d2', True), ('an', False)):
         if key in M:
             m = M[key]; med.append(dict(name={'d1': 'dorsal1', 'd2': 'dorsal2', 'an': 'anal'}[key], base=[m['u'][0] * f, m['u'][1] * f],
                                         h=[v * f for v in m['h']], lean=dget(m, 'lean', [35, 55], 'skeleton.median.<fin>'), top=top,
-                                        rays=len(m['h']) + dget(m, 'spines', 0, 'skeleton.median.<fin>'), edge=fin_edge(m)))
+                                        edge=fin_edge(m), **fin_elements(m)))
             P(f'fin {key}', f'record.skeleton.median.{key} ' + ('(u, edge traced: ray tips on the free edge, spines)' if 'edge' in m else '(u, h, lean, spines)'))
     if 'd' in M:  # single dorsal fin records
-        m = M['d']; med.append(dict(name='dorsal', base=[m['u'][0] * f, m['u'][1] * f], h=[v * f for v in m['h']], lean=dget(m, 'lean', [35, 55], 'skeleton.median.<fin>'), top=True, rays=len(m['h']) + dget(m, 'spines', 0, 'skeleton.median.<fin>'), edge=fin_edge(m)))
+        m = M['d']; med.append(dict(name='dorsal', base=[m['u'][0] * f, m['u'][1] * f], h=[v * f for v in m['h']], lean=dget(m, 'lean', [35, 55], 'skeleton.median.<fin>'), top=True, edge=fin_edge(m), **fin_elements(m)))
     fins['median'] = med
     C = M['caudal']
     fins['caudal'] = dict(x=dget(dget(C, 'proc', {}, 'skeleton.median.caudal'), 'uUp', SL, 'skeleton.median.caudal.proc') * f, len=C['len'] * f, spread=C['spread'], outline=C['outline'] if 'outline' in C else caudal_outline(C['round']), rays=dget(C, 'n', 17, 'skeleton.median.caudal'), edge=fin_edge(C))
@@ -180,13 +195,18 @@ def adapt(path, style=None):
     else: P('pelvic fin', 'absent in record.skeleton (no pelvic fins)')
     out['fins'] = fins
     S = R.get('scales', {})
-    ll = get(S, 'lateral_line.pored_scales', None, need=False) or get(S, 'grow.lateral_line.pored_scales.value', None, need=False)
+    # pored scales: older records hold them at scales.lateral_line, grown ones at scales.grow.lateral_line, as a [lo, hi]
+    # list or a {value: ...} block (the list form was missed: trevally fell back to the rows ESTIMATE, scales 25 % small)
+    pv = lambda v: v.get('value') if isinstance(v, dict) else v
+    ll = pv(get(S, 'lateral_line.pored_scales', None, need=False)) or pv(get(S, 'grow.lateral_line.pored_scales', None, need=False))
     rows = float(np.mean(ll)) if ll else float(dget(S, 'rows', 60, 'scales'))
     naked = 'naked' in str(get(S, 'grow.type_body.value', '', need=False))
     if naked: rows = 0.0                     # naked skin (blennies): no scale relief
     elif rows <= 0:                          # record: 0 = "none or too small to count" on a scaled body -> minute scales
         rows = 150.0; DEFAULTS.append(dict(input='scales.rows', source='DEFAULT', value=150, note='scaled body with rows 0: minute scales'))
-    out['scales'] = dict(lateral_line=rows, ll_frac=float(get(S, 'll_frac', 0.27, need=False, where='scales')),
+    if not (get(S, 'll_frac', None, need=False) or get(S, 'grow.lateral_line.ll_frac', None, need=False)):
+        DEFAULTS.append(dict(input='scales.grow.lateral_line.ll_frac', source='DEFAULT', value=LL_FRAC))
+    out['scales'] = dict(lateral_line=rows, ll_frac=float(get(S, 'll_frac', None, need=False) or get(S, 'grow.lateral_line.ll_frac', None, need=False) or LL_FRAC),
                          type=get(S, 'grow.type_body.value', get(S, 'type', 'ctenoid', need=False), need=False))
     P('scale height (UV)', 'record.scales lateral_line pored_scales (else scales.rows)')
     G0 = R['paint']['ground']; sh = dget(G0, 'shade', {}, 'paint.ground')
