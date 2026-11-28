@@ -2,7 +2,7 @@
 ## case the motor tests cover plus body-specific ones (standing, turning on the spot, jumps, hits, walls, ceilings),
 ## with body invariants checked every tick on every limb.
 ## Run: godot --headless --fixed-fps 60 --path . --script res://tests/test_body_stress.gd -- [--tick 60] [--monkey 2]
-##        [--monkey-secs 60] [--only B7] [--fault len|flip|clip|jitter] [--out /tmp/b.json]
+##        [--monkey-secs 60] [--only B7] [--fault len|flip|clip|jitter|breathjump] [--out /tmp/b.json]
 ## exit 0 = every case passed except the KNOWN open ones below. --fault plants a known body bug and the run must FAIL (run_all.sh checks that).
 ##
 ## Invariants (per tick, per limb; thresholds at the top):
@@ -40,6 +40,17 @@
 ##                   breath phase only advances, at most 0.6 Hz; signal changes <= 2.5 /s, amplitude <= 1 /s, rate
 ##                          <= 1 rad/s^2 (continuous: no jumps); "effort" cases: the breath rate in the sprint is >= 1.3x
 ##                          the rate at rest and falls again after it
+##  J12 breath       (every case, the live brain; breath master clock, body_rig _breath_body / _breath_lock) the breath
+##                   clock (cycles + phase) never runs backwards and never faster than BRAIN_MAX_HZ; the stroke and kick
+##                   phases never run backwards nor faster than BR_PHASE_MAX; the skeleton's sternum, shoulders and
+##                   head facing pass J11 too. Cases with "breath": the sternum's breathing offset (mm) in the "rest" and
+##                   "exert" windows lies inside BR_REST_MM / BR_EXERT_MM and exertion breathes >= BR_EXERT_GAIN deeper;
+##                   in "lock" windows the stroke stays within BR_LOCK_ERR turns of its beat on the breath and the kick of
+##                   its beat on the stroke;
+##                   in "land_lock" windows the breath runs within BR_LAND_RATIO of a whole fraction of the step cadence;
+##                   "glance": at least BR_GLANCE_SHARE of the free new looks (not the camera's intent, not a sound)
+##                   start as the breath turns (the brain lets one wait at most half a breath for it), at least one.
+##                   Planted fault --fault breathjump: the breath phase jumps 0.35 of a cycle once.
 extends SceneTree
 
 const Packet := preload("res://core/m01_input/input_packet.gd")
@@ -94,6 +105,13 @@ const BRAIN_SIG_RATE := 2.5
 const BRAIN_AMP_RATE := 1.0
 const BRAIN_RATE_RATE := 1.0
 const BRAIN_EFFORT_GAIN := 1.3
+const BR_PHASE_MAX := 14.0        # rad/s: stroke / kick phase rate (sprint kick ~6.6, +12 % lock)
+const BR_REST_MM := Vector2(1.5, 6.0)
+const BR_EXERT_MM := Vector2(3.0, 12.0)
+const BR_EXERT_GAIN := 1.4
+const BR_LOCK_ERR := 0.12         # turns
+const BR_LAND_RATIO := 0.20       # |cadence / breath - N|
+const BR_GLANCE_SHARE := 0.5
 
 ## Open cases, listed so the suite still gates everything else: a KNOWN case may fail (reported, not counted against
 ## the exit code); every other case must pass, and a KNOWN case that starts passing is reported so it can come off.
@@ -291,6 +309,19 @@ func _define_cases() -> void:
 	# Mac breach test: holding ascend and forward from the 2.4 m lagoon floor skimmed 20 m through the air
 	_case("B47 lagoon: breach from the floor, ascend held", "lagoon_pool", {"start": Vector3(0, -1.4, 0), "mode": Motor.Mode.SWIM}, 12.0,
 		func(_t): var k = _pk(Vector2(0, 1)); k.thrust = 1.0; k.ascend = true; return k)
+	# breath master clock (J12 windows; see the header)
+	_case("B60 breath: long idle stand, glances on the breath", "wall", {"start": Vector3(-8, 0.05, 0)}, 40.0,
+		func(_t): return _pk(), {"brain": "free", "breath": {"rest": [10.0, 40.0], "glance": true}})
+	_case("B61 breath: swim hover, cruise, sprint, rest", "pool", {"start": Vector3(0, -8, 0), "mode": Motor.Mode.SWIM}, 38.0,
+		func(tt):
+			var k = _pk(Vector2(0, 1) if (tt >= 6.0 and tt < 24.0) else Vector2.ZERO, 0.0)
+			k.thrust = 1.0 if (tt >= 15.0 and tt < 24.0) else 0.0
+			return k, {"breath": {"rest": [2.0, 6.0], "exert": [24.0, 28.0], "lock": [[11.0, 15.0], [20.0, 24.0], [32.0, 38.0]]}})
+	_case("B62 breath: walk, run, stop", "wall", {"start": Vector3(-8, 0.05, 18)}, 30.0,
+		func(tt):
+			var k = _pk(Vector2(0, 0.6) if tt < 7.0 else (Vector2(0, 1) if tt < 13.0 else Vector2.ZERO))
+			k.thrust = 1.0 if (tt >= 7.0 and tt < 13.0) else 0.0
+			return k, {"breath": {"exert": [14.0, 19.0], "land_lock": [[4.0, 7.0], [10.0, 13.0]]}})
 	for m in monkey_runs:
 		var seed := 2000 + m
 		_case("BM monkey seed %d (%ds)" % [seed, int(monkey_secs)], "shore", {"start": Vector3(0, 1.05, 4), "waves": 0.5 if m % 2 == 1 else 0.0},
@@ -396,6 +427,8 @@ func _physics_process(dt: float) -> bool:
 			return false
 		rdt = rec.hitch_acc
 		rec.hitch_acc = 0.0
+	if fault == "breathjump" and rec.ticks == tick * 5 and rig.brain.get("breath_phase") != null:
+		rig.brain.breath_phase = fposmod(rig.brain.breath_phase + 0.35, 1.0)     # planted: the breath skips a third of a cycle
 	var pose: Dictionary = rig.update_swim(rdt, s, null, t, renv, _brain_sense(s) if cur.opts.has("brain") else null)
 	if fault == "jitter":
 		_shift_pose(pose, Vector3(0.002 if int(rec.ticks) % 2 == 0 else -0.002, 0, 0))   # planted: the whole body shaking +-2 mm
@@ -704,6 +737,7 @@ func _check(p: Dictionary, dt: float) -> void:
 		_w("leg_overlap", ov)
 		if ov > 0.02: _fail("J8", "legs overlap %.0f mm" % (ov * 1000.0))
 	if cur.opts.has("brain"): _check_brain(p, dt)
+	_check_breath(p, dt)
 	for side in ["L", "R"]:
 		var arm3: Dictionary = p["arm" + side]
 		for pt in [arm3.mid.lerp(arm3.eff, 0.5), arm3.eff]:
@@ -770,11 +804,20 @@ func _brain_setup() -> void:
 		reg.add("fish", "fish", 0.3, {"label": "Fish", "priority": 0.87})
 		reg.add("buoy", "vessel", 0.6, {"label": "Buoy behind", "priority": 0.8, "moving": false, "pos": st + Vector3(0, 0.5, 6)})
 		rec.brain_sounds = [[4.0, "impact", Vector3(3, 0, 4), 0.95], [13.0, "ping", Vector3(6, 0, -2), 0.6], [16.0, "crack", Vector3(-4, 1, 3), 0.9]]
+	elif cur.opts.brain == "free":
+		# (B60 breath) still things off the camera's centre, so her looks are her own (no camera intent), one sound
+		sc.landmarks = []
+		var i := 0
+		for o in [Vector3(-1.4, 1.2, -3), Vector3(1.6, 1.0, -3.4), Vector3(-1.2, 0.5, -4), Vector3(1.5, 1.8, -4.2), Vector3(0.3, 2.4, -3)]:
+			sc.landmarks.append({"id": "thing%d" % i, "kind": "console", "label": "thing %d" % i, "pos": st + o, "priority": 0.78,
+				"moving": false, "selfRadius": 0.3, "maxRange": 32.0})
+			i += 1
+		rec.brain_sounds = [[22.0, "impact", Vector3(3, 0.5, -2), 0.9]]
 	else:
 		# the blockout kit's "senses" world (blockout/blockout_kit.gd): an object ahead, a creature circling, an object
 		# behind her, a knock that sounds 0.5 s every 3 s; read each tick through BlockoutKit.pois
 		rec.brain_sounds = []
-	rec.brain = {"sc": sc, "reg": reg, "swim": swim, "focus": "", "focus_t": -99.0, "left": {}, "last_new": -99.0, "last_snd": -99.0,
+	rec.brain = {"sc": sc, "reg": reg, "swim": swim, "free": cur.opts.brain == "free", "focus": "", "focus_t": -99.0, "left": {}, "last_new": -99.0, "last_snd": -99.0,
 		"looks": 0, "sounds": 0, "prev": {}, "rates": [], "head_rate": 0.0, "gaze_yaw": 0.0, "hjerk": []}
 
 func _brain_sense(s) -> Dictionary:
@@ -788,6 +831,7 @@ func _brain_sense(s) -> Dictionary:
 		reg.move("fish", fp, Vector3.ZERO)
 		# the player UI's interact target, engaged every tick as the game does (it circles behind her in this window)
 		if t >= 7.0 and t < 9.5: rig.brain.engage_objective_focus("interact", fp)
+	elif b.free: pass
 	else:
 		var lm := []
 		for q in BlockoutKit.pois(world):
@@ -1037,8 +1081,96 @@ func _film_head(pose: Dictionary) -> void:
 func _film_save(path: String) -> void:
 	root.get_texture().get_image().save_png(path)
 
+# ---------------------------------------------------------------- breath master clock (J12)
+func _in_win(w) -> bool:
+	return w is Array and w.size() == 2 and t >= float(w[0]) and t < float(w[1])
+
+func _check_breath(p: Dictionary, dt: float) -> void:
+	var o: Dictionary = rig.brain_out
+	if not o.has("breathCycle") or dt <= 0.0: return
+	if not rec.has("br"):
+		rec.br = {"rest": 0.0, "exert": 0.0, "lock_arm": 0.0, "lock_kick": 0.0, "land": 0.0, "land_n": 0, "glances": 0, "on_breath": 0,
+			"bt_rate": 0.0, "arm_rate": 0.0, "focus": null, "exhales": 0, "uw": 0}
+	var br: Dictionary = rec.br
+	var bt := float(o.breathCycle) + float(o.breathPhase)
+	if br.has("bt"):
+		var d := (bt - float(br.bt)) / dt
+		br.bt_rate = maxf(br.bt_rate, d)
+		if d < -1e-9: _fail("J12 breath", "breath clock ran backwards %.3f cycles" % (bt - float(br.bt)))
+		elif d > BRAIN_MAX_HZ * 1.001: _fail("J12 breath", "breath clock jumped %.3f cycles in a tick (%.2f Hz)" % [bt - float(br.bt), d])
+		for k in [["arm", rig.arm_phase], ["kick", rig.kick_phase]]:
+			var dp: float = (float(k[1]) - float(br[k[0]])) / dt
+			br.arm_rate = maxf(br.arm_rate, dp)
+			if dp < -1e-9 or dp > BR_PHASE_MAX: _fail("J12 phase", "%s phase rate %.2f rad/s" % [k[0], dp])
+	br.bt = bt; br.arm = rig.arm_phase; br.kick = rig.kick_phase
+	br.exhales = int(o.get("exhaleCount", 0)); br.uw = rig.underwater_exhales
+	# the skeleton's breathing bones pass J11 like the joints
+	if p.has("skel"):
+		var sk: Dictionary = p.skel
+		var sc: Vector3 = sk.get("breath_scale", {}).get("spine_03", Vector3.ONE)
+		_jitter(prev.jit, "skel sternum", (sk.spine_03 as Transform3D) * (Vector3(0, 0.032, -0.080) * sc), JIT_AMP)
+		_jitter(prev.jit, "skel shoulderL", (sk.upperarm_l as Transform3D).origin, JIT_AMP)
+		_jitter(prev.jit, "skel shoulderR", (sk.upperarm_r as Transform3D).origin, JIT_AMP)
+		_jitter(prev.jit, "skel head facing", (sk.head as Transform3D).basis.z.normalized(), JIT_AMP_DIR)
+	var spec: Dictionary = cur.opts.get("breath", {})
+	if spec.is_empty(): return
+	var mm: float = (rig.breath_dbg.get("sternum", Vector3.ZERO) as Vector3).length() * 1000.0
+	if _in_win(spec.get("rest")): br.rest = maxf(br.rest, mm)
+	if _in_win(spec.get("exert")): br.exert = maxf(br.exert, mm)
+	for w in spec.get("lock", []):
+		if _in_win(w):
+			br.lock_arm = maxf(br.lock_arm, absf(rig.breath_lock.arm.err))
+			br.lock_kick = maxf(br.lock_kick, absf(rig.breath_lock.kick.err))
+	var lw: Array = spec.get("land_lock", [])
+	for i in lw.size():
+		if _in_win(lw[i]) and rig._br_cad > 0.0 and int(o.get("breathLockN", 0)) > 0:
+			# over the window: mean step cadence against the mean breath (a step interval is noisy, the lock is not)
+			var acc: Array = br.get("land_acc", [])
+			while acc.size() <= i: acc.append([0.0, 0.0, 0])
+			acc[i][0] += rig._br_cad; acc[i][1] += float(o.breathRate) / TAU; acc[i][2] = int(o.breathLockN)
+			br.land_acc = acc
+	if spec.get("glance", false):
+		var fid = o.get("focusId")
+		# looks nobody asked for (not the camera's intent, not a sound): they wait for the breath to turn
+		var sk: String = o.get("focusStartKind", "")
+		if fid != null and fid != br.focus and not o.get("focusIsSound", false):
+			br.all_looks = int(br.get("all_looks", 0)) + 1
+			if sk == "breath" or sk == "waited":
+				br.glances += 1
+				var ph := float(o.breathPhase)
+				if (ph > 0.33 and ph < 0.47) or ph > 0.94 or ph < 0.05: br.on_breath += 1
+		br.focus = fid
+
+func _breath_end() -> String:
+	if not rec.has("br"): return ""
+	var br: Dictionary = rec.br
+	var txt := "; breath clock max %.2f Hz, %d exhales (%d under water)" % [br.bt_rate, br.exhales, br.uw]
+	var spec: Dictionary = cur.opts.get("breath", {})
+	if spec.is_empty(): return txt
+	if spec.has("rest"):
+		txt += ", sternum rest %.1f mm" % br.rest
+		if br.rest < BR_REST_MM.x or br.rest > BR_REST_MM.y: _fail("J12 depth", "resting breath moves the sternum %.1f mm (%.1f..%.1f)" % [br.rest, BR_REST_MM.x, BR_REST_MM.y])
+	if spec.has("exert"):
+		txt += ", sternum exertion %.1f mm" % br.exert
+		if br.exert < BR_EXERT_MM.x or br.exert > BR_EXERT_MM.y: _fail("J12 depth", "breath after effort moves the sternum %.1f mm (%.1f..%.1f)" % [br.exert, BR_EXERT_MM.x, BR_EXERT_MM.y])
+		if spec.has("rest") and br.exert < br.rest * BR_EXERT_GAIN: _fail("J12 depth", "effort breath %.1f mm not %.1fx the resting %.1f" % [br.exert, BR_EXERT_GAIN, br.rest])
+	if spec.has("lock"):
+		txt += ", lock err arm %.3f kick %.3f turns" % [br.lock_arm, br.lock_kick]
+		if br.lock_arm > BR_LOCK_ERR or br.lock_kick > BR_LOCK_ERR: _fail("J12 lock", "stroke %.3f turns off the breath / kick %.3f off the stroke (max %.2f)" % [br.lock_arm, br.lock_kick, BR_LOCK_ERR])
+	if spec.has("land_lock"):
+		for a in br.get("land_acc", []):
+			var off := absf(float(a[0]) / maxf(1e-6, float(a[1])) - float(a[2]))
+			if off >= br.land: br.land = off; br.land_n = int(a[2])
+			txt += ", steps/breath %.2f (N=%d)" % [float(a[0]) / maxf(1e-6, float(a[1])), int(a[2])]
+		if br.land > BR_LAND_RATIO or br.land_n == 0: _fail("J12 lock", "breath %.2f off a whole fraction (N=%d) of the step cadence" % [br.land, br.land_n])
+	if spec.get("glance", false):
+		txt += ", free looks on the breath %d/%d (%d looks in all)" % [br.on_breath, br.glances, br.get("all_looks", 0)]
+		if br.glances == 0 or float(br.on_breath) < BR_GLANCE_SHARE * br.glances: _fail("J12 glance", "only %d of %d new looks began as the breath turned" % [br.on_breath, br.glances])
+	return txt
+
 func _end_case() -> void:
 	var brain_txt: String = _brain_end() if cur.opts.has("brain") else ""
+	brain_txt += _breath_end()
 	var ok: bool = rec.fail.is_empty()
 	var w: Dictionary = rec.worst
 	var summary := "bone %.2f mm, span %.0f%%, elbow %.0f, knee %.0f, knee back %.0f mm, neck +%.2f, head/chest %.0f, pop %.1f m/s, pelvis %.2f m, rock %d ticks, sole under %.0f mm, stand gap %.0f mm, slide %.0f mm, legs %.0f mm, torso %.0f mm" % [
