@@ -421,7 +421,9 @@ static func declare_globals() -> void:
 		"water_amb_ref": [V, Vector3.ONE], "water_fill_ao": [F, 1.0], "water_amb_sky": [F, 0.0],
 		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "sky_turbidity": [F, turbidity], "sky_overcast": [F, 0.0], "sky_oc_zenith": [F, 0.0], "sky_rayleigh": [V, rayleigh], "sky_horizon_k": [F, horizon_k], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0],
 		# CORTAO screen AO (look/screen_ao.gdshaderinc): the result texture and 1 = on
-		"cortao_ao": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()], "cortao_on": [F, 0.0]}   # set_ao turns it on once the effect runs
+		"cortao_ao": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()], "cortao_on": [F, 0.0],
+		# stress-shot switch (look/hot_probe.gdshaderinc): paint pixels over this many exposed units (or non-finite) in their shader's tag colour; 0 = off
+		"hot_probe": [F, float(OS.get_environment("AO_HOT_PROBE")) if OS.get_environment("AO_HOT_PROBE") != "" else 0.0]}   # set_ao turns it on once the effect runs
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)

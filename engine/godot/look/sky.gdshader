@@ -57,6 +57,7 @@ float airmass(float y) {
 // shared with the water shaders (look/sky_dome.gdshaderinc); mirrored on the CPU in WorldRoot.dome().
 #include "sky_dome.gdshaderinc"
 #include "sky_overcast.gdshaderinc"
+#include "hot_probe.gdshaderinc"
 #include "sea_bathy.gdshaderinc"
 global uniform vec3 water_sun_air;
 global uniform float water_sun_lux;
@@ -172,4 +173,6 @@ void sky() {
 		if (!AT_CUBEMAP_PASS) col += sky_oc_beam * stars(v, POSITION, TIME, s, normalize(moon_a_dir), normalize(moon_b_dir));
 		COLOR = col;
 	}
+	// stress-shot switch (look/hot_probe), off in play
+	if (hot_probe > 0.0 && !AT_CUBEMAP_PASS) COLOR = hot_probe_paint(COLOR * water_exposure, v.y < 0.0 ? vec3(0.0, 1.0, 1.0) : vec3(1.0, 1.0, 0.0)) / max(water_exposure, 1e-12);
 }
