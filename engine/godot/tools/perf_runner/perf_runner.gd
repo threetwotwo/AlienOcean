@@ -5,10 +5,14 @@
 ## vsync off (true cost, not the display cap): mean / p50 / p95 / p99 / worst frame ms, GPU and CPU render ms, draws, triangles,
 ## GameRoot phase ms, a screenshot, and image numbers (mean brightness, share of near-white pixels = the "white void" check).
 ## Then at each toggle station every switch is flipped, timed and flipped back: the ms each system costs in that view.
+## Each flip is compared with the switch-unflipped frames measured right before AND right after it (ABA, --ab-rounds N
+## repeats the AB pair): one base taken at the start drifts over the minutes of later flips (the girl settles, other
+## systems warm up), which once billed the last switch in the list (bubbles) ~5 ms it never cost (bubbles thread, 28 Nov).
 ## Output: <out>/results.json + station PNGs; tools/perf_runner/summarize.py turns it into summary.md and report.html.
 ## Run (tools/perf_runner/run_perf.sh does all of it):
 ##   godot --path . --script res://tools/perf_runner/perf_runner.gd -- --out DIR [--stations res://...json] [--settle 1.5]
 ##         [--measure 3.0] [--toggle-measure 2.0] [--only name,name] [--no-toggles] [--fault slow] [--label NAME]
+##         [--toggles name,name] [--ab-rounds 1]
 ## --fault slow: planted fault, burns 40 ms of CPU per frame at the station "keyframe_view"; the summary must show it as the
 ## worst station (tests/run_perf_runner.sh checks it).
 extends SceneTree
@@ -20,6 +24,8 @@ var measure_s := 3.0
 var toggle_measure_s := 2.0
 var only: Array = []
 var do_toggles := true
+var only_toggles: Array = []
+var ab_rounds := 1
 var fault := ""
 var run_label := ""
 var _burn_ms := 0.0
@@ -43,6 +49,8 @@ func _initialize() -> void:
 			"--fault": fault = v; i += 1
 			"--label": run_label = v; i += 1
 			"--no-toggles": do_toggles = false
+			"--toggles": only_toggles = Array(v.split(",")); i += 1
+			"--ab-rounds": ab_rounds = maxi(1, int(v)); i += 1
 		i += 1
 	if out == "":
 		push_error("perf_runner: --out DIR is required"); quit(2); return
@@ -103,17 +111,24 @@ func _run(main) -> void:
 			var base := await _station(by_name[sn], false, toggle_measure_s)
 			for t in lvl.toggle_names():
 				if t in skip: continue
+				if not only_toggles.is_empty() and not t in only_toggles: continue
 				var was: bool = lvl.get_toggle(t)
-				lvl.set_toggle(t, not was)
-				var r := await _station(by_name[sn], false, toggle_measure_s, false)
-				lvl.set_toggle(t, was)
-				var row := {"station": sn, "toggle": t, "default_on": was, "flipped_to": not was,
-					"base_mean_ms": base.mean_ms, "flipped_mean_ms": r.mean_ms, "base_gpu_ms": base.gpu_ms, "flipped_gpu_ms": r.gpu_ms,
-					"cost_ms": (base.mean_ms - r.mean_ms) if was else (r.mean_ms - base.mean_ms),
-					"gpu_cost_ms": (base.gpu_ms - r.gpu_ms) if was else (r.gpu_ms - base.gpu_ms),
-					"base_p95_ms": base.p95_ms, "flipped_p95_ms": r.p95_ms, "flipped_worst_ms": r.worst_ms}
+				var bases := [base]; var flips := []
+				for k in ab_rounds:
+					lvl.set_toggle(t, not was)
+					flips.append(await _station(by_name[sn], false, toggle_measure_s, false))
+					lvl.set_toggle(t, was)
+					bases.append(await _station(by_name[sn], false, toggle_measure_s, false))
+				base = bases[bases.size() - 1]          # the next switch's "before"
+				var b := _mean_rows(bases); var r := _mean_rows(flips)
+				var row := {"station": sn, "toggle": t, "default_on": was, "flipped_to": not was, "ab_rounds": ab_rounds,
+					"base_mean_ms": b.mean_ms, "flipped_mean_ms": r.mean_ms, "base_gpu_ms": b.gpu_ms, "flipped_gpu_ms": r.gpu_ms,
+					"base_spread_ms": b.spread_ms, "flipped_spread_ms": r.spread_ms,
+					"cost_ms": (b.mean_ms - r.mean_ms) if was else (r.mean_ms - b.mean_ms),
+					"gpu_cost_ms": (b.gpu_ms - r.gpu_ms) if was else (r.gpu_ms - b.gpu_ms),
+					"base_p95_ms": b.p95_ms, "flipped_p95_ms": r.p95_ms, "flipped_worst_ms": r.worst_ms}
 				results.toggles.append(row)
-				print("TOGGLE %-20s %-9s %s: %6.1f -> %6.1f ms (cost %+.1f ms, gpu %+.1f)" % [sn, t, "off" if was else "on", base.mean_ms, r.mean_ms, row.cost_ms, row.gpu_cost_ms])
+				print("TOGGLE %-20s %-9s %s: %6.1f -> %6.1f ms (cost %+.1f ms, gpu %+.1f; base spread %.1f)" % [sn, t, "off" if was else "on", b.mean_ms, r.mean_ms, row.cost_ms, row.gpu_cost_ms, b.spread_ms])
 				_save()
 	lvl.apply_state(base_state)
 	results["finished_utc"] = Time.get_datetime_string_from_system(true)
@@ -130,6 +145,16 @@ func _save() -> void:
 	var f := FileAccess.open(out.path_join("results.json"), FileAccess.WRITE)
 	f.store_string(JSON.stringify(results, "  "))
 	f.close()
+
+## The mean of several timed runs of one view, and how far apart their means are (max - min: the noise floor of a cost).
+static func _mean_rows(rows: Array) -> Dictionary:
+	var m := {"mean_ms": 0.0, "gpu_ms": 0.0, "p95_ms": 0.0, "worst_ms": 0.0}
+	var lo := INF; var hi := -INF
+	for r in rows:
+		for k in m: m[k] += float(r[k]) / rows.size()
+		lo = minf(lo, r.mean_ms); hi = maxf(hi, r.mean_ms)
+	m["spread_ms"] = hi - lo
+	return m
 
 ## Go to a station, settle, time frames for `secs`, optionally save a screenshot. retp=false keeps the girl where she is
 ## (toggle runs at the same station) and only re-applies the camera angles.

@@ -3,7 +3,9 @@
 // adapters/godot/agx_effect.gd as a CompositorEffect after the transparent pass. Godot's own tonemapper is set to
 // LINEAR, so this writes display-linear light and Godot only encodes it to sRGB.
 // Unreal's Depth > SkyDepthKm (the sky) is Godot's reverse-Z depth == 0; CamV / SunT are rebuilt in y-up world space.
-// Bloom (BloomMix / BloomLens) is not ported yet: Godot's glow is off while this runs.
+// Bloom 0.1.0 (28 Nov): the key frame's veiling glare (look/bloom.glsl) is added here, right after exposure and before
+// the tone curve, energy kept (light above the threshold leaves its pixel, the PSF puts it back around it). Then the
+// vignette (scene light, before the curve). Godot's glow stays off while this runs.
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(rgba16f, set = 0, binding = 0) uniform image2D color_out;
 layout(set = 0, binding = 1) uniform sampler2D color_src;
@@ -21,7 +23,15 @@ layout(set = 0, binding = 3, std140) uniform Params {
 	vec4 p3;          // StarKeep, NightDeep, PhotoSky, TwilightSoft
 	vec4 p4;          // EmitKeep, EmitFrom, NightSky, Mode (0 AgX, 1 identity, 2 constant 0.5)
 	vec4 p5;          // width, height
+	vec4 p6;          // Bloom (0 off, 1 key frame), BloomThr (exposed units), Vignette (corner light lost), BloomMax (excess cap)
+	vec4 p7;          // PSF weights 0-3
+	vec4 p8;          // PSF weight 4, Keep (1 energy kept, 0 added glow), IsoFloor, IsoK (look/bloom.glsl lone-texel rule)
 } P;
+layout(set = 0, binding = 4) uniform sampler2D glare0;
+layout(set = 0, binding = 5) uniform sampler2D glare1;
+layout(set = 0, binding = 6) uniform sampler2D glare2;
+layout(set = 0, binding = 7) uniform sampler2D glare3;
+layout(set = 0, binding = 8) uniform sampler2D glare4;
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 float sat(float x) { return clamp(x, 0.0, 1.0); }
@@ -100,6 +110,31 @@ void main() {
 		c = mix(c, V * vec3(0.88, 1.0, 1.35), NightLook * wa * wp * (1.0 - src) * (1.0 - psk));
 	}
 	c *= Exposure * exp2(Bias);
+
+	// camera veiling glare (bloom): same exposed units as the pyramid's prefilter (look/bloom.glsl)
+	if (P.p6.x > 0.0) {
+		vec3 ex = clamp(c - P.p6.y, vec3(0.0), vec3(P.p6.w));
+		ex = mix(ex, vec3(0.0), bvec3(uvec3(isnan(c)) | uvec3(isinf(c))));   // as the prefilter: a broken texel gives no glare
+		// the same lone-texel rule as the pyramid's prefilter (neighbours in the same exposed units)
+		float kx = Exposure * exp2(Bias) / max(BufScale, 1e-30);
+		vec3 nb = vec3(0.0);
+		for (int q = 0; q < 4; q++) {
+			ivec2 o4 = q == 0 ? ivec2(1, 0) : q == 1 ? ivec2(-1, 0) : q == 2 ? ivec2(0, 1) : ivec2(0, -1);
+			vec3 bn = texelFetch(color_src, clamp(px + o4, ivec2(0), sz - 1), 0).rgb;
+			bn = mix(bn, vec3(0.0), bvec3(uvec3(isnan(bn)) | uvec3(isinf(bn))));
+			nb = max(nb, clamp(bn * kx * max(P.DG.rgb, vec3(0.0)) - P.p6.y, vec3(0.0), vec3(P.p6.w)));
+		}
+		ex = min(ex, max(vec3(P.p8.z), P.p8.w * nb));
+		vec3 g = P.p7.x * texture(glare0, uv).rgb + P.p7.y * texture(glare1, uv).rgb + P.p7.z * texture(glare2, uv).rgb
+		       + P.p7.w * texture(glare3, uv).rgb + P.p8.x * texture(glare4, uv).rgb;
+		c = max(c + P.p6.x * (g - P.p8.y * ex), vec3(0.0));
+	}
+	// natural vignette: corners keep (1 - Vignette) of their light (art bible round 6 post.py)
+	if (P.p6.z > 0.0) {
+		vec2 q = uv * 2.0 - 1.0; float r2 = dot(q, q) * 0.5;
+		float k = inversesqrt(max(1.0 - P.p6.z, 1e-3)) - 1.0;
+		c /= (1.0 + k * r2) * (1.0 + k * r2);
+	}
 
 	// v69 NightDeep
 	float wn = sat((1.477 - log(max(0.18 / max(Exposure, 1e-12), 1e-9)) / log(10.0)) / 3.0);   // 0 by day, 1 at night

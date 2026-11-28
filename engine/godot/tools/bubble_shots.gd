@@ -42,6 +42,8 @@ func _initialize() -> void:
 			for k in 4: shots.append([8.0 + k * 2.5, "ceiling_%d" % k, func(h: Transform3D): return [h.origin + h.basis.x * 1.4 + Vector3(0, -0.6, 0), h.origin + Vector3(0, 1.2, 0), 60.0]])
 		"lab":
 			for k in 4: shots.append([8.3 + k * 0.12, "lab_%d" % k, func(h: Transform3D): return [_lab_eye(), _lab_eye() + Vector3(0, -0.05, -1), 30.0]])
+		"choice":     # the exhale style choice: same camera, same moments (run once per AO_EXHALE)
+			for k in 5: shots.append([7.3 + k * 0.3, "choice_%d" % k, side])
 		"film":
 			for k in 90: shots.append([7.0 + k / 30.0, "film_%03d" % k, side])
 

@@ -65,7 +65,7 @@ if K:
     if jw: piece_obs['jaw'] = (mesh_ob('jaw', [(jw[0], jw[1], 0)], [mat_p['jaw']])[0], 'jaw')
     if K.get('cover_poly'):
         for nm, (v, f) in CM.covers(D, K['cover_poly']).items(): piece_obs[nm] = (mesh_ob(nm, [(v, f, 0)], [mat_p['cover']])[0], nm)
-    Cs = dict(bones=D['bones'], xend=D['xend'])
+    Cs = dict(bones=D['bones'], xend=D['xend'], head_end=D['head_end'])
     for q in K.get('blocks', []):
         if q['kind'] == 'eyeball':
             v, f = _ellipsoid(q['c'], q['r'], CM.SEG_HI, CM.RINGS_HI); nm = 'eye_L' if q['c'][2] > 0 else 'eye_R'
@@ -79,32 +79,25 @@ for k, f in FINS.items():
     ob = bpy.data.objects.new(k, m_); scn.collection.objects.link(ob); fin_obs[k] = ob
 
 # ---------------------------------------------------------------- rig: the full export's bones (rig.bones needs a cage-like C)
-C = dict(bones=D['bones'], xend=D['xend'], SL_mm=D['SL_mm'], species=D['species'], fins=D['fins'],
+C = dict(bones=D['bones'], xend=D['xend'], head_end=D['head_end'], SL_mm=D['SL_mm'], species=D['species'], fins=D['fins'],
          openings=dict(jaw_joint=D['jaw_joint'], opercle_hinge=D['opercle_hinge']),
          faces=F, ftag=['body'] * len(F))
 REC = dict(mouth=dict(line=D['mouth_line']), cover=dict(rear=D['cover_rear']))
-BL = RIG.bones(C, V, REC); NB, xs = RIG.spine_stations(C)
-spine_at = lambda x: f'spine_{RIG.spine_index(C, x):02d}'
-rig = rigging.build_armature(scn, BL, D['fins'], B, spine_at)
+BL = RIG.bones(C, V, REC) + RIG.fin_bones(C); NB, xs = RIG.spine_stations(C)
+rig = rigging.build_armature(scn, BL, B)
 nv0 = len(body.data.vertices)
 W = {f'spine_{i:02d}': (VB0 == i).astype(float) for i in range(NB)}                # rigid segments
 W.update(jaw=np.zeros(nv0), opercleL=np.zeros(nv0), opercleR=np.zeros(nv0))
 rigging.bind_groups(body, rig, W)
 for k, (ob, bn) in piece_obs.items(): rigging.bind_groups(ob, rig, {bn: np.ones(len(ob.data.vertices))})
-for k, ob in fin_obs.items():   # as export_glb: fin vertices follow the spine at their x, paired fins hand over to their root bone
-    fv = np.array(FINS[k]['V']); T = np.clip(np.array(FINS[k]['T'], float), 0, 1)
-    share = T if k.startswith(('pectoral', 'pelvic')) else np.zeros(len(fv))
-    i0, a0, i1, a1 = RIG.spine_weights(C, fv[:, 0]); g = {}
-    for j in range(len(fv)):
-        for i, a in ((i0[j], a0[j]), (i1[j], a1[j])):
-            g.setdefault(f'spine_{i:02d}', np.zeros(len(fv)))[j] += a * (1 - share[j])
-    g['fin_' + k + '_root'] = share
-    rigging.bind_groups(ob, rig, g)
+CF = dict(C, fins={k: dict(V=f['V'], T=f['T']) for k, f in FINS.items()})      # the plates' own vertices and T
+for k, ob in fin_obs.items(): rigging.bind_groups(ob, rig, RIG.fin_groups(CF, k))   # as export_glb: spine at the root, the fin's chain toward the edge
 
 # ---------------------------------------------------------------- clips: the swim engine on the blockout's own mass model
 SW = swim_clip.clips(C, V, RAW, BL, None)
+RG = swim_clip.rig_checks(C, V, {f'spine_{i:02d}': (VB == i).astype(float) for i in range(NB)}, BL, SW, head=VB == 0); SW['extras']['rig']['checks'] = RG   # rigid blocks: the head is the head bone's blocks
 FPS = 120; scn.render.fps = FPS; scn.render.fps_base = 1.0
-chain = swim_clip.chain_names(NB); cmap = {chain[i]: f'spine_{i:02d}' for i in range(NB)}
+cmap = {j: b for b, j in swim_clip.bone_joints(NB).items()}; cmap.update({b['name']: b['name'] for b in BL if b.get('fin')})   # engine joint -> bone
 rigging.key_clip(rig, 'swim_loop', [(k / SW['swim_fps'], P) for k, P in enumerate(rigging.engine_frames(rig, SW['swim'], cmap))], FPS)
 cmap_b = dict(opercleL='opercleL', opercleR='opercleR')
 rigging.key_clip(rig, 'breathe_loop', [(k / SW['breathe_fps'], P) for k, P in enumerate(rigging.engine_frames(rig, SW['breathe'], cmap_b))], FPS)
@@ -158,6 +151,6 @@ for n, L in sorted(D.get('lods', {}).items(), key=lambda kv: int(kv[0])):
 tris = sum(sum(len(p.vertices) - 2 for p in o.data.polygons) for o in [body] + list(fin_obs.values()) + [o for o, _ in piece_obs.values()])
 stats = dict(glb=os.path.basename(glb), kb=round(os.path.getsize(glb) / 1024), tris=tris, bones=len(rig.data.bones),
              hulls=len(HUL), swim_loop_closure_BL=SW['loop_err'], beat_Hz=SW['extras']['clips']['swim_loop']['beat_Hz'],
-             swim_keys_hz=round(SW['swim_fps'], 1), jitter=SW['extras']['jitter'], lods=lod_stats)
+             swim_keys_hz=round(SW['swim_fps'], 1), jitter=SW['extras']['jitter'], lods=lod_stats, rig={k: v for k, v in RG.items()})
 json.dump(stats, open(os.path.join(OUT, 'blockout_glb.json'), 'w'), indent=1)
 print('BLOCKOUT_GLB', json.dumps(stats))

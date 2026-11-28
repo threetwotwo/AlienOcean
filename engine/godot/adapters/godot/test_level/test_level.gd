@@ -149,7 +149,7 @@ func worst_frame_ms(seconds := 10.0) -> float:
 # ---- switches: every one has a getter and a setter, so the test can prove each one returns to where it was ----
 
 func toggle_names() -> Array:
-	return ["sdfgi", "god_rays", "caustics", "agx", "taa", "ssao", "cortao", "gtao", "vbao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider", "bubbles"]
+	return ["sdfgi", "god_rays", "caustics", "agx", "bloom", "taa", "ssao", "cortao", "gtao", "vbao", "ssil", "shadows", "half_res", "grass_v2", "schools", "sea", "lagoon", "tide", "collider", "bubbles"]
 
 func get_toggle(n: String) -> bool:
 	var wr := game.world_root
@@ -158,6 +158,7 @@ func get_toggle(n: String) -> bool:
 		"god_rays": return wr.god_rays
 		"caustics": return wr.caustics.enabled
 		"agx": return wr.agx_fx.enabled
+		"bloom": return wr.bloom > 0.0
 		"taa": return get_viewport().use_taa
 		"ssao": return wr.env.ssao_enabled
 		"cortao": return wr.ao_mode == "cortao"
@@ -182,12 +183,15 @@ func set_toggle(n: String, on: bool) -> void:
 		"god_rays": wr.god_rays = on
 		"caustics": wr.caustics.enabled = on
 		"agx": wr.set_agx(on)
+		"bloom":   # the key frame's veiling glare in the AgX pass (bloom thread 28 Nov)
+			if on: wr.set_bloom_style(wr.bloom_style)
+			else: wr.bloom = 0.0
 		"taa": get_viewport().use_taa = on
 		"ssao", "cortao", "gtao", "vbao": _set_ao_toggle(wr, n, on)
 		"ssil": wr.env.ssil_enabled = on
 		"shadows": wr.light.shadow_enabled = on
 		"half_res":
-			# half the pixels each way, upscaled (upscaler(): MetalFX temporal / FSR 2 by default; AO_UPSCALER picks another).
+			# half the pixels each way, upscaled (upscaler(): FSR 1 + Godot TAA by default; AO_UPSCALER picks another).
 			# A spatial upscaler brings TAA with it, so thin edges (grass) stay anti-aliased.
 			var m := upscaler()
 			get_viewport().scaling_3d_mode = m if on else Viewport.SCALING_3D_MODE_BILINEAR
@@ -207,10 +211,8 @@ func set_toggle(n: String, on: bool) -> void:
 		_: push_error("TestLevel: unknown toggle " + n); return
 	_relight()
 
-## The upscaler behind half_res. AO_UPSCALER = fsr | fsr2 | metalfx | metalfx_temporal picks one; by default AMD FSR 2, a temporal
-## upscaler that does its own anti-aliasing (TAA stays off): MetalFX temporal on Apple silicon, FSR 2 elsewhere (below). FSR 1 was the default (8.8 ms vs MetalFX temporal 11.5 ms on the M1 Pro),
-## but it is spatial, with no anti-aliasing: Gary's fullscreen playtest (28 Nov) showed stair-stepped grass, pixelation and shimmer.
-## At 2704x1756 FSR 2 draws the grass clean where FSR 1 aliases (look thread, plans/godot_look/iq_28nov.jpg); Gary approved the cost.
+## The upscaler behind half_res. AO_UPSCALER = fsr | fsr2 | metalfx | metalfx_temporal picks one; by default AMD FSR 1 with Godot
+## TAA (Gary's pick, 28 Nov). FSR 1 alone is spatial, with no anti-aliasing: his fullscreen playtest showed stair-stepped grass.
 static func upscaler() -> int:
 	var rd := RenderingServer.get_rendering_device()
 	var mfx_t := rd != null and rd.has_feature(RenderingDevice.SUPPORTS_METALFX_TEMPORAL)
@@ -220,12 +222,10 @@ static func upscaler() -> int:
 		"fsr2": return Viewport.SCALING_3D_MODE_FSR2
 		"metalfx": return Viewport.SCALING_3D_MODE_METALFX_SPATIAL if mfx_s else Viewport.SCALING_3D_MODE_FSR
 		"metalfx_temporal": return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR
-	# default: a temporal upscaler. Mac matrix 28 Nov, 2704x1696 all on, key-frame / floor ms: FSR 1 + TAA 31.7 / 31.1, MetalFX temporal
-	# 37.6 / 37.6 (both soft, no stair-steps), FSR 2 42.6 / 37.2 (crispest, grainy grass), FSR 1 alone 28.5 / 35.1 (jagged). But in
-	# motion Godot's TAA at half resolution shimmers on smooth shading (tools/ao_motion_check.gd, sliding camera, AO off: flicker RMS
-	# 4.4 levels with FSR 1 + TAA, 0.48 FSR 2, 0.37 FSR 1 alone, 0.13 native), against Gary's no-jitter rule. So MetalFX temporal
-	# (Apple's own, native on the M1) where the GPU has it, FSR 2 elsewhere.
-	return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR2
+	# default FSR 1 + Godot TAA (needs_taa): Gary's pick, 28 Nov 11:25Z (Style choices "upscaler"), from side-by-side Mac clips.
+	# Mac fullscreen all on, key-frame / floor ms: FSR 1 + TAA 39.5 / 34.9, MetalFX temporal 43.8 / 40.2. MetalFX was calmer on
+	# smooth shading in motion (tools/ao_motion_check.gd: TAA at half res 4.4 RMS levels vs 0.48 FSR 2); Gary judged the look.
+	return Viewport.SCALING_3D_MODE_FSR
 
 static func needs_taa(mode: int) -> bool:
 	## a spatial upscaler does no anti-aliasing of its own: TAA goes with it
@@ -370,7 +370,7 @@ func stats() -> Dictionary:
 
 # ---- benchmark (F9 in the panel, or AO_BENCH=1 at start: run_benchmark.command): the cost of each system on this machine ----
 
-const BENCH_SWITCHES := ["ssao", "cortao", "ssil", "shadows", "god_rays", "caustics", "agx", "grass_v2", "sea", "schools", "lagoon", "half_res", "sdfgi"]   # sdfgi last: it rebuilds for seconds after it comes back
+const BENCH_SWITCHES := ["ssao", "cortao", "ssil", "shadows", "god_rays", "caustics", "agx", "bloom", "grass_v2", "sea", "schools", "lagoon", "half_res", "sdfgi"]   # sdfgi last: it rebuilds for seconds after it comes back
 var bench_running := false
 signal bench_done(path: String)
 

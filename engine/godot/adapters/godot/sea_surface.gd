@@ -43,9 +43,12 @@ func _init() -> void:
 	# the tank's spray and spume off the breaking crests (SeaSpray: the sprite kit; drawn after the sea's top side)
 	add_child(SeaSpray.new())
 
+func _exit_tree() -> void:
+	WaterlineEffect.sea_on = false        # no sea drawn: no waterline, and the underwater view draws every pixel itself
+
 static func globals() -> void:
 	## the eye's values the underside needs for its own water path (WorldRoot sets them, as on the underwater view):
-	## sea_eye_wave = the wave over the still level at the eye (m), sea_god = (god rays on 0/1, frame mod 8, frames averaged 0/1, 0)
+	## sea_eye_wave = the wave over the still level at the eye (m), sea_god = (god rays on 0/1, frame mod 8, frames averaged 0/1, a sea is drawn 0/1)
 	if _globals_done: return
 	_globals_done = true
 	RenderingServer.global_shader_parameter_add(&"sea_eye_wave", RenderingServer.GLOBAL_VAR_TYPE_FLOAT, 0.0)

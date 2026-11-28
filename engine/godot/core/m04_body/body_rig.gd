@@ -123,6 +123,8 @@ var brain_out := {}          # the brain's last output (breath phase / signal / 
 var _brain_fresh := false    # stepped during this rig step already
 var head_yaw_spring = BM.CritSpring1D.new(0.0)
 var head_pitch_spring = BM.CritSpring1D.new(0.0)
+var head_yaw_spring_w = BM.CritSpring1D.new(0.0)     # (head upgrade FIX) the walk solve's own neck springs, see solve_head
+var head_pitch_spring_w = BM.CritSpring1D.new(0.0)
 
 var swim_pose = null
 var left_wrist_light_pos := Vector3(0, -6.5, 16.5)
@@ -335,6 +337,11 @@ func solve_head(dt: float, chest_pos: Vector3, neck_anchor: Vector3, c_right: Ve
 	var min_pitch: float = lim.get("minPitch", -0.60)
 	var max_pitch: float = lim.get("maxPitch", 0.68)
 	var nps: float = lim.get("neckPitchShare", 0.42)
+	# (head upgrade) FIX: on land the swim pose is solved every tick before the walk pose, and both stepped the same neck
+	# springs (as in the JS), so the swim solve's prone look-ahead (+0.4 rad) pulled the walk's: standing she looked 23 deg
+	# up. Off exact the walk solve keeps its own springs.
+	var ysp = head_yaw_spring_w if (lim.get("walk", false) and not thalassa_exact) else head_yaw_spring
+	var psp = head_pitch_spring_w if (lim.get("walk", false) and not thalassa_exact) else head_pitch_spring
 	var ln := BM.nrm(look_dir)
 	var lf := ln.dot(c_fwd)
 	var lr := ln.dot(c_right)
@@ -348,7 +355,7 @@ func solve_head(dt: float, chest_pos: Vector3, neck_anchor: Vector3, c_right: Ve
 		var bu := clampf((0.08 - lf) / 0.65, 0.0, 1.0)
 		var ls: float
 		if absf(lr) > 0.22: ls = 1.0 if lr >= 0.0 else -1.0
-		elif absf(head_yaw_spring.x) > 0.06: ls = signf(head_yaw_spring.x)
+		elif absf(ysp.x) > 0.06: ls = signf(ysp.x)
 		else: ls = 1.0 if lr >= 0.0 else -1.0
 		raw_yaw = ls * max_yaw * (1.0 - bu * 0.65)
 	var raw_pitch := atan2(lu, maxf(0.05, Vector2(lf, lr).length()))
@@ -356,12 +363,17 @@ func solve_head(dt: float, chest_pos: Vector3, neck_anchor: Vector3, c_right: Ve
 	var cpt := clampf(raw_pitch, min_pitch, max_pitch)
 	var plim := (max_pitch if cpt >= 0.0 else absf(min_pitch)) + 1e-4
 	var e2 := pow(cy_ / (max_yaw + 1e-4), 2) + pow(cpt / plim, 2)
+	if not thalassa_exact:
+		# (head upgrade: soft neck limits) the goal saturates smoothly past NECK_SOFT_KNEE of the range, no clamp
+		var e := Vector2(raw_yaw / (max_yaw + 1e-4), raw_pitch / ((max_pitch if raw_pitch >= 0.0 else absf(min_pitch)) + 1e-4)).length()
+		var f := _soft_sat(e, NECK_SOFT_KNEE) / e if e > NECK_SOFT_KNEE else 1.0
+		cy_ = raw_yaw * f; cpt = raw_pitch * f; e2 = 0.0
 	if e2 > 1.0:
 		var inv := 1.0 / sqrt(e2)
 		cy_ *= inv; cpt *= inv
 	var hl: float = lim.get("neckHalflife", 0.165)
-	var sy: float = head_yaw_spring.step(cy_, hl, sdt)
-	var sp: float = head_pitch_spring.step(cpt, hl, sdt)
+	var sy: float = ysp.step(cy_, hl, sdt)
+	var sp: float = psp.step(cpt, hl, sdt)
 	var hf := BM.nrm(c_fwd * cos(sy) + c_right * sin(sy))
 	var rhx := BM.nrm(c_right * cos(sy) - c_fwd * sin(sy))
 	var head_fwd := BM.nrm(hf * cos(sp) + c_up * sin(sp))
@@ -385,6 +397,7 @@ static func _ff(fh, x: float, z: float) -> float:
 
 ## updateSwim. s = the ported SwimmerLocomotion (core/m02_motor/swimmer_locomotion.gd). Returns the pose dictionary.
 func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense = null, on_stroke_pull = null, on_shore_footstep = null) -> Dictionary:
+	_hd_dt = dt     # (head upgrade: the head's clocks run on the whole frame)
 	if _act_live(s):
 		return _update_act(dt, s, total_time, env, sense)
 	_act = {}
@@ -1125,6 +1138,264 @@ func _breath_body(skel: Dictionary, dt: float) -> void:
 	breath_dbg = {"sternum": st1 - st0, "depth": depth, "signal": e, "up_w": up_w, "ext": ext, "shrug": shrug}
 # ============================================================== breath master clock (END)
 
+# ============================================================== head upgrade (M04 head 0.1, BEGIN)
+## Gary 28 Nov: "Head also needs an upgrade". Skeleton 22 -> 28 bones: the neck is two (neck_lower carries the tilt,
+## neck_upper the nod and turn), two eyes, two upper lids and a jaw. Skeleton only, like the follow-through and the
+## breath (built after them, from the final chest, skull base and head); all of it off when thalassa_exact (no skeleton).
+##  - gaze chain: the eyes take the brain's goal at once (gazeGoalWorld, before its gaze spring and glance blend) with a
+##    saccade; the head follows the brain's gaze spring (solve_head, neck half-life 0.1-0.24 s); the chest last (the
+##    brain's curiosity torso yaw, half-life 0.68 s). The eyes cover what the head has not turned yet, up to their
+##    soft limits (+-35 deg yaw, +-25 deg pitch); of the head's turn relative to the chest, neck_upper carries 85 % of
+##    the nod / tilt and 75 % of the turn, neck_lower 50 % and 20 % (the rest rides the head bone itself).
+##  - saccades: a goal more than SACC_TRIGGER from the fixation starts one (min-jerk, 20-55 ms by amplitude, then at
+##    least SACC_REFRACT before the next); a goal that moves smoothly is pursued (its motion carried up to
+##    PURSUIT_MAX, the rest closed with a short spring). Fixation is held in the world: the eyes counter every head bob.
+##    Micro-saccades every 0.8-2.0 s while fixating, 0.25-0.45 deg, each one back toward the centre of the last.
+##    Near goals (gazeGoalPos) converge the eyes (distance eased in dioptres).
+##  - blinks: every 2-6 s at rest (x0.5 at full exertion), early on the start of an exhale when one is nearly due,
+##    and with 70 % of the saccades over BLINK_SHIFT; 50 ms close (ease in), 10 ms shut, 90 ms open (ease out). The
+##    upper lid rides the eye's pitch (85 %): it follows the eye down, lifts a little with it.
+##  - jaw: closed under water; on land or at the surface it opens with exertion (mouth breathing past ~30 %), wider on
+##    the inhale, up to JAW_MAX, through a critically damped spring (never pops).
+##  - soft neck limits (solve_head): the head's yaw / pitch goal saturates smoothly past 75 % of its range instead of
+##    being clamped, so the head slows into its limits.
+const NECK_BASE := 0.045          # m from the chest bone (spine_03) up to the base of the neck (C7)
+const NECK_SEG := 0.040           # m: neck_lower and neck_upper, each
+const NECK_SOFT_KNEE := 0.75      # share of the neck's range past which its goal saturates
+const EYE_L := Vector3(-0.036, 0.098, -0.083)     # head local: the eyes' centres (the stand-in's big ceramic eyes)
+const EYE_R := Vector3(0.036, 0.098, -0.083)
+const EYE_RADIUS := 0.017
+const LID_RADIUS := 0.0188
+const EYE_YAW_MAX := 0.61         # rad (35 deg)
+const EYE_PITCH_MAX := 0.44       # rad (25 deg), up and down
+const EYE_SOFT_KNEE := 0.80
+const SACC_TRIGGER := 0.035       # rad (2 deg) off the goal starts a saccade
+const SACC_REFRACT := 0.16        # s between saccades
+const PURSUIT_MAX := 2.2          # rad/s of goal motion the eyes carry smoothly
+const PURSUIT_JUMP := 4.5         # rad/s: goal motion faster than this in a tick is a jump (a new target): a saccade takes it
+const PURSUIT_VEL_HL := 0.05     # s: the goal's turn rate as pursuit sees it
+const PURSUIT_HL := 0.06          # s: the residual pursuit error
+const MICRO_EVERY := Vector2(0.8, 2.0)
+const MICRO_AMP := Vector2(0.0045, 0.0080)
+const MICRO_DUR := 0.022
+const VERGE_HL := 0.10
+const FAR_DIOPTRE := 0.05         # 20 m
+const BLINK_EVERY := Vector2(2.0, 6.0)
+const BLINK_CLOSE := 0.050
+const BLINK_HOLD := 0.010
+const BLINK_OPEN := 0.090
+const BLINK_REFRACT := 0.6        # s from one blink's start to the next
+const BLINK_SHIFT := 0.30         # rad: a gaze shift this big may bring a blink
+const BLINK_SHIFT_P := 0.70
+const BLINK_BREATH_WIN := 0.9     # s: a blink this close to due waits for nothing and goes on the exhale's start
+const LID_OPEN := 0.32            # rad: the upper lid's edge above the eye's centre line, looking straight ahead
+const LID_TRACK := 0.85           # share of the eye's pitch the lid follows
+const LID_CLOSED := -0.52         # the edge where it meets the lower lid
+const LID_UP_MAX := 0.80
+const LID_HL := 0.022
+const JAW_MAX := 0.13             # rad, mouth breathing at full exertion
+const JAW_HL := 0.16
+var head_fault := ""              # tests: "eyelimit" plants eyes without limits
+var head_dbg := {}                # last _head_upgrade: eye angles, lids, blink closure, jaw, saccade / blink counters (tests, films)
+var _hd_dt := 0.0                 # the whole frame (update_swim's sub-steps run the skeleton once, with the last step's dt)
+var _hd := {}
+
+## soft saturation of a normalised amount x >= 0: linear to knee, then easing to 1 (C1, never past 1)
+static func _soft_sat(x: float, knee: float) -> float:
+	if x <= knee: return x
+	return knee + (1.0 - knee) * tanh((x - knee) / (1.0 - knee))
+
+static func _mj(u: float) -> float:
+	u = clampf(u, 0.0, 1.0)
+	return u * u * u * (10.0 - 15.0 * u + 6.0 * u * u)
+
+## the unit vector a turned toward b by angle at most step
+static func _rot_toward(a: Vector3, b: Vector3, step: float) -> Vector3:
+	var ang := a.angle_to(b)
+	if ang < 1e-7: return b
+	if ang <= step: return b
+	return a.slerp(b, step / ang).normalized()
+
+## a rotation q split into swing (of the y axis) and twist (about y): returns [swing, twist]
+static func _swing_twist(q: Quaternion) -> Array:
+	var tw := Quaternion(0.0, q.y, 0.0, q.w)
+	if tw.length_squared() < 1e-9: tw = Quaternion()
+	else: tw = tw.normalized()
+	return [q * tw.inverse(), tw]
+
+## a basis turned (shortest arc) so its y runs along dir
+static func _y_along(b: Basis, dir: Vector3) -> Basis:
+	var y := b.y.normalized()
+	var d := dir.normalized()
+	if y.dot(d) < -0.999: return b
+	return Basis(Quaternion(y, d)) * b
+
+## the eye's soft-limited yaw / pitch (head frame) toward world direction d
+func _eye_angles(hb: Basis, d: Vector3) -> Vector2:
+	var hx := hb.x.normalized(); var hy := hb.y.normalized(); var hf := -hb.z.normalized()
+	var yaw := atan2(d.dot(hx), d.dot(hf))
+	var pitch := asin(clampf(d.dot(hy), -1.0, 1.0))
+	if head_fault == "eyelimit": return Vector2(yaw, pitch)
+	var e := Vector2(yaw / EYE_YAW_MAX, pitch / EYE_PITCH_MAX).length()
+	if e > EYE_SOFT_KNEE:
+		var f := _soft_sat(e, EYE_SOFT_KNEE) / e
+		yaw *= f; pitch *= f
+	return Vector2(yaw, pitch)
+
+static func _eye_basis(hb: Basis, a: Vector2) -> Basis:
+	var hx := hb.x.normalized(); var hy := hb.y.normalized(); var hf := -hb.z.normalized()
+	var f := (hf * (cos(a.y) * cos(a.x)) + hx * (cos(a.y) * sin(a.x)) + hy * sin(a.y)).normalized()
+	var z := -f
+	var x := hy.cross(z).normalized()
+	return Basis(x, z.cross(x), z)
+
+func _head_upgrade(skel: Dictionary, s) -> void:
+	if thalassa_exact or not skel.has("neck") or not skel.has("head"): return
+	var dt := clampf(_hd_dt, 0.0, 0.25)
+	var c: Transform3D = skel["spine_03"]
+	var hd: Transform3D = skel["head"]
+	var n2: Vector3 = (skel["neck"] as Transform3D).origin
+	var cb := c.basis.orthonormalized()
+	var hb := hd.basis.orthonormalized()
+	var c_up := cb.y
+	var c_fwd := -cb.z
+	if _hd.is_empty():
+		var rng := RandomNumberGenerator.new(); rng.seed = 1717
+		_hd = {"rng": rng, "clock": 0.0, "fix": -hb.z, "goal_prev": Vector3.ZERO, "gv": Vector3.ZERO, "inv_d": FAR_DIOPTRE, "inv_v": 0.0,
+			"sacc": false, "s_t": 0.0, "s_dur": 0.0, "s_from": Vector3.ZERO, "since_sacc": 1.0, "sacc_n": 0, "sacc_amp": 0.0,
+			"m": Vector2.ZERO, "m_from": Vector2.ZERO, "m_to": Vector2.ZERO, "m_t": 1.0, "m_next": 1.0, "micro_n": 0,
+			"blink_t": -1.0, "blink_due": 2.5, "since_blink": 9.0, "blink_n": 0, "blink_kind": "",
+			"lid": [LID_OPEN, LID_OPEN], "lid_v": [0.0, 0.0], "jaw": 0.0, "jaw_v": 0.0}
+	var H: Dictionary = _hd
+	var rng: RandomNumberGenerator = H.rng
+	H.clock += dt
+	# ---- neck: two segments of fixed length from the base of the neck to the skull base (the gentle forward curve)
+	var n0 := c.origin + c_up * NECK_BASE
+	var reach := NECK_SEG * 2.0 * 0.995
+	if n0.distance_to(n2) > reach: n0 = n2 + (n0 - n2).normalized() * reach
+	var chord := n2 - n0
+	var dl := chord.length()
+	var ch := chord / maxf(1e-6, dl)
+	var pole := (c_fwd - hb.z) - ch * (c_fwd - hb.z).dot(ch)
+	if pole.length() < 1e-4: pole = c_fwd - ch * c_fwd.dot(ch)
+	var n1 := n0 + chord * 0.5 + pole.normalized() * sqrt(maxf(0.0, NECK_SEG * NECK_SEG - dl * dl * 0.25))
+	var qc := cb.get_rotation_quaternion()
+	var rel := qc.inverse() * hb.get_rotation_quaternion()
+	var st := _swing_twist(rel)
+	var lower := Basis(qc * (Quaternion().slerp(st[0], 0.50) * Quaternion().slerp(st[1], 0.20)))
+	var upper := Basis(qc * (Quaternion().slerp(st[0], 0.85) * Quaternion().slerp(st[1], 0.75)))
+	skel["neck_lower"] = Transform3D(_y_along(lower, n1 - n0), n0)
+	skel["neck_upper"] = Transform3D(_y_along(upper, n2 - n1), n1)
+	skel.erase("neck")
+	# ---- gaze goal
+	var o: Dictionary = brain_out
+	var goal: Vector3 = -hb.z
+	if o.get("gazeGoalWorld") is Vector3: goal = (o.gazeGoalWorld as Vector3).normalized()
+	elif o.get("gazeDirWorld") is Vector3: goal = (o.gazeDirWorld as Vector3).normalized()
+	var cyc: Vector3 = hd * ((EYE_L + EYE_R) * 0.5)
+	var inv_goal := FAR_DIOPTRE
+	if o.get("gazeGoalPos") is Vector3:
+		inv_goal = 1.0 / clampf(cyc.distance_to(o.gazeGoalPos), 0.15, 1.0 / FAR_DIOPTRE)
+		goal = ((o.gazeGoalPos as Vector3) - cyc).normalized()     # from her real eyes (the brain's head point is nominal)
+	var r_inv := BM.crit(H.inv_d, H.inv_v, inv_goal, 0.0, VERGE_HL, dt)
+	H.inv_d = r_inv.x; H.inv_v = r_inv.y
+	var fix: Vector3 = H.fix
+	var gp: Vector3 = H.goal_prev if H.goal_prev != Vector3.ZERO else goal
+	H.goal_prev = goal
+	H.since_sacc += dt
+	H.since_blink += dt
+	var blink_now := ""
+	var err := fix.angle_to(goal)
+	if not H.sacc and err > SACC_TRIGGER and H.since_sacc >= SACC_REFRACT:
+		H.sacc = true; H.s_t = 0.0; H.s_from = fix
+		H.s_dur = clampf(0.018 + 0.0011 * rad_to_deg(err), 0.020, 0.055)
+		H.sacc_n += 1; H.sacc_amp = err
+		H.m_from = H.m; H.m_to = Vector2.ZERO; H.m_t = 0.0      # the micro offset goes with it
+		if err > BLINK_SHIFT and rng.randf() < BLINK_SHIFT_P: blink_now = "shift"
+	if H.sacc:
+		H.s_t += dt
+		fix = (H.s_from as Vector3).slerp(goal, _mj(H.s_t / H.s_dur)).normalized()
+		if H.s_t >= H.s_dur:
+			H.sacc = false; H.since_sacc = 0.0; fix = goal
+	else:
+		# pursuit: carry the goal's own smooth motion, close the rest with a short spring
+		# (the goal's turn rate, low-passed: pursuit has a bandwidth, a shake of the goal is not followed)
+		var gm := gp.angle_to(goal)
+		var w := Vector3.ZERO
+		if gm > 1e-7 and gm <= PURSUIT_JUMP * maxf(dt, 1e-4):
+			var q := Quaternion(gp, goal)
+			w = q.get_axis().normalized() * (gm / maxf(dt, 1e-4))
+		H.gv = (H.gv as Vector3).lerp(w, BM.expk(0.6931 / PURSUIT_VEL_HL, dt))
+		var gvl: float = (H.gv as Vector3).length()
+		if gvl > 1e-6:
+			fix = (Quaternion((H.gv as Vector3) / gvl, minf(gvl, PURSUIT_MAX) * dt) * fix).normalized()
+		fix = _rot_toward(fix, goal, fix.angle_to(goal) * BM.expk(0.6931 / PURSUIT_HL, dt))
+	H.fix = fix
+	# micro-saccades while fixating
+	if H.m_t < 1.0:
+		H.m_t = minf(1.0, H.m_t + dt / MICRO_DUR)
+		H.m = (H.m_from as Vector2).lerp(H.m_to, _mj(H.m_t))
+	elif not H.sacc and H.since_sacc > 0.3 and H.clock >= H.m_next:
+		var amp := rng.randf_range(MICRO_AMP.x, MICRO_AMP.y)
+		var back: Vector2 = -(H.m as Vector2)
+		var dir := Vector2.from_angle(rng.randf() * TAU)
+		if back.length() > 1e-5: dir = (dir * 0.6 + back.normalized()).normalized()     # each one back toward the centre
+		H.m_from = H.m; H.m_to = (H.m as Vector2) + dir * amp; H.m_t = 0.0; H.micro_n += 1
+		if (H.m_to as Vector2).length() > MICRO_AMP.y: H.m_to = (H.m_to as Vector2).normalized() * MICRO_AMP.y
+		H.m_next = H.clock + rng.randf_range(MICRO_EVERY.x, MICRO_EVERY.y)
+	var mo: Vector2 = H.m
+	var eye_dir := (Basis(hb.y.normalized(), -mo.x) * (Basis(hb.x.normalized(), mo.y) * fix)).normalized()
+	var dist := 1.0 / maxf(FAR_DIOPTRE, H.inv_d)
+	var p_fix := cyc + eye_dir * dist
+	var ang := []
+	for side in [0, 1]:
+		var ec: Vector3 = hd * (EYE_L if side == 0 else EYE_R)
+		var a := _eye_angles(hb, (p_fix - ec).normalized())
+		ang.append(a)
+		skel["eye_l" if side == 0 else "eye_r"] = Transform3D(_eye_basis(hb, a), ec)
+	# ---- blinks
+	var ex: float = clampf(float(o.get("exertion", 0.0)), 0.0, 1.0)
+	if H.blink_t < 0.0:
+		H.blink_due -= dt
+		if blink_now == "" and H.blink_due <= 0.0: blink_now = "spont"
+		if blink_now == "" and H.blink_due < BLINK_BREATH_WIN and o.get("exhaleStart", false): blink_now = "breath"
+		if blink_now != "" and H.since_blink >= BLINK_REFRACT:
+			H.blink_t = 0.0; H.since_blink = 0.0; H.blink_n += 1; H.blink_kind = blink_now
+			H.blink_due = rng.randf_range(BLINK_EVERY.x, BLINK_EVERY.y) * lerpf(1.0, 0.5, ex)
+	var closure := 0.0
+	if H.blink_t >= 0.0:
+		H.blink_t += dt
+		var bt: float = H.blink_t
+		if bt < BLINK_CLOSE: closure = _mj(bt / BLINK_CLOSE)
+		elif bt < BLINK_CLOSE + BLINK_HOLD: closure = 1.0
+		elif bt < BLINK_CLOSE + BLINK_HOLD + BLINK_OPEN: closure = 1.0 - _mj((bt - BLINK_CLOSE - BLINK_HOLD) / BLINK_OPEN)
+		else: H.blink_t = -1.0
+	var lids := []
+	for side in [0, 1]:
+		var a: Vector2 = ang[side]
+		var want := clampf(LID_OPEN + LID_TRACK * a.y, LID_CLOSED + 0.12, LID_UP_MAX)
+		var rl := BM.crit(H.lid[side], H.lid_v[side], want, 0.0, LID_HL, dt)
+		H.lid[side] = rl.x; H.lid_v[side] = rl.y
+		var la := lerpf(clampf(rl.x, LID_CLOSED, LID_UP_MAX), LID_CLOSED, closure)
+		lids.append(la)
+		var ec2: Vector3 = (skel["eye_l" if side == 0 else "eye_r"] as Transform3D).origin
+		skel["lid_l" if side == 0 else "lid_r"] = Transform3D(Basis(hb.x.normalized(), la) * hb, ec2)
+	# ---- jaw
+	var under: bool = hd.origin.y < float(s.config.surface_y) - 0.02
+	var jaw_goal := 0.0
+	if not under:
+		var bs: float = clampf(float(o.get("breathSignal", 0.0)), 0.0, 1.0)
+		jaw_goal = JAW_MAX * smoothstep(0.30, 0.85, ex) * (0.55 + 0.45 * bs)
+	var rj := BM.crit(H.jaw, H.jaw_v, jaw_goal, 0.0, JAW_HL, dt)
+	H.jaw = clampf(rj.x, 0.0, JAW_MAX); H.jaw_v = rj.y
+	skel["jaw"] = Transform3D(Basis(hb.x.normalized(), -H.jaw) * hb, hd * JAW_HINGE)
+	head_dbg = {"eye_l": ang[0], "eye_r": ang[1], "lid_l": lids[0], "lid_r": lids[1], "closure": closure, "jaw": H.jaw,
+		"under": under, "sacc_n": H.sacc_n, "sacc_amp": H.sacc_amp, "sacc": H.sacc, "micro_n": H.micro_n,
+		"blink_n": H.blink_n, "blink_kind": H.blink_kind, "goal": goal, "fix": fix, "dist": dist}
+const JAW_HINGE := Vector3(0.0, 0.072, 0.0)       # head local: where the jaw turns (by the ear; the stand-in's chin and lower lip hang from it)
+# ============================================================== head upgrade (END)
+
+
 func _skeleton(pose: Dictionary, dt: float, s, env: Dictionary) -> Dictionary:
 	var skel := {}
 	var pm: Transform3D = pose.pelvisMat
@@ -1235,6 +1506,7 @@ func _skeleton(pose: Dictionary, dt: float, s, env: Dictionary) -> Dictionary:
 	_breath_body(skel, dt)     # (breath master clock)
 	_follow_through(skel, dt, s)
 	_soft_arms(skel, dt, s)
+	_head_upgrade(skel, s)     # (head upgrade: neck_lower / neck_upper, eyes, lids, jaw)
 	pose["skel"] = skel
 	return pose
 
@@ -2675,7 +2947,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 	var gaze: Vector3 = BM.nrm(bo.gazeDirWorld + up * dip) if absf(dip) > 0.004 else bo.gazeDirWorld
 	var head := solve_head(sdt, chest_pos, raw_neck, cx_b, cay_b, -cz, gaze,
 		{"maxYaw": 0.96, "minPitch": -0.54, "maxPitch": 0.60, "neckPitchShare": 0.42, "extraRoll": bo.headTiltRad,
-		"neckHalflife": 0.095 if bo.get("objectiveFast", false) else 0.24})
+		"neckHalflife": 0.095 if bo.get("objectiveFast", false) else 0.24, "walk": true})
 	return {
 		"mode": "shore_wade" if wade_b > 0.12 else "shore_walk", "footCenter": ground,
 		"neckPos": head.neckPos, "chestPos": chest_pos, "waistPos": waist_pos, "pelvisPos": pelvis_pos,
