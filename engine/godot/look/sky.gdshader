@@ -45,6 +45,7 @@ uniform vec3 under_down = vec3(0.0);    // nits, the upper hemisphere (Ek(z_ref)
 uniform vec3 under_up = vec3(0.0);      // nits, the lower hemisphere (Eu(z_ref) / pi)
 
 const vec3 EXT = vec3(0.0862, 0.1665, 0.2961);
+#include "water_physics.gdshaderinc"   // water_y and the water's optics (the far sea below the horizon); before sky_stars
 #include "sky_stars.gdshaderinc"
 
 float airmass(float y) {
@@ -56,6 +57,10 @@ float airmass(float y) {
 // shared with the water shaders (look/sky_dome.gdshaderinc); mirrored on the CPU in WorldRoot.dome().
 #include "sky_dome.gdshaderinc"
 #include "sky_overcast.gdshaderinc"
+#include "sea_bathy.gdshaderinc"
+global uniform vec3 water_sun_air;
+global uniform float water_sun_lux;
+global uniform float water_sky_nits;
 vec3 dome(vec3 v, vec3 s) { return sky_dome_shape(v, s); }
 float h31(vec3 q) { return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
 float vnoise(vec3 p) {
@@ -107,7 +112,7 @@ vec4 moon(vec3 v, vec3 c, float deg, float real_deg, float albedo, float kelvin,
 void sky() {
 	vec3 v = EYEDIR;
 	if (AT_CUBEMAP_PASS && under_k > 0.5) { COLOR = v.y >= 0.0 ? under_down : under_up; }
-	else if (v.y < -0.02) {
+	else if (v.y < 0.0) {     // 28 Nov: was -0.02, so the dome's own below-horizon light showed as a dark line between the drawn sea (to 400 m) and the sky
 		// the far sea, past the camera's far plane (seen from height it is a wide band under the horizon: it read flat grey
 		// over the reef, water surface thread 28 Nov): the sky in its mirror by Fresnel (the waves turn facets toward the eye,
 		// RMS slope ~0.09, so the mirror sees a little higher than the flat sea would) + the deep's own blue through it
@@ -115,7 +120,26 @@ void sky() {
 			float mu = clamp(-v.y + 0.09, 0.0, 1.0);
 			float F = 0.02 + 0.98 * pow(1.0 - mu, 5.0);
 			vec3 r = normalize(vec3(v.x, mu, v.z));
-			COLOR = F * sky_overcast_air(dome(r, normalize(dome_sun)) * sky_norm, r) + (1.0 - F) * sea_deep_nits;
+			// 28 Nov: the water's own light as look/sea_top draws it where nothing is drawn under it (the floor beyond from
+			// sea_bathy at that point, faded on the way up, + Rrs x Ed): was the open ocean's blue everywhere, so over a
+			// lagoon that goes on (no reef) a dark line sat between the drawn sea and the sky (Gary 28 Nov playtest "still a
+			// slight seaming happening in the horizon")
+			vec3 far_c = sea_deep_nits;
+			float ch = POSITION.y - water_y;
+			if (ch > 0.0) {
+				vec2 xz = POSITION.xz + v.xz * (ch / max(-v.y, 1e-4));
+				float H = sea_bathy_depth(xz);
+				vec3 Tg = refract(v, vec3(0.0, 1.0, 0.0), 1.0 / 1.333);
+				float Lb = min(min(H, 60.0) / max(-Tg.y, 0.05), 400.0);
+				vec3 c = water_a + water_b;
+				float Ed = water_sun_lux * max(water_sun_air.y, 0.0) + PI * water_sky_nits;
+				vec3 rrs0 = mix(water_rrs, max(water_rrs, water_rrs_deep), sea_bathy_ss(20.0, 120.0, H));
+				vec3 rrs = mix(rrs0, rrs0.z * vec3(0.03, 0.55, 1.0), sea_open_teal) * sea_open_gain;
+				far_c = sea_bathy_sand(H) * exp(-c * Lb) + w_glow(Tg, 0.0, Lb) + rrs * Ed / 0.98 * (vec3(1.0) - exp(-(water_kd + water_ku) * H));
+			}
+			COLOR = F * sky_overcast_air(dome(r, normalize(dome_sun)) * sky_norm, r) + (1.0 - F) * far_c;
+			vec3 hz = normalize(vec3(v.x, 0.0015, v.z));          // the sea's last half degree melts into the horizon (look/sea_top)
+			COLOR = mix(COLOR, sky_overcast_air(dome(hz, normalize(dome_sun)) * sky_norm, hz), sea_horizon_melt * (1.0 - smoothstep(0.0, 0.012, -v.y)));
 		} else { COLOR = vec3(sea_nits); }
 	}
 	else {

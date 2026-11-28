@@ -11,7 +11,7 @@
 //   since v32 nothing is drawn under water), the old aureole (v25; MoonSky > 0 replaced it in v81), the airglow ripples
 //   (AirRipple 0 since v80).
 // The catalogue comes from look/star_catalogue.gd as a float texture (StarCatalogue.texture()).
-global uniform float water_y;
+// water_y: from water_physics.gdshaderinc (look/sky.gdshader includes it first)
 uniform sampler2D star_cat : filter_nearest, repeat_disable;
 // ---- from the clock (WorldRoot._push_sky), as Unreal's MPC_Sky and the Stars actor
 uniform float stars_on = 0.0;            // the star cube is shown below 50 lux on the ground, or in an eclipse's glow

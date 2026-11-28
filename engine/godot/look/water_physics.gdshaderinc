@@ -6,6 +6,7 @@ global uniform vec3 water_rrs;      // the deep water's Rrs (/sr, above the surf
 global uniform vec3 water_rrs_deep;  // the open ocean's Rrs (WaterOptics.OCEAN), past the reef (sea_top blends by floor depth 20-120 m)
 global uniform float sea_open_gain;  // open water art levers (FftSea adds both: 2, 0.5 = the lifted Abzu blue Gary picked 28 Nov; 1, 0 = physical)
 global uniform float sea_open_teal;
+global uniform float sea_horizon_melt; // art lever (FftSea, AO_HORIZON_MELT): the last ~0.5 deg of sea under the horizon melts into the sky there (look/sea_top, look/sky)
 global uniform vec3 water_a;
 global uniform vec3 water_b;
 global uniform vec3 water_kd;

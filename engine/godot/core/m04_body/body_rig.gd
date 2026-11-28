@@ -2,7 +2,8 @@
 ## and the swim <-> walk blend from core/ik-poses-world.js). 1.38 m girl, NASA neutral-body-posture springs, soft
 ## joint limits, breaststroke + flutter kick, foot placement on land, anatomical head, no-clip limbs.
 ## Differences from the JS (each written down):
-## - the brain is pluggable (quiet_brain.gd until character-brain.js is ported);
+## - the brain is the ported character-brain.js (character_brain.gd); thalassa_exact runs swap in quiet_brain.gd, the
+##   stand-in the golden body trace was recorded with, so the rig port stays checked on its own;
 ## - HairBobPhysics is not ported: the minimal mannequin has no hair (its bob meshes are 1 mm placeholders);
 ## - buildUE5SkeletonPose is not ported (only the .glb skinning used it);
 ## - cockpit / deck / helm / mantle / ride poses come with their modules.
@@ -14,10 +15,14 @@ const BM := preload("res://core/m04_body/body_math.gd")
 const PhysicsControl := preload("res://core/m04_body/physics_control.gd")
 const FootPlacer := preload("res://core/m04_body/foot_placer.gd")
 const QuietBrain := preload("res://core/m04_body/quiet_brain.gd")
+const CharacterBrain := preload("res://core/m04_body/character_brain.gd")
 
 ## true = reproduce Thalassa v20.19 exactly, bugs included (the golden test sets it). false = with the fixes the body
 ## stress test (tests/test_body_stress.gd) forced; each one is marked FIX and listed in CHANGELOG.md.
-var thalassa_exact := false
+var thalassa_exact := false:
+	set(v):
+		thalassa_exact = v
+		brain = QuietBrain.new() if v else CharacterBrain.new()
 var ground_follow := NAN
 var noclip_off := {}
 var _step_dt := 1.0 / 60.0
@@ -113,7 +118,9 @@ var light_button_depression := 0.0
 
 var world_foot_placer = FootPlacer.new({"stanceHalfWidth": 0.088, "walkStepHeight": 0.044, "runStepHeight": 0.102})
 var physics_control = PhysicsControl.new("underwater_active_ragdoll")
-var brain = QuietBrain.new()
+var brain = CharacterBrain.new()
+var brain_out := {}          # the brain's last output (breath phase / signal / rate / amp, gaze, focus): the body's pacemaker
+var _brain_fresh := false    # stepped during this rig step already
 var head_yaw_spring = BM.CritSpring1D.new(0.0)
 var head_pitch_spring = BM.CritSpring1D.new(0.0)
 
@@ -657,6 +664,7 @@ func _skeleton(pose: Dictionary, dt: float, s, env: Dictionary) -> Dictionary:
 
 func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary, sense = null, on_stroke_pull = null, on_shore_footstep = null) -> Dictionary:
 	_step_dt = clampf(dt, 0.0001, 0.05)
+	_brain_fresh = false
 	if not _spawned and not thalassa_exact:
 		# FIX (stress B38): the body yaw started at Thalassa's spawn yaw 0.12 whatever way she faced, so spawning
 		# facing elsewhere swung the first second's pose round through her (crossed legs, an arm in the torso)
@@ -868,7 +876,7 @@ func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary,
 
 	var chest_fwd_swim := -chest_z
 	var crossing := absf(s.pos.y - s.config.surface_y) < 0.72 and absf(s.vel.y) > 1.15
-	var brain_swim: Dictionary = brain.update(dt, {
+	var brain_ctx := {
 		"mode": "swim", "headPos": cam_anchor, "bodyFwd": chest_fwd_swim, "bodyRight": chest_x, "bodyUp": chest_axis_y,
 		"visionFwd": fwd_look, "visionRight": right_look, "visionUp": head_up,
 		"cameraFwd": sense.cameraFwd if (sense != null and sense.get("cameraFwd") != null) else fwd_look,
@@ -878,7 +886,23 @@ func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary,
 		"impactShake": impact_energy, "inCriticalTransition": crossing or s.shore_dive_arc_timer > 0.0,
 		"objectiveFocus": {"label": "WATER ENTRY", "dir": fwd_look, "holdSec": 0.45} if crossing else null,
 		"getFloorHeight": get_floor, "queryNearestSurface": query,
-		"colliders": sense.get("colliders") if sense != null else null, "pois": sense.get("pois") if sense != null else null})
+		"colliders": sense.get("colliders") if sense != null else null, "pois": sense.get("pois") if sense != null else null}
+	var brain_swim: Dictionary
+	if thalassa_exact:
+		brain_swim = brain.update(dt, brain_ctx)
+	else:
+		# ROOT (brain port): ik-rig.js stepped the brain in this swim pose AND again in the walk pose whenever she stood
+		# or waded, alternating 'swim' and 'deck_walk' contexts: the breath ran at twice its rate on land, every land idle
+		# glance was cancelled by the swim step the next call, the contrapposto spring was pulled back to 0 each tick.
+		# One step per rig step now, in the context she is mostly in (ground walk blend 0.5); the other pose reuses it.
+		brain_ctx["checkLineOfSight"] = sense.get("checkLineOfSight") if sense != null else null
+		brain_ctx["effort"] = clampf(0.45 * active_stroke + 0.55 * sprint_blend, 0.0, 1.0)     # breath drive (see the brain)
+		if s.ground_walk_blend >= 0.5 and not brain_out.is_empty():
+			brain_swim = brain_out
+		else:
+			brain_swim = brain.update(dt, brain_ctx)
+			_brain_fresh = true
+	brain_out = brain_swim
 
 	var ubr_base := fposmod(arm_phase, TAU) / TAU
 	if on_stroke_pull != null and swim_blend > 0.28 and prev_ubr < 0.48 and ubr_base >= 0.48:
@@ -1244,7 +1268,7 @@ func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary,
 
 	var head := solve_head(dt, chest_pos, neck_pos, chest_x, chest_axis_y, chest_fwd_swim, brain_swim.gazeDirWorld,
 		{"maxYaw": 1.04, "minPitch": -0.58, "maxPitch": lerpf(0.72, 1.08, clampf(swim_blend, 0.0, 1.0)), "neckPitchShare": 0.44,
-		"extraRoll": brain_swim.headTiltRad, "neckHalflife": 0.095 if brain_swim.get("objectiveFocusActive", false) else 0.21})
+		"extraRoll": brain_swim.headTiltRad, "neckHalflife": 0.095 if brain_swim.get("objectiveFast", false) else 0.21})
 	swim_pose = {
 		"mode": "swim", "neckPos": head.neckPos, "chestPos": chest_pos, "waistPos": waist_pos, "pelvisPos": pelvis_pos,
 		"clavicleL": clavicle_l, "clavicleR": clavicle_r, "shoulderL": shoulder_l, "shoulderR": shoulder_r, "hipL": hip_l, "hipR": hip_r,
@@ -1415,7 +1439,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 	var look_fwd := BM.fwd(yaw, look_pitch)
 	var look_up := BM.nrm(w_right.cross(look_fwd))
 	var des_spd: float = s.shore_desired_vel_xz.length()
-	var bo: Dictionary = brain.update(sdt, {
+	var walk_ctx := {
 		"mode": "deck_walk", "headPos": Vector3(ground.x, ground.y + 1.32, ground.z), "bodyFwd": w_fwd, "bodyRight": w_right, "bodyUp": up,
 		"visionFwd": look_fwd, "visionRight": w_right, "visionUp": look_up,
 		"cameraFwd": sense.cameraFwd if (sense != null and sense.get("cameraFwd") != null) else look_fwd,
@@ -1423,7 +1447,18 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		"isAirborne": s.shore_is_airborne, "jumpAnticip": s.shore_jump_anticip, "inCriticalTransition": s.shore_dive_arc_timer > 0.0,
 		"objectiveFocus": {"label": "SHORE DIVE", "dir": look_fwd, "holdSec": 0.65} if s.shore_dive_arc_timer > 0.0 else null,
 		"getFloorHeight": get_floor, "crouchBlend": s.shore_crouch_blend,
-		"colliders": sense.get("colliders") if sense != null else null, "pois": sense.get("pois") if sense != null else null})
+		"colliders": sense.get("colliders") if sense != null else null, "pois": sense.get("pois") if sense != null else null}
+	var bo: Dictionary
+	if thalassa_exact:
+		bo = brain.update(sdt, walk_ctx)
+	elif _brain_fresh:
+		bo = brain_out     # stepped in the swim pose this rig step (see ROOT there)
+	else:
+		walk_ctx["checkLineOfSight"] = sense.get("checkLineOfSight") if sense != null else null
+		walk_ctx["effort"] = clampf((float(loco.speed) - 0.2) / 3.0 + (0.25 if s.shore_is_airborne else 0.0), 0.0, 1.0)
+		bo = brain.update(sdt, walk_ctx)
+		_brain_fresh = true
+	brain_out = bo
 	var pelv_yaw: float = yaw + loco.pelvisYaw
 	if not thalassa_exact:
 		# ROOT (stress monkey slips): a planted foot can't turn, and the hip rotates only int 0.20 / ext 0.48 rad over
@@ -1623,7 +1658,12 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		var clamped := hip + (pelv_right_base * cl_lat + (pelv_fwd * cl_fwd + up * up_d))
 		# ROOT (stress J7 slide): a planted foot is a world constant until it lifts; out of the hip's reach box it asks
 		# for a step (below, ahead of time) instead of being dragged into the box
-		if thalassa_exact or fst.stepping or s.shore_is_airborne: ft = clamped
+		if thalassa_exact or s.shore_is_airborne: ft = clamped
+		elif fst.stepping:
+			# FIX (stress J5, B14 turning on a 30 deg ramp at 120 Hz): a planted foot outside the reach box stays where
+			# it stands (above) and asks for a step; at lift-off it was put into the box in one tick, up to 12 cm away
+			# and, on a ramp, onto the higher ground there. The swing takes it into the box over its first quarter
+			ft = ft_raw.lerp(clamped, smoothstep(0.0, 0.25, fst.t))
 		if not thalassa_exact and fst.stepping and not s.shore_is_airborne and get_floor != null \
 				and Vector2(clamped.x - ft_raw.x, clamped.z - ft_raw.z).length() > 0.001:
 			# ROOT (stress B12 step down at 30/120 Hz): a long swing held back inside the reach box sat over the tread
@@ -2043,7 +2083,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 	var gaze: Vector3 = BM.nrm(bo.gazeDirWorld + up * dip) if absf(dip) > 0.004 else bo.gazeDirWorld
 	var head := solve_head(sdt, chest_pos, raw_neck, cx_b, cay_b, -cz, gaze,
 		{"maxYaw": 0.96, "minPitch": -0.54, "maxPitch": 0.60, "neckPitchShare": 0.42, "extraRoll": bo.headTiltRad,
-		"neckHalflife": 0.095 if bo.get("objectiveFocusActive", false) else 0.24})
+		"neckHalflife": 0.095 if bo.get("objectiveFast", false) else 0.24})
 	return {
 		"mode": "shore_wade" if wade_b > 0.12 else "shore_walk", "footCenter": ground,
 		"neckPos": head.neckPos, "chestPos": chest_pos, "waistPos": waist_pos, "pelvisPos": pelvis_pos,
@@ -2118,6 +2158,15 @@ func blend_swim_walk(sp: Dictionary, wp: Dictionary, t_raw: float) -> Dictionary
 		var zb := BM.nrm(right * (side * 0.65) + ortho_back * 0.55)
 		var xa := BM.nrm(fd.cross(zb))
 		return BM.basis_xf(ik.eff, xa, fd, xa.cross(fd))
+	var chest_b := Basis(cx, cay, cz)
+	var pelvis_b := Basis(px, pay, pz)
+	if not thalassa_exact:
+		# FIX (stress J9 head, brain port): the blend rebuilt the chest and pelvis frames from the lerped joints, without
+		# the walk pose's spine twist, chest roll and hip roll. With the brain those carry the curiosity twist and the
+		# contrapposto, so the chest swung up to 0.1 rad in the one tick the blend handed over to the walk pose (gwb
+		# 0.992). The frames now turn from the swim pose's to the walk pose's (equal to each at the ends).
+		chest_b = Quaternion(_ortho(sp.chestMat.basis)).slerp(Quaternion(_ortho(wp.chestMat.basis)), t)
+		pelvis_b = Quaternion(_ortho(sp.pelvisMat.basis)).slerp(Quaternion(_ortho(wp.pelvisMat.basis)), t)
 	var head_pos: Vector3 = sp.headMat.origin.lerp(wp.headMat.origin, t)
 	var hf := BM.nrm(sp.headMotion.fwd.lerp(wp.headMotion.fwd, t))
 	var hx := BM.nrm(hf.cross(Vector3.UP))
@@ -2127,7 +2176,7 @@ func blend_swim_walk(sp: Dictionary, wp: Dictionary, t_raw: float) -> Dictionary
 		"clavicleL": chest_pos.lerp(shoulder_l, 0.45), "clavicleR": chest_pos.lerp(shoulder_r, 0.45),
 		"shoulderL": shoulder_l, "shoulderR": shoulder_r, "hipL": hip_l, "hipR": hip_r,
 		"bodyRight": right, "bodyBack": ortho_back, "bodyAxisY": axis_y, "armL": arm_l, "armR": arm_r, "legL": leg_l, "legR": leg_r,
-		"chestMat": BM.basis_xf(chest_pos, cx, cay, cz), "pelvisMat": BM.basis_xf(pelvis_pos, px, pay, pz),
+		"chestMat": Transform3D(chest_b, chest_pos), "pelvisMat": Transform3D(pelvis_b, pelvis_pos),
 		"headMat": BM.basis_xf(head_pos, hx, hy, -hf), "handLMat": hb.call(arm_l, -1.0), "handRMat": hb.call(arm_r, 1.0),
 		"torchMat": sp.torchMat, "headMotion": {"pos": head_pos, "fwd": hf, "neckYaw": 0.0, "neckPitch": 0.0}}, true)
 	return out
