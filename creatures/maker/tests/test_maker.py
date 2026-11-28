@@ -133,14 +133,24 @@ def test_bake_keeps_interior_and_linings_off_the_skin_maps(tmp_path):
         assert p.returncode == 0, p.stderr[-800:]
         N = np.asarray(Image.open(os.path.join(out, 'body_normal.png'))).astype(float)[..., :3] / 127.5 - 1
         return checks.p6(N, np.load(os.path.join(out, 'body_mask.npy'))[::-1])
+    Zc = np.load(os.path.join(out, 'cage.npz'))
+    rim_z = lambda: checks.rim_lean(json.load(open(os.path.join(out, 'cage.json'))), Zc['V'], Zc['VN'], np.asarray(Image.open(os.path.join(out, 'body_normal.png'))).astype(float)[..., :3] / 127.5 - 1)
     good = bake()
-    assert good['P6_pass'], good
+    assert good['P6_pass'] and rim_z()['P6_rim_pass'], (good, rim_z())
     bad = bake(dict(CREATURE_PLANT_BAKE_FAULT='interior_on_skin'))
     assert not bad['P6_pass'] and bad['P6_backward_texels'] > 20 * max(good['P6_backward_texels'], 1), bad
+    # skin turns in round a rim: the lining at the lips and gill slits carries the skin's colour (EX9), and with the lining
+    # mucosa pink right from the rim again the check must see it
+    rim = lambda: checks.rim_colour(json.load(open(os.path.join(out, 'cage.json'))), checks._lin(os.path.join(out, 'body_base.png')), checks._lin(os.path.join(out, 'interior_base.png')))
+    r_good = rim(); assert r_good['EX9_pass'] and r_good['EX9_rim_vertices'] > 40, r_good
+    bake(dict(CREATURE_PLANT_BAKE_FAULT='lining_pink_at_rim')); r_bad = rim()
+    assert not r_bad['EX9_pass'] and r_bad['EX9_rim_colour_diff_p95'] > 3 * checks.EX9_DIFF_MAX, r_bad
     # the skin's shading stops at the lips: with the lip normals averaged into the lining again (the edges between skin and
     # interior faces left smooth) the map must lean the other way over every skin face at a lip, and P6 sees it
+    # on those faces (the map-wide percentile alone no longer trips its gate here: it did while plate walls used up most of its 1 %)
     lean = bake(dict(CREATURE_PLANT_BAKE_FAULT='lips_shaded_with_lining'))
-    assert lean['P6_normal_z_p1'] < good['P6_normal_z_p1'] - 0.03 and lean['P6_normal_z_p1'] < checks.P6_Z_P1_MIN, (good, lean)
+    r_lean = rim_z()
+    assert lean['P6_normal_z_p1'] < good['P6_normal_z_p1'] - 0.03 and not r_lean['P6_rim_pass'], (good, lean, r_lean)
 
 
 def test_ventral_vs_from_the_record():
@@ -151,9 +161,12 @@ def test_ventral_vs_from_the_record():
     from creature_maker.cage import build_cage
     rec = adapt(REC); form = Form(rec)
     assert {'jaw.dentary', 'jaw.mandibleLow'} <= set(rec['defaults_used'])          # the proof record has no jaw bones: listed
-    assert [p[0] for p in form.VPLATES] == ['mandible', 'branchiostegal'] and form.vedge['za'] < form.vedge['zc']
-    e = form.vedge; xm = 0.5 * (e['xa'] + e['xc']); zm = float(form.vedge_z(xm)); y = float(form.BOT(xm)) + 0.004
-    d_in, d_out = (float(form.sd_full(np.array([[xm, y, z]]))[0] - form.sd_body(np.array([[xm, y, z]]))[0]) for z in (zm - 0.004, zm + 0.008))     # outside: past the edge's chamfer (form.PLATE_CHAMFER)
+    names = [p['name'] for p in form.PLATES]; cover = form.PLATES[names.index('gill cover')]
+    assert 'mandible' in names and len(cover['free']) == 2 and form.vedge['za'] < form.vedge['zc']     # one cover: its free margin is the rear edge, then the V
+    e = form.vedge; xm = 0.5 * (e['xa'] + e['xc']); te = float(form.vedge_th(xm)[0]); ths = te + np.linspace(-0.5, 0.5, 2001)
+    S = form.loft_point(np.full(len(ths), xm), ths); arc = np.linalg.norm(S - form.loft_point(np.array([xm]), np.array([te])), axis=1)
+    k_in, k_out = (int(np.argmax(np.where(m, -np.abs(arc - cover['bevel']), -9))) for m in (ths > te, ths < te))      # one bevel width either side of the edge, on the skin
+    d_in, d_out = (float(form.sd_full(S[k:k + 1])[0] - form.sd_body(S[k:k + 1])[0]) for k in (k_in, k_out))
     assert d_out < d_in - 1e-4                                                      # the membrane stands proud outside the V edge only
     # the proof record's slit is 14 columns long, so the 17-edge cap leaves no leg that reaches the cavity slot; a cover
     # with a lower top (as most records have) gets the leg
@@ -288,7 +301,7 @@ def test_lower_jaw_plate_has_no_ledge():
     the bare body's."""
     from creature_maker.record import adapt
     from creature_maker.form import Form
-    form = Form(adapt(REC)); k = [p[0] for p in form.VPLATES].index('mandible'); poly = np.array(form.VPLATES[k][1]); n = 140
+    form = Form(adapt(REC)); k = [p['name'] for p in form.PLATES].index('mandible'); poly = form.PLATES[k]['poly']; n = 140
     X, T = np.meshgrid(np.linspace(poly[:, 0].min(), poly[:, 0].max(), n), np.linspace(np.pi * 0.5, np.pi, n)); X, T = X.ravel(), T.ravel()
     top, bot = form.TOP(X), form.BOT(X); D = np.stack([np.zeros_like(X), np.cos(T), np.sin(T)], 1); O = np.stack([X, (top + bot) / 2, np.zeros_like(X)], 1)
     lo, hi = np.zeros(len(X)), 1.5 * np.maximum(form.HW(X), (top - bot) / 2) + 0.02; f = lambda P: form.sd_full(P, cleft=False)
@@ -297,9 +310,36 @@ def test_lower_jaw_plate_has_no_ledge():
     P = O + D * hi[:, None]; e = 2e-4
     g = lambda fn: np.stack([fn(P + e * np.eye(3)[i]) - fn(P - e * np.eye(3)[i]) for i in range(3)], 1)
     a, b = g(f), g(form.sd_body); c = (a * b).sum(1) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1) + 1e-15)
-    ids = form.sd_full(P - b / np.linalg.norm(b, axis=1)[:, None] * 5e-4, parts=True)[1]
-    jaw = np.asarray(ids) == len(form.PLATES) + k + 1
+    jaw = form.plates(P)[1] == k + 1
     assert jaw.sum() > 50 and c[jaw].min() > 0, (int(jaw.sum()), float(c[jaw].min()))
+
+
+def test_plates_shape_the_skin_as_one_surface():
+    """bone plates are thickness fields on the skin: zero on every outline, a bevel inside a free margin, no wall anywhere
+    (FM2). Slabs cut off square at their outlines came out of the dense form as staircases and baked as saw-toothed
+    plate edges; the opercle and the membrane under it were two slabs with a seam (export r6). The gill cover is one
+    plate whose step holds round its lower corner, and the same fault planted back must be caught."""
+    from creature_maker.record import adapt
+    from creature_maker.form import Form, PLATE_SLOPE
+    from creature_maker import checks
+    rec = adapt(REC); form = Form(rec); R = checks.plate_fair(form)
+    assert R['FM2_pass'] and R['FM2_plate_slope_max'] <= PLATE_SLOPE * 1.1, R
+    # on its outline every plate is the bare body
+    for p in form.PLATES:
+        S = form.loft_point(p['poly'][:, 0], p['poly'][:, 1]); T, _, _ = form.plates(S)
+        own = form.PLATES.index(p) + 1; others = form.plates(S)[1]
+        assert T[(others == own) | (others == 0)].max(initial=0) < 0.05 * p['step'], (p['name'], float(T.max()))
+    # the cover's step is there just inside its free margin all the way round the corner: rear edge, corner, V
+    cover = next(p for p in form.PLATES if p['name'] == 'gill cover'); k = form.PLATES.index(cover) + 1
+    xs = np.linspace(0.02, 0.33, 300); X, TH = np.meshgrid(xs, np.linspace(0.05, np.pi - 0.05, 300)); S = form.loft_point(X.ravel(), TH.ravel())
+    T, ids, W = form.plates(S); from creature_maker.form import line_d
+    near = (ids == k) & (line_d(S, cover['free']) < 2.5 * cover['bevel']) & (line_d(S, cover['free']) > 1.2 * cover['bevel']) & (line_d(S, cover['buried']) > 0.06)
+    assert near.sum() > 100 and T[near].min() > 0.5 * cover['step'], (int(near.sum()), float(T[near].min()))
+    from creature_maker.form import SKIN_OVER
+    assert np.median(np.abs(form.sd_full(S, cleft=False)[ids > 0] + T[ids > 0] + SKIN_OVER)) < 1e-5          # the solid is the body less the bone: no union on top
+    bad = Form(rec)
+    for p in bad.PLATES: p['bevel'] = 0.0006
+    assert not checks.plate_fair(bad)['FM2_pass']
 
 
 def test_top_view_closing_to_a_point_at_the_snout_builds(tmp_path):
@@ -341,12 +381,14 @@ def test_front_reference_marked_as_a_section_is_scored_against_a_slice():
     assert section_u({'front_kind': 'section', 'front_u': 0.57}) == 0.57
 
 
-def test_eye_aims_down_its_own_axis_and_the_head_has_volume_round_it(tmp_path):
+def test_eye_aims_down_its_own_axis_from_a_swelling_and_the_head_keeps_the_scan_line(tmp_path):
     """planted: a record whose eye sits high on a round head (the proof record with its eye moved up to 0.15 eye radii under
     the dorsal outline). On the bare loft the rim's own plane leans far up there (the old aim); the eye's aim stays in the
-    scan range, the rim is plane and square to it, the tissue only widens the head and stays inside the top view."""
+    scan range, the rim is plane and square to it, the swelling round the rim stays inside the top view and has run out by
+    SWELL_MAX eye radii, and the skin ring stays the head's own (inside the scans' band, or where the record's loft put it).
+    A head whose ring lies over the band is turned back to it."""
     from creature_maker.record import adapt
-    from creature_maker.form import Form, AIM_UP, AIM_FWD
+    from creature_maker.form import Form, AIM_UP, AIM_FWD, SWELL_MAX, RING_HOLD
     from creature_maker.cage.eye import rim3
     D = json.load(open(REC)); R = D['record']; E = R['skeleton']['eye']; top = np.array(R['outline']['top'])
     E['y'] = float(np.interp(E['u'], top[:, 0], top[:, 1])) - 1.15 * E['R']
@@ -363,7 +405,18 @@ def test_eye_aims_down_its_own_axis_and_the_head_has_volume_round_it(tmp_path):
     assert (rim[:, 2] >= bare[:, 2] - rec['eye']['groove'] * F.er - 1e-9).all()      # tissue is added; the furrow is the only way in
     assert (rim[:, 2] <= F.HW(rim[:, 0]) + rec['eye']['bulge'] * F.er + 1e-9).all()  # and stays inside the top view + the bulge
     assert np.allclose(F.eye_axis(-1), n * [1, 1, -1])
-    assert O['skin_up_deg'] < O['bare_skin_up_deg']                        # the skin round the eye faces less up than before
+    # the head is the record's: the ring is not filled past the band's lower edge (or past the record's own loft, if that lies lower)
+    assert O['skin_up_deg'] >= min(O['bare_skin_up_deg'], O['ring_target_deg'] - RING_HOLD) - 0.15, O
+    far = np.stack([F.ex + 1.02 * SWELL_MAX * F.er * np.cos(ph), F.eyy + 1.02 * SWELL_MAX * F.er * np.sin(ph)], -1)
+    far = far[(far[:, 1] < F.TOP(far[:, 0])) & (far[:, 1] > F.BOT(far[:, 0])) & (far[:, 0] > 0)]; z1 = F.z_on(far[:, 0], far[:, 1])
+    F._orb = None; z0 = F.z_on(far[:, 0], far[:, 1]); F._orb = keep
+    assert len(far) > 100 and np.allclose(z1, z0, atol=1e-9)              # past the swelling's longest run the loft is the record's
+    from creature_maker.checks import form_fair, FM1_ORBIT_GATED
+    Rf = form_fair(F); assert FM1_ORBIT_GATED and Rf['FM1_pass'] and Rf['FM1_orbit_crease_deg'] <= 8.0, Rf    # no crease from the swelling
+    # a head that falls away round the eye (its ring 12 deg over the stated facing) is turned back into the band
+    D2 = json.load(open(REC)); D2['record']['skeleton']['eye']['skin_up'] = Form(adapt(REC)).ORBIT['bare_skin_up_deg'] - 12.0
+    p2 = str(tmp_path / 'falls_away.json'); json.dump(D2, open(p2, 'w')); O2 = Form(adapt(p2)).ORBIT
+    assert O2['head_turn'] < 0 and abs(O2['skin_up_deg'] - (O2['ring_target_deg'] + RING_HOLD)) < 0.1, O2
     out = str(tmp_path / 'b'); build(p, out, res=64, dense_form=False, log=lambda *a: None)
     Rk = check(out, p, sweep=False)
     assert Rk['EA2_pass'] and Rk['EY1_pass'] and Rk['EY2_pass'] and Rk['OP1_pass'], {k: Rk[k] for k in Rk if k.startswith(('EA', 'EY'))}
@@ -418,6 +471,59 @@ def test_traced_tables_are_faired_and_the_loft_has_no_crease_or_ripple(tmp_path)
     G = Form(rec('corner', 0.0, 0.0)); ph = G.SECT['phi']; c_, s_ = np.abs(np.cos(ph)), np.sin(ph)     # a rhombus, drawn row to row
     G.SECT['rho'][:] = 1 / (c_ + s_); G.SECT['drho'][:] = -(np.where(ph < np.pi / 2, -s_, s_) + np.cos(ph)) / (c_ + s_) ** 2
     assert form_fair(G)['FM1_crease_deg'] > FM1_CREASE_MAX
+
+
+def _traced_paired(tmp_path, fault=None):
+    """the proof record with its paired fins traced: a sickle pectoral laid flat on the flank, a pelvic fin held erect (as a
+    specimen photo shows it), its base on the belly line."""
+    from creature_maker.record import adapt
+    from creature_maker.form import Form
+    from creature_maker.fins import build_fins
+    D = json.load(open(REC)); S = D['record']['skeleton']; f0 = Form(adapt(REC)); SL = D['record']['outline']['end']
+    S['pectoral'].update(base_line=[[112.5, 5.4], [112.5, 0.0], [113.5, -5.4]],
+                         edge=[[112.5, 5.4], [135, 7], [155, 2], [172, -10], [156, -5], [135, -5], [113.5, -5.4]])
+    by = lambda u: float(f0.BOT(u / SL)) * SL
+    S['pelvic'].update(base_line=[[115, by(115)], [120, by(120)], [127, by(127)]],
+                       edge=[[115, by(115)], [118, by(118) - 18], [124, by(124) - 36], [128, by(128) - 24], [128.5, by(128) - 10], [127, by(127)]])
+    rp = str(tmp_path / 'paired.json'); json.dump(D, open(rp, 'w')); rec = adapt(rp)
+    for n in ('pectoral', 'pelvic'): rec['fins'][n]['fault'] = fault
+    form = Form(rec); fins = build_fins(form, rec, str(tmp_path))
+    return dict(fins={k: dict(V=np.asarray(v['V']).tolist(), F=v['F'], T=v['T']) for k, v in fins.items()}), form, rec
+
+
+def test_traced_paired_fins_keep_their_size_their_side_and_a_flat_blade(tmp_path):
+    """export r6 pixel check, items 1 and 4. A side-view outline is the fin's own shape, so the fin turns about its base line
+    (true length), a pelvic fin traced erect is folded to the record's rest angle, the pair stays apart, the blade is flat
+    and the base leaves the skin along the skin. The rule before (outline kept as the side view and pushed out by tan(out),
+    rows relaxed) fails the size and flatness checks, and each planted fault is caught."""
+    from creature_maker.checks import paired_fin_checks, paired_sheets, planted_fins
+    from creature_maker.fins import fan_angle
+    C, form, rec = _traced_paired(tmp_path); R = paired_fin_checks(paired_sheets(C, rec), form)
+    assert all(R[k] for k in ('PF1_pass', 'PF2_pass', 'PF3_pass', 'PF4_pass')), R
+    P = form.PAIRED['pelvic']; assert P['under'] and P['fan_traced'] > P['fan_record'] and abs(P['fold'] - P['fan_record'] / P['fan_traced']) < 1e-3
+    V = np.array(C['fins']['pelvic_L']['V']).reshape(-1, 25, 3); tip = V[-1][np.linalg.norm(V[-1] - V[1, 0], axis=1).argmax()] - V[1, 0]; c = V[1, -1] - V[1, 0]
+    ang = np.degrees(np.arccos(tip @ c / np.linalg.norm(tip) / np.linalg.norm(c)))        # the leading ray from the root line, in the fin's own plane
+    assert ang <= rec['fins']['pelvic']['fan'] + 6 < P['fan_traced'] - 15, (ang, P)     # 6 deg: measured from the first row, the root row is sunk
+    assert np.array(C['fins']['pelvic_L']['V'])[:, 2].min() > 0 > np.array(C['fins']['pelvic_R']['V'])[:, 2].max()
+    PL = planted_fins(C, form, rec); assert len(PL) >= 5 and all(PL.values()), PL
+    C0, form0, rec0 = _traced_paired(tmp_path, fault='project'); R0 = paired_fin_checks(paired_sheets(C0, rec0), form0)
+    assert not R0['PF2_pass'] and not R0['PF3_pass'], R0
+
+
+def test_a_swept_fin_lobe_does_not_fold_its_card(tmp_path):
+    """the notch behind the trevally's dorsal lobe (export r6, known item): a traced fin with a lobe swept back over the low
+    fin behind it. Rows relaxed to the mean of their neighbours fold over behind the lobe; the Winslow grid does not."""
+    from creature_maker.record import adapt
+    from creature_maker.form import Form
+    from creature_maker.fins import build_fins
+    from creature_maker.checks import fin_fold_check
+    D = json.load(open(REC)); f0 = Form(adapt(REC)); SL = D['record']['outline']['end']; ty = lambda u: float(f0.TOP(u / SL)) * SL
+    D['record']['skeleton']['median']['d']['edge'] = [[135, ty(135)], [150, ty(150) + 40], [185, ty(185) + 46], [166, ty(166) + 14], [180, ty(180) + 7], [198, ty(198)]]
+    rp = str(tmp_path / 'lobe.json'); json.dump(D, open(rp, 'w')); got = {}
+    for mode in ('relaxed', None):
+        rec = adapt(rp); rec['fins']['fault'] = mode; fins = build_fins(Form(rec), rec, str(tmp_path))
+        got[mode] = fin_fold_check(dict(fins={'dorsal': dict(V=np.asarray(fins['dorsal']['V']), F=fins['dorsal']['F'])}))
+    assert not got['relaxed']['FN1_pass'] and got[None]['FN1_pass'], got
 
 
 def test_blockout_follows_the_record_and_catches_planted_faults(tmp_path):
