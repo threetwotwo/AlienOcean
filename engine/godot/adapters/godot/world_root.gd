@@ -50,6 +50,12 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 const SUN_DISC_DEG := 0.53
 const SDFGI_RESET_STOPS := 3.0
 @export var under_white := Vector3.ZERO      # look check: the under-water camera balance (zero = the place's UNDER_WHITE)
+## The floor beyond the drawn floor (look/sea_bathy.gdshaderinc, 28 Nov): the lagoon's sand runs out to its reef
+## (lagoon_radius m round lagoon_centre, Godot x z), then falls away over fore_reef_m to ocean_depth. Radius 0 = no reef.
+@export var lagoon_centre := Vector2.ZERO
+@export var lagoon_radius := 400.0
+@export var fore_reef_m := 600.0
+@export var ocean_depth := 1000.0
 @export var water_type := 0.0              # 0 = the lagoon's water, 1 = the open ocean's (WaterOptics.optics); between = a blend (shelf)
 # weather (28 Nov, look thread; promised to the water surface thread, which wires foam and haze to it): cloud cover 0 clear ..
 # 1 overcast. SkyClock.overcast splits the light (Kasten-Czeplak): the sun's beam fades (shadows, caustics, glitter, the disc and
@@ -60,6 +66,8 @@ const SDFGI_RESET_STOPS := 3.0
 @export var gi_k := 1.0                    # art lever: GI strength (SDFGI energy). 1 = physical (the water's fill + the sand's real bounce)
 @export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
 ## the haze keeps its forward-scattered light (similarity relation, 28 Nov): 1 = on, 0 = as ported (AO_GLOW_MS=0)
+## the drawn sand's colour (world_textures BIBLE sand f0e1c0 and sand_d e3cca2, linear, their mean): the floor beyond
+const FAR_SAND := Vector3(0.82, 0.68, 0.44)
 static var glow_ms := float(OS.get_environment("AO_GLOW_MS")) if OS.get_environment("AO_GLOW_MS") != "" else 1.0
 @export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
 ## The god rays under the water (Unreal GodK): the light net's map summed along each view ray. false = off (checks).
@@ -366,7 +374,7 @@ static func declare_globals() -> void:
 	var defs := {"water_y": [F, LagoonWaterField.SURFACE_Y], "water_floor_y": [F, 0.0],
 		"water_a": [V, Vector3.ZERO], "water_b": [V, Vector3.ZERO], "water_kd": [V, Vector3.ZERO], "water_ku": [V, Vector3.ZERO],
 		"water_sun_w": [V, Vector3.UP], "water_es0": [F, 0.0], "water_ek0": [F, 0.0], "water_exposure": [F, 1.0],
-		"water_glow_k": [F, 1.0], "water_glow_ms": [F, 1.0], "water_zref": [F, 2.0], "water_sky_nits": [F, 0.0], "water_rrs": [V, Vector3.ZERO],
+		"water_glow_k": [F, 1.0], "water_glow_ms": [F, 1.0], "water_bathy": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO], "water_ocean_depth": [F, 1000.0], "water_far_sand": [V, Vector3(0.82, 0.68, 0.44)], "water_zref": [F, 2.0], "water_sky_nits": [F, 0.0], "water_rrs": [V, Vector3.ZERO],
 		"water_sand": [RenderingServer.GLOBAL_VAR_TYPE_COLOR, Color.WHITE],
 		# the light net (look/caustics.gdshaderinc): its map, and x 1 = read the map / 0 = per pixel, y the net's time (-1 = TIME)
 		"water_caus_map": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()],
@@ -396,6 +404,9 @@ func _push_water(water_y: float, sun_up_air: Vector3, beam_h_lux: float, sky_lux
 	rs.global_shader_parameter_set("water_exposure", exposure)
 	rs.global_shader_parameter_set("water_glow_k", glow_k)
 	rs.global_shader_parameter_set("water_glow_ms", glow_ms)
+	rs.global_shader_parameter_set("water_bathy", Vector4(lagoon_centre.x, lagoon_centre.y, lagoon_radius, fore_reef_m))
+	rs.global_shader_parameter_set("water_ocean_depth", ocean_depth)
+	rs.global_shader_parameter_set("water_far_sand", FAR_SAND)
 	rs.global_shader_parameter_set("water_fill_ao", 1.0 if fill_occluded else 0.0)
 	rs.global_shader_parameter_set("water_sand", WaterOptics.SAND)
 	rs.global_shader_parameter_set("water_sky_nits", sky_lux / PI)   # clear sky as a uniform dome (stand-in for the surface)
