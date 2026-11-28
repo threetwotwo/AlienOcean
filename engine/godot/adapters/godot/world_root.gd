@@ -49,6 +49,12 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 const SUN_DISC_DEG := 0.53
 @export var under_white := Vector3.ZERO      # look check: the under-water camera balance (zero = the place's UNDER_WHITE)
 @export var water_type := 0.0              # 0 = the lagoon's water, 1 = the open ocean's (WaterOptics.optics); between = a blend (shelf)
+# weather (28 Nov, look thread; promised to the water surface thread, which wires foam and haze to it): cloud cover 0 clear ..
+# 1 overcast. SkyClock.overcast splits the light (Kasten-Czeplak): the sun's beam fades (shadows, caustics, glitter, the disc and
+# the moons go with it), the sky's share grows, and the dome blends to the CIE overcast deck (look/sky_overcast.gdshaderinc).
+# Pushed as the global sky_overcast. AO_OVERCAST in the shot tool.
+@export_range(0.0, 1.0) var sky_overcast := 0.0
+@export var motes := true                 # marine snow under water (blind critique r1 row 6); AO_MOTES=0 in the shot tool
 @export var gi_k := 1.0                    # art lever: GI strength (SDFGI energy). 1 = physical (the water's fill + the sand's real bounce)
 @export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
 @export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
@@ -177,6 +183,7 @@ func attach_camera(cam: Camera3D) -> void:
 	q.gi_mode = GeometryInstance3D.GI_MODE_DISABLED   # a screen pass, not a solid: never in SDFGI / VoxelGI
 	q.extra_cull_margin = 16384.0; q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; q.layers = 1 << 3   # layer 4: the eye's own quads (the sea floor map's captures skip it)
 	cam.add_child(q)
+	if motes and get_node_or_null("Motes") == null: add_child(Motes.new())   # marine snow around the eye (adapters/godot/motes.gd)
 
 func _process(_dt: float) -> void:
 	## the god rays' start point moves on each frame only where TAA averages it (Unreal: StateFrameIndexMod8 under TSR);
@@ -200,14 +207,14 @@ func make_surface(_size_m := 160.0) -> Node3D:
 func apply(cam_y: float) -> Dictionary:
 	if tide_on: water.set_clock(hours)   # the sea level follows the two moons (core/world/tide.gd)
 	var water_y := water.level
-	var st := SkyClock.sky_state(hours, noon_yaw)
+	var st := SkyClock.overcast(SkyClock.sky_state(hours, noon_yaw), sky_overcast)
 	state = st
 	key = SkyClock.pick_key(st, key)
 	var body: Dictionary = st[key]
 	var fade := SkyClock.key_fade(st, key)
 	var under := cam_y < water_y
 	var up_air := to_godot(body.dir)
-	var beam_h: float = SkyClock.beam_lux(body.elev) * (body.toa / SkyClock.STAR.toa_lux if key != "sun" else 1.0) * fade
+	var beam_h: float = SkyClock.beam_lux(body.elev) * (body.toa / SkyClock.STAR.toa_lux if key != "sun" else 1.0) * fade * float(st.oc_beam_k)
 	var tint: Color = SkyClock.kelvin_rgb(body.kelvin) * air_tint(body.elev)
 	if key != "sun": tint = tint * SkyClock.MOON_TINTS[key].lerp(Color(1, 1, 1), 0.5)
 	# exposure: the eye's dark end slid with the light; steady under water; place compensation
@@ -239,6 +246,11 @@ func apply(cam_y: float) -> Dictionary:
 	rsw.global_shader_parameter_set("water_dome_sun", sky_mat.get_shader_parameter("dome_sun"))
 	rsw.global_shader_parameter_set("water_sky_norm", sky_mat.get_shader_parameter("sky_norm"))
 	rsw.global_shader_parameter_set("sky_turbidity", turbidity)
+	rsw.global_shader_parameter_set("sky_overcast", st.overcast)
+	# the deck's zenith nits: its light on level ground (Lz x 7 pi / 9) is the clock's cloudy sky light, as the clear dome's is
+	var oc_zenith := (float(st.skylux) - SkyClock.NIGHT_SKY_LUX) * 9.0 / (7.0 * PI)
+	rsw.global_shader_parameter_set("sky_oc_zenith", oc_zenith)
+	sky_mat.set_shader_parameter("sky_oc_beam", st.oc_beam_k)
 	rsw.global_shader_parameter_set("sky_rayleigh", rayleigh)
 	rsw.global_shader_parameter_set("water_sun_air", up_air)
 	rsw.global_shader_parameter_set("water_sun_lux", beam_h / maxf(up_air.y, 0.02) if up_air.y > 0.0 else 0.0)
@@ -289,7 +301,9 @@ func apply(cam_y: float) -> Dictionary:
 		RenderingServer.global_shader_parameter_set("water_amb_ref", amb / maxf(exposure, 1e-12))
 	else:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-		var dz := dome(Vector3.UP, _dome_sun); var dm := maxf(dz.x, maxf(dz.y, dz.z))
+		var dz := dome(Vector3.UP, _dome_sun)
+		dz = (dz / maxf(dz.dot(Vector3(0.2126, 0.7152, 0.0722)), 1e-12)).lerp(Vector3.ONE, float(st.overcast))   # the deck is grey
+		var dm := maxf(dz.x, maxf(dz.y, dz.z))
 		env.ambient_light_color = Color(dz.x / dm, dz.y / dm, dz.z / dm) if dm > 0.0 else Color.WHITE
 		env.ambient_light_energy = st.skylux / PI * exposure
 		var ac: Color = env.ambient_light_color * (st.skylux / PI)
@@ -303,7 +317,7 @@ func apply(cam_y: float) -> Dictionary:
 		var lum_att := att.r * 0.2126 + att.g * 0.7152 + att.b * 0.0722
 		light.light_indirect_energy = WaterOptics.FRESNEL_SUN * maxf(up_air.y, 0.02) / tr.y * lum_att
 	last = {"key": key, "elev": body.elev, "total_lux": st.total, "sky_lux": st.skylux, "beam_h": beam_h,
-		"ev100": ev, "bias": bias, "under": under, "night_w": nw}
+		"ev100": ev, "bias": bias, "under": under, "night_w": nw, "overcast": st.overcast, "beam_k": st.oc_beam_k, "oc_zenith": oc_zenith}
 	return last
 
 func _art_k(k: Vector3) -> Vector3:
@@ -331,7 +345,7 @@ static func declare_globals() -> void:
 		"water_caus_k": [RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(0.0, -1.0, 0.0, 0.0)],
 		# the sea surface (water surface thread): the sky dome's shape sun and scale, the key body in air and its beam lux
 		"water_amb_ref": [V, Vector3.ONE], "water_fill_ao": [F, 1.0], "water_amb_sky": [F, 0.0],
-		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "sky_turbidity": [F, turbidity], "sky_rayleigh": [V, rayleigh], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
+		"water_dome_sun": [V, Vector3.UP], "water_sky_norm": [F, 0.0], "sky_turbidity": [F, turbidity], "sky_overcast": [F, 0.0], "sky_oc_zenith": [F, 0.0], "sky_rayleigh": [V, rayleigh], "water_sun_air": [V, Vector3.UP], "water_sun_lux": [F, 0.0]}
 	for k in defs:
 		RenderingServer.global_shader_parameter_add(k, defs[k][0], defs[k][1])
 	Engine.set_meta("water_globals", true)
