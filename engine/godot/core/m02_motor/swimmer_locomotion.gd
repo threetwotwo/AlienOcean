@@ -377,7 +377,9 @@ func _update_swim(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, i
 	var tread_y := surf_y - (0.10 if enclosed else -float(c.get("tread_eye", -0.14))) + swell
 	var wants_dive := in_up < -0.1 or (in_fwd > 0.1 and pitch < -0.26)
 	var in_band: bool = c.has_surface and pos.y >= surf_y - 0.56 and pos.y <= surf_y + (0.45 if enclosed else 0.28)
-	var treading := in_band and not wants_dive and (enclosed or not jump_held)
+	# FIX (Gary 28 Nov: after a breach, holding ascend dithered in and out of the band for seconds): once a breach is
+	# spent, holding ascend treads with the head out until she dives again
+	var treading: bool = in_band and not wants_dive and (enclosed or not jump_held or (not c.thalassa_exact and not breach_armed))
 	var underwater: bool = (not c.has_surface) or pos.y < surf_y - 0.15 or treading
 	surface_tread_blend = lerpf(surface_tread_blend, 1.0 if treading else 0.0, exp_k(6.5 if treading else 8.0, sdt))
 	if surface_tread_blend < 0.004: surface_tread_blend = 0.0
@@ -413,6 +415,7 @@ func _update_swim(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, i
 		glide_pulse = 1.0 + sin(swim_phase * 0.5) * c.glide_pulse_amp * (1.15 if spr else 0.85)
 	var max_spd := (base_max + dive_bonus + slip_bonus) * glide_pulse
 
+	var vy_in := vel.y
 	if underwater:
 		if c.classic_drag:
 			vel += a * (38.0 if spr else 27.0) * sdt
@@ -453,8 +456,19 @@ func _update_swim(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, i
 			vel *= exp(-eff_drag * sdt)
 			if get_speed() < 0.04: vel = Vector3.ZERO
 		# buoyant treading: holds the head at the waterline with a wave bob
-		if treading:
+		if treading and c.thalassa_exact:
 			vel.y += ((tread_y - pos.y) * 16.5 - vel.y * 5.8) * sdt
+		elif treading:
+			# FIX (Gary 28 Nov 09:02Z: "water surface feels like a ceiling that player cant get pass from underwater"):
+			# Thalassa's tread is a stiff spring with the swim steering still on the vertical, so a swimmer rising at
+			# 2.3 m/s was stopped dead 0.6 m under and crawled the last half metre in a second. In the band the vertical
+			# now belongs to buoyancy alone (the steering's change to it is undone): under the tread line a body near
+			# neutral rises gently (at most 2.5 m/s2), over it the lost buoyancy pulls down by up to g, heave damping
+			# ratio about 0.4. So she keeps her momentum, breaks out to the shoulders, sinks back once and settles into
+			# the bob, as a real swimmer surfacing does (and as the M29 buoyancy core floats a body).
+			vel.y = vy_in
+			var ab := clampf((tread_y - pos.y) * 16.5, -9.81, 2.5) - vel.y * 3.5
+			vel.y += ab * sdt
 		if has_input:
 			swim_phase += sdt * (10.6 if spr else 6.2)
 	else:

@@ -33,8 +33,15 @@ vec3 cortao_loadNormal(ivec2 p) {
 		vec3 c = view_pos(p);
 		vec3 l = view_pos(p - ivec2(1, 0)), r = view_pos(p + ivec2(1, 0));
 		vec3 u = view_pos(p - ivec2(0, 1)), b = view_pos(p + ivec2(0, 1));
-		vec3 dx = abs(r.z - c.z) < abs(c.z - l.z) ? r - c : c - l;
-		vec3 dy = abs(b.z - c.z) < abs(c.z - u.z) ? b - c : c - u;
+		// at the screen's edge the outside neighbour is the clamped centre itself (a zero difference that would always win and
+		// zero the cross product, dropping back to the rippled shading normal: dark marks along the bottom row), so use the inside one
+		ivec2 sz = textureSize(depthBuffer, 0);
+		bool r_in = p.x + 1 < sz.x, l_in = p.x > 0, b_in = p.y + 1 < sz.y, u_in = p.y > 0;
+#ifdef CORTAO_FAULT_EDGE
+		r_in = true; l_in = true; b_in = true; u_in = true;   // planted fault (checks only): the clamped neighbour wins again
+#endif
+		vec3 dx = (r_in && (!l_in || abs(r.z - c.z) < abs(c.z - l.z))) ? r - c : c - l;
+		vec3 dy = (b_in && (!u_in || abs(b.z - c.z) < abs(c.z - u.z))) ? b - c : c - u;
 		vec3 g = cross(dx, dy);
 		if (dot(g, g) > 1e-20) {
 			g = normalize(g);

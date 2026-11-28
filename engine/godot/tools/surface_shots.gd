@@ -126,19 +126,30 @@ func _setup():
 	if OS.get_environment("AO_REFR") != "":         # refraction check (Gary 28 Nov: the body doubled from above): a body
 		# at the surface, a post half in and half out, a rock 1.5 m down, seen from above at three angles
 		var base := Vector3(0.0, y, 10.0)
-		var mk := func(m: Mesh, at: Vector3, rot: Vector3, c: Color) -> void:
+		var mk := func(m: Mesh, at: Vector3, rot: Vector3, c: Color) -> MeshInstance3D:
 			var mi := MeshInstance3D.new(); mi.mesh = m; mi.position = at; mi.rotation = rot
 			var sm := StandardMaterial3D.new(); sm.albedo_color = c; sm.roughness = 0.6; mi.material_override = sm
 			root.add_child(mi)
+			return mi
 		var body := CapsuleMesh.new(); body.radius = 0.18; body.height = 1.4
-		mk.call(body, base + Vector3(0.0, -0.25, 0.0), Vector3(0, 0, PI * 0.5), Color(0.85, 0.82, 0.78))     # lying at the surface, like the girl swimming
+		SeaFloorMap.mark_mover(mk.call(body, base + Vector3(0.0, -0.25, 0.0), Vector3(0, 0, PI * 0.5), Color(0.85, 0.82, 0.78)))     # lying at the surface, like the girl swimming
+		# Gary 28 Nov playtest 2 (bodies and fish seen from above drawn flat or as teal cut-outs): movers were frozen into the
+		# sea floor map where they stood at its last capture. A swimmer and three fish that keep moving: the water must show
+		# each once, where it is now, tinted by the water over it (no copy left where it was)
+		var swim: MeshInstance3D = mk.call(body, base + Vector3(-6.0, -0.2, 0.0), Vector3(0, 0, PI * 0.5), Color(0.85, 0.82, 0.78))
+		SeaFloorMap.mark_mover(swim)
+		var fishm := SphereMesh.new(); fishm.radius = 0.12; fishm.height = 0.24
+		for k in 3:
+			var f: MeshInstance3D = mk.call(fishm, base + Vector3(-7.0 + 1.2 * k, -0.5 - 0.3 * k, 1.2), Vector3.ZERO, Color(0.85, 0.7, 0.35))
+			f.scale = Vector3(1.0, 0.8, 3.0); SeaFloorMap.mark_mover(f)
+		_movers_step = true    # each shot: the floor map is captured, then every mover steps 0.9 m (see _process)
 		var post := CylinderMesh.new(); post.top_radius = 0.12; post.bottom_radius = 0.12; post.height = 2.0
 		mk.call(post, base + Vector3(2.2, 0.1, 0.5), Vector3.ZERO, Color(0.9, 0.35, 0.2))                   # half in, half out
 		var rock := BoxMesh.new(); rock.size = Vector3(1.2, 0.8, 0.9)
 		mk.call(rock, base + Vector3(-2.0, -1.5, 1.0), Vector3(0.2, 0.5, 0.1), Color(0.35, 0.38, 0.32))   # 1.5 m down
 		# Gary 28 Nov playtest: standing in the water by a rock, seen from behind (legs and rock "doubled and smeared")
 		var legs := CapsuleMesh.new(); legs.radius = 0.16; legs.height = 3.0
-		mk.call(legs, base + Vector3(6.0, -0.9, 0.0), Vector3.ZERO, Color(0.88, 0.85, 0.8))           # floor to 0.6 m above
+		SeaFloorMap.mark_mover(mk.call(legs, base + Vector3(6.0, -0.9, 0.0), Vector3.ZERO, Color(0.88, 0.85, 0.8)))   # floor to 0.6 m above
 		var boulder := SphereMesh.new(); boulder.radius = 1.6; boulder.height = 3.2
 		mk.call(boulder, base + Vector3(7.6, -1.2, -2.2), Vector3.ZERO, Color(0.72, 0.58, 0.42))      # top 0.4 m out
 		shots = [
@@ -148,6 +159,8 @@ func _setup():
 			["f4_refr_top", base + Vector3(0.1, 5.0, 0.6), base + Vector3(0, -0.3, 0), 60.0],
 			["f5_refr_stand_behind", base + Vector3(6.3, 1.6, 2.2), base + Vector3(6.6, -0.6, -1.5), 60.0],
 			["f6_refr_stand_low", base + Vector3(6.2, 0.7, 2.6), base + Vector3(6.4, -0.2, -2.0), 60.0],
+			["f7_movers_top", base + Vector3(-6.0, 4.5, 0.4), base + Vector3(-6.0, -0.3, 0), 70.0],
+			["f8_movers_behind", base + Vector3(-6.0, 1.2, 4.0), base + Vector3(-6.0, -0.3, -1.0), 70.0],
 		]
 	if OS.get_environment("AO_WL") != "":           # the waterline (Gary 28 Nov: "a cardboard effect of the horizon fog" as
 		# the eye cuts the water line): level views at the dressed lagoon's arch, the eye 2 cm and 15 cm above, 3 cm under,
@@ -173,7 +186,16 @@ func _setup():
 var _film := -1                 # AO_FILM: frames left to write for this shot (-1 = not filming)
 var _film_n := 0
 
+var _movers_step := false
+
 func _process(d):
+	if _movers_step and i >= 0 and i < shots.size():
+		if wait == 1:
+			var fm0 := root.find_child("SeaFloorMap", true, false)
+			if fm0: fm0.refresh()
+		if wait == 14:   # after the capture: a frozen copy, if any, is left 0.9 m from the body
+			for n in root.get_tree().get_nodes_in_group(SeaFloorMap.MOVER_GROUP):
+				if n is Node3D: (n as Node3D).position.z += 0.9 if i % 2 == 0 else -0.9
 	# AO_FILM=<frames> (videos, run with --fixed-fps 30): each shot, once settled, lets the waves run and writes one frame
 	# per step to <out>/<shot>/f_0000.png ... (the camera holds still), then moves on
 	var film_n := int(OS.get_environment("AO_FILM")) if OS.get_environment("AO_FILM") != "" else 0

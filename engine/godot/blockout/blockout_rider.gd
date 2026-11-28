@@ -51,6 +51,7 @@ func _init() -> void:
 	collision_mask = 0
 
 func _ready() -> void:
+	SeaFloorMap.mark_mover(self)   # moves: never frozen into the sea floor map (the water drew stale copies, Gary 28 Nov)
 	var mat := ShaderMaterial.new(); mat.shader = preload("res://blockout/blockout_grey.gdshader")
 	mat.set_shader_parameter("tint_amount", 0.5)
 	if species != "":
