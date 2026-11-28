@@ -41,6 +41,17 @@ var breath_signal := 0.0
 var breath_inflection := false
 var _last_breath_stage := 0
 var exertion := 0.0          # FIX (upgrade): effort the breath still carries (fast to build, slow to pay back)
+# breath master clock (upgrade, off when exact): events for the body and bubbles, the cadence lock, the glance gate
+var exhale_count := 0         # exhales begun (phase crossing BREATH_EXHALE_AT); a consumer compares, never misses one
+var _exhale_start := false
+var _inhale_start := false
+var _lock_n := 0              # cadence lock: cadence cycles (strokes, steps) per breath, held with hysteresis
+var _lock_w := 0.0            # lock weight, eased
+var _glance_wait := 0.0       # s a non-urgent new look has waited for a breath turn
+var focus_start_kind := ""    # how the last look began: "breath" (gated, on the breath's turn), "waited", "intent", "free"
+const BREATH_EXHALE_AT := 0.40     # eval_asymmetric_breath: 40 % inhale, then the exhale
+const GLANCE_WAIT_CYCLES := 0.5    # a free look waits at most half a breath (the turns are under half a breath apart)
+const GLANCE_WAIT_MAX := 2.5       # s, and never longer than this
 
 # attention
 var poi_memory := {}         # id -> Mem
@@ -303,6 +314,8 @@ func update(dt: float, ctx: Dictionary) -> Dictionary:
 		exertion += (eff - exertion) * BM.expk(1.0 / (2.5 if eff > exertion else 9.0), sdt)
 		goal_freq = maxf(goal_freq, 0.21 + 0.26 * exertion)
 		goal_amp = maxf(goal_amp, 1.0 + 0.45 * exertion)
+		goal_freq = _cadence_lock(goal_freq, 0.21 + 0.26 * eff, _f(ctx.get("cadenceHz")), _f(ctx.get("cadenceLock")), sdt)
+	var prev_phase := breath_phase
 	var breath_freq: float = breath_freq_spring.step(goal_freq, 1.1, sdt)
 	var breath_amp: float = breath_amp_spring.step(goal_amp, 1.1, sdt)
 	breath_phase += breath_freq * sdt
@@ -313,6 +326,9 @@ func update(dt: float, ctx: Dictionary) -> Dictionary:
 	var stage := 0 if breath_phase < 0.38 else (1 if breath_phase < 0.90 else 2)
 	breath_inflection = stage != _last_breath_stage and (stage == 1 or stage == 0)
 	_last_breath_stage = stage
+	_exhale_start = prev_phase < BREATH_EXHALE_AT and breath_phase >= BREATH_EXHALE_AT
+	_inhale_start = breath_phase < prev_phase
+	if _exhale_start: exhale_count += 1
 	var breath_centered := (breath_signal - 0.5) * 2.0
 
 	# 2. proprioception and breath-synced idle contrapposto
@@ -592,6 +608,8 @@ func update(dt: float, ctx: Dictionary) -> Dictionary:
 				side_reversal_cooldown = maxf(side_reversal_cooldown, config.sideReversalCooldownSec)
 			sound_accepted = true
 
+	var glance_waited := _glance_wait     # (breath gate below; reset unless a look is still waiting this step)
+	_glance_wait = 0.0
 	if not objective_active and objective_post_cooldown <= 0.0 and not sound_accepted and not active_turning and not sustained_turning and best_poi != null and best_poi_score > 0.12 and (head_turn_cooldown <= 0.0 or best_poi_intent):
 		var bid: String = str(best_poi.id)
 		var no_focus_ready := active_focus == null and (scan_beat_timer <= 0.0 or best_poi_intent)
@@ -603,7 +621,17 @@ func update(dt: float, ctx: Dictionary) -> Dictionary:
 			# same 0.85 s a look gets before an intent switch may take over.
 			intent_switch = false
 		var can_switch: bool = active_focus != null and not active_focus.isSound and focus_hold_timer <= 0.0 and bid != active_focus.id and best_poi_score > current_score * (1.0 + config.focusHysteresis) + 0.05
+		var start_kind := "intent" if (intent_switch or best_poi_intent) else "free"
+		if not exact and start_kind == "free" and (no_focus_ready or can_switch):
+			# breath master clock (upgrade): a look nobody asked for starts as the breath turns (top of the inhale or
+			# its start), as an eye at rest does; it waits at most half a breath (2.5 s), so nothing is ever missed
+			if _breath_turning(): start_kind = "breath"
+			elif glance_waited >= minf(GLANCE_WAIT_MAX, GLANCE_WAIT_CYCLES / maxf(0.05, breath_freq)): start_kind = "waited"
+			else:
+				_glance_wait = glance_waited + sdt
+				no_focus_ready = false; can_switch = false
 		if no_focus_ready or can_switch or intent_switch:
+			focus_start_kind = start_kind
 			if (can_switch or intent_switch) and active_focus != null:
 				_record_focus_end(active_focus, false, head_pos)
 			var max_dwell := _max_dwell_for_kind(best_poi.get("kind"), best_poi_fam)
@@ -756,6 +784,9 @@ func update(dt: float, ctx: Dictionary) -> Dictionary:
 		"breathPhase": breath_phase, "breathSignal": breath_signal, "breathCentered": breath_centered,
 		"breathRate": breath_freq * TAU, "breathAmp": breath_amp, "breathCycle": breath_cycle_count,
 		"breathInflection": breath_inflection, "exertion": exertion,
+		# hooks (bubbles, sounds): exhaleStart / inhaleStart are true on the step the phase crosses; exhaleCount only grows
+		"exhaleStart": _exhale_start, "inhaleStart": _inhale_start, "exhaleCount": exhale_count,
+		"breathLockN": _lock_n, "breathLockW": _lock_w, "focusStartKind": focus_start_kind,
 		"gazeDirWorld": gaze_dir_world, "gazeBlend": gaze_blend,
 		"headTiltRad": _cl(head_tilt, -0.055, 0.055), "torsoCuriosityYaw": _cl(torso_yaw, -0.24, 0.24),
 		"idleHipShift": idle_hip_shift, "anticipationCrouch": 0.0, "anticipationLean": ready_lean,
@@ -776,6 +807,27 @@ func update(dt: float, ctx: Dictionary) -> Dictionary:
 		"memoryCount": poi_memory.size(), "memoryFamiliarCount": memory_familiar_count,
 	}
 	return last_output
+
+## Breath master clock: the breath's frequency is drawn softly to a whole fraction of the body's cadence (stroke or
+## step frequency), so strokes and steps fall on the same part of every breath. Frequency only (the phase stays
+## continuous, the frequency spring smooths it); held within -15 % / +18 % of what effort asks, the ratio N kept
+## with hysteresis so it never flips back and forth. The rig locks the stroke phase to the breath (body_rig).
+func _cadence_lock(goal: float, goal_n: float, cad_hz: float, w_in: float, dt: float) -> float:
+	var want_w := _cl(w_in, 0.0, 1.0) if cad_hz > 0.05 else 0.0
+	_lock_w += (want_w - _lock_w) * BM.expk(1.0 / 0.8, dt)
+	if cad_hz <= 0.05 or goal <= 0.0:
+		return goal
+	# N from where the effort is taking the breath (goal_n), not where the slow exertion has it now: a sprint picks
+	# its ratio once instead of passing 1 -> 2 -> 1 as the breath climbs
+	var ratio := cad_hz / maxf(goal_n, 0.05)
+	if _lock_n <= 0 or absf(ratio - float(_lock_n)) > 0.62:
+		_lock_n = clampi(roundi(ratio), 1, 12)
+	var locked := _cl(cad_hz / float(_lock_n), goal * 0.85, goal * 1.18)
+	return lerpf(goal, locked, _lock_w)
+
+## the breath is turning: near the top of the inhale or the start of the next (where breath_inflection fires)
+func _breath_turning() -> bool:
+	return (breath_phase > 0.33 and breath_phase < 0.47) or breath_phase > 0.94 or breath_phase < 0.05
 
 ## d held inside a yaw / pitch window of the frame (bf, br, bu): body_rig solve_head's limits less a margin for the gaze
 ## spring and the lerp toward the look direction
