@@ -17,6 +17,8 @@ def get(d, path, default=None, need=True, where=''):
             if default is not None: DEFAULTS.append(dict(input=(where + '.' if where else '') + path, source='DEFAULT', value=default if not isinstance(default, np.ndarray) else default.tolist()))
             return default
     return cur
+SPINE_NOTCH = 0.22   # DEFAULT: membrane dip between spine tips, share of the spine length (seabream/snapper-like; deep-notched fins say so in the record)
+
 def dget(d, key, default, where):
     """dict.get that records the default it fell back to."""
     if isinstance(d, dict) and key in d: return d[key]       # a record may hold a bare number where a block is expected (0 = none)
@@ -129,15 +131,21 @@ def adapt(path, style=None):
     # a traced fin carries its free edge (ray tips, first ray to last, record units): the card's rays end on it, so the
     # fin's side silhouette is the photo's, not one guessed from heights and a lean (SIL1, Gary 27 Nov)
     fin_edge = lambda m: sc(m['edge']) if isinstance(m, dict) and m.get('edge') else None
+    def fin_elements(m):
+        # h lists every element of the fin, front to back, spines first (record h counts the spines: d1 h == spines), so the
+        # ray count is len(h) and the first `spines` of them are spines. The membrane dips between spine tips by `notch`, a
+        # share of the spine length (record skeleton.median.<fin>.notch when traced; SPINE_NOTCH otherwise)
+        sp = int(dget(m, 'spines', 0, 'skeleton.median.<fin>'))
+        return dict(rays=len(m['h']), spines=sp, notch=float(dget(m, 'notch', SPINE_NOTCH, 'skeleton.median.<fin>')) if sp else 0.0)
     med = []
     for key, top in (('d1', True), ('d2', True), ('an', False)):
         if key in M:
             m = M[key]; med.append(dict(name={'d1': 'dorsal1', 'd2': 'dorsal2', 'an': 'anal'}[key], base=[m['u'][0] * f, m['u'][1] * f],
                                         h=[v * f for v in m['h']], lean=dget(m, 'lean', [35, 55], 'skeleton.median.<fin>'), top=top,
-                                        rays=len(m['h']) + dget(m, 'spines', 0, 'skeleton.median.<fin>'), edge=fin_edge(m)))
+                                        edge=fin_edge(m), **fin_elements(m)))
             P(f'fin {key}', f'record.skeleton.median.{key} ' + ('(u, edge traced: ray tips on the free edge, spines)' if 'edge' in m else '(u, h, lean, spines)'))
     if 'd' in M:  # single dorsal fin records
-        m = M['d']; med.append(dict(name='dorsal', base=[m['u'][0] * f, m['u'][1] * f], h=[v * f for v in m['h']], lean=dget(m, 'lean', [35, 55], 'skeleton.median.<fin>'), top=True, rays=len(m['h']) + dget(m, 'spines', 0, 'skeleton.median.<fin>'), edge=fin_edge(m)))
+        m = M['d']; med.append(dict(name='dorsal', base=[m['u'][0] * f, m['u'][1] * f], h=[v * f for v in m['h']], lean=dget(m, 'lean', [35, 55], 'skeleton.median.<fin>'), top=True, edge=fin_edge(m), **fin_elements(m)))
     fins['median'] = med
     C = M['caudal']
     fins['caudal'] = dict(x=dget(dget(C, 'proc', {}, 'skeleton.median.caudal'), 'uUp', SL, 'skeleton.median.caudal.proc') * f, len=C['len'] * f, spread=C['spread'], outline=C['outline'] if 'outline' in C else caudal_outline(C['round']), rays=dget(C, 'n', 17, 'skeleton.median.caudal'), edge=fin_edge(C))
