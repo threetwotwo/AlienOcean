@@ -13,6 +13,8 @@
 ## Planted faults: --fault flip renders with flip_y inverted (the AO lands mirrored), which must fail C1 or C3;
 ## --fault coarse makes the last filter pass use CORTAO's 3 px taps again (the lattice comes back), which must fail C6;
 ## --fault edge plants the old edge-normal bug (the clamped neighbour's zero difference wins), which must fail C7.
+##   C9 no ghost: the box jumps 3 m aside; 3 frames later the floor where its contact shadow was is open (r > 0.85) again
+##      (the AO's temporal history must not trail it; --fault ghost drops the history clamp, which must fail C9)
 ## C8 (tests/run_cortao.sh, from the engine log): the run resizes the window 4 times and must log no "Uniforms were never supplied"
 ## error (the materials' uniform set lost its AO texture when a resize freed it, Mac 28 Nov); env CORTAO_FAULT_FREE=1 plants it.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- <out dir> [--fault flip]
@@ -30,9 +32,10 @@ func _initialize() -> void:
 	WorldRoot.declare_globals()
 	_run.call_deferred()
 
-func _box(pos: Vector3, size: Vector3, mat: Material) -> void:
+func _box(pos: Vector3, size: Vector3, mat: Material) -> MeshInstance3D:
 	var mi := MeshInstance3D.new(); var m := BoxMesh.new(); m.size = size; mi.mesh = m; mi.material_override = mat
 	mi.position = pos; root.add_child(mi)
+	return mi
 
 func _run() -> void:
 	var sm := ShaderMaterial.new()
@@ -53,7 +56,7 @@ void fragment() {
 	NORMAL = normalize((VIEW_MATRIX * vec4(normalize(vec3(t.x, 1.0, t.y)), 0.0)).xyz);
 }"""
 	_box(Vector3(0, -0.05, 0), Vector3(20, 0.1, 20), fm)
-	_box(Vector3(0, 0.5, 0), Vector3(1, 1, 1), sm)
+	var box := _box(Vector3(0, 0.5, 0), Vector3(1, 1, 1), sm)
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR; env.background_color = Color(0.3, 0.4, 0.5)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR; env.ambient_light_color = Color(1, 1, 1); env.ambient_light_energy = 1.0
@@ -142,6 +145,14 @@ void fragment() {
 			edge_dev = maxf(edge_dev, rad_to_deg(acos(clampf(e.normalized().dot(inn), -1.0, 1.0))))
 	var rows := [["C7 screen edges: shape normal within 5 deg of just inside", edge_dev < 5.0, edge_dev], ["C5 grain (high-pass std) < 0.02", grain < 0.02, grain], ["C1 contact r < 0.80", contact < 0.80, contact], ["C2 open floor r > 0.95", open > 0.95, open],
 		["C6 no screen door: 3 / 6 px periodic grain < 0.0035", grain * maxf(lat, 0.0) < 0.0035, grain * maxf(lat, 0.0)], ["C3 box top r > 0.95", top > 0.95, top], ["C4 lit contact/open <= 0.90", lc / maxf(lo, 1e-4) <= 0.90, lc / maxf(lo, 1e-4)]]
+	# C9: move the box away and look at its old contact shadow 3 frames later
+	box.position = Vector3(-3.0, 0.5, -2.0)
+	for i in 3: await process_frame
+	fx.capture_next = true
+	await process_frame
+	await RenderingServer.frame_post_draw
+	var ghost: float = at.call(fx.captured, Vector3(0.55, 0.0, 0.2), sx)
+	rows.append(["C9 no ghost: old contact r > 0.85 three frames after the box left", ghost > 0.85, ghost])
 	var all := true
 	for r in rows:
 		print("%s %s  (%.3f)" % ["PASS" if r[1] else "FAIL", r[0], r[2]]); all = all and r[1]

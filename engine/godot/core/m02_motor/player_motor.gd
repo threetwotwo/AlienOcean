@@ -9,11 +9,15 @@ extends RefCounted
 
 const Swimmer := preload("res://core/m02_motor/swimmer_locomotion.gd")
 const Layers := preload("res://core/m02_motor/layered_moves.gd")
+const BodyAct := preload("res://core/m02_motor/body_act.gd")
 
-enum Mode { WALK, WADE, SWIM, TREAD, FALL }
-const MODE_NAMES := ["WALK", "WADE", "SWIM", "TREAD", "FALL"]
+enum Mode { WALK, WADE, SWIM, TREAD, FALL, REST, RIDE }
+const MODE_NAMES := ["WALK", "WADE", "SWIM", "TREAD", "FALL", "REST", "RIDE"]
 
 var swimmer = Swimmer.new()
+## Resting and riding (core/m02_motor/body_act.gd): request_rest / request_ride start one; while it holds her the
+## swimmer is not integrated. The rig reads it as swimmer.act.
+var act = BodyAct.new()
 var layers = Layers.new()
 var transitions := 0
 var mode_time := 0.0
@@ -24,7 +28,7 @@ var _boost_prev := false
 var sync := {"movement_mode": "ShoreWalking", "position": Vector3.ZERO, "velocity": Vector3.ZERO, "surface_y": 0.0}
 # speed caps for the stress invariant I10 (Thalassa soft caps: swim (5.0 + 0.45 dive + 1.35 slip) x 1.24, burst,
 # breach 5.8 m/s up, 15.5 m/s2 above-water gravity; shore jog 2.45 + running dive 1.45 + jump 3.15)
-var max_speed := {Mode.WALK: 5.0, Mode.WADE: 5.0, Mode.SWIM: 9.5, Mode.TREAD: 9.5, Mode.FALL: 30.0}
+var max_speed := {Mode.WALK: 5.0, Mode.WADE: 5.0, Mode.SWIM: 9.5, Mode.TREAD: 9.5, Mode.FALL: 30.0, Mode.REST: 2.0, Mode.RIDE: 9.5}
 var swim_enter: float:
 	get: return swimmer.config.wade_exit_depth
 var facing_yaw: float:
@@ -42,7 +46,7 @@ var mode: int:
 		_mode_cache = v
 
 func _init() -> void:
-	pass
+	swimmer.act = act
 
 func enable_current(get_current: Callable) -> void:
 	layers.queue(Layers.ocean_current(get_current))
@@ -55,6 +59,8 @@ func mover_mode_name() -> String:
 
 func _classify() -> int:
 	var s = swimmer
+	if act.holding():
+		return Mode.RIDE if act.kind == "ride" else Mode.REST
 	if s.shore_grounded:
 		if s.shore_is_airborne: return Mode.FALL
 		return Mode.WADE if s.wade_blend > 0.10 else Mode.WALK
@@ -87,17 +93,34 @@ func step(dt: float, k, env: Dictionary, water_y: float) -> void:
 	var mm := mover_mode_name()
 	sync.movement_mode = mm
 	sync.position = swimmer.pos
+	var inp := input_from_packet(k)
+	if act.step(dt, swimmer, inp):
+		# held (seated, lying, riding): the act placed the eye; no layers, no integration, no collisions
+		sync.position = swimmer.pos
+		sync.velocity = swimmer.vel
+		_set_mode(_classify(), dt)
+		return
 	var prop: Dictionary = layers.evaluate(dt, mm, sync, {"total_time": total_time})
 	if prop.override_velocity != null:
 		swimmer.vel = prop.override_velocity
 	elif not swimmer.shore_grounded:
 		swimmer.vel += prop.layered_delta_vel
-	swimmer.update(dt, input_from_packet(k), env)
+	swimmer.update(dt, inp, env)
 	sync.position = swimmer.pos
 	sync.velocity = swimmer.vel
-	var m := _classify()
+	_set_mode(_classify(), dt)
+
+func _set_mode(m: int, dt: float) -> void:
 	mode_time += dt
 	if m != _mode_cache:
 		transitions += 1
 		mode_time = 0.0
 	_mode_cache = m
+
+## Sit (stool / bench) or lie (bunk) at the given markers; see body_act.gd. false (act.refused says why) when refused.
+func request_rest(spec: Dictionary) -> bool:
+	return act.request_rest(spec, swimmer)
+
+## Latch onto a creature stand-in (marker(), slots(), velocity, LENGTH, species); false when out of reach etc.
+func request_ride(rider) -> bool:
+	return act.request_ride(rider, swimmer)

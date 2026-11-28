@@ -23,6 +23,8 @@ echo "== Bathymetry (the reef drop-off's stress-test world)"
 "$G" --headless --path . --script res://tests/test_bathymetry.gd 2>&1 | grep -E "FAIL|BATHYMETRY"; "$G" --headless --path . --script res://tests/test_bathymetry.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_bathymetry.gd -- --fault >/dev/null 2>&1 && { echo "BATHYMETRY PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Bathymetry planted fault caught"
 echo "== Overcast (look)"
+"$G" --headless --path . --script res://tests/test_sky_derivatives.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_sky_derivatives.gd >/dev/null 2>&1 || rc=1
+for f in branch early; do "$G" --headless --path . --script res://tests/test_sky_derivatives.gd -- --fault $f >/dev/null 2>&1 && { echo "SKY DERIVATIVES PLANTED FAULT $f NOT CAUGHT"; rc=1; } || echo "Sky derivatives planted fault $f caught"; done
 "$G" --headless --path . --script res://tests/test_overcast.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_overcast.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_overcast.gd -- --fault >/dev/null 2>&1 && { echo "OVERCAST PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Overcast planted fault caught"
 echo "== Image quality (look: soft shadows, temporal upscaler)"
