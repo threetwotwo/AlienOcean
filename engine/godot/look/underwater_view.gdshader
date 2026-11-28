@@ -12,6 +12,7 @@ render_mode unshaded, cull_disabled, depth_draw_never, depth_test_disabled, fog_
 #include "res://look/god_rays.gdshaderinc"
 #include "res://look/sea_bathy.gdshaderinc"
 #include "res://look/sea_waves.gdshaderinc"
+global uniform vec4 sea_god;   // (.., .., .., the sea is drawn 1/0) WorldRoot
 
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
@@ -50,12 +51,18 @@ void fragment() {
 	bool under_px = near_line ? dl < 0.0 : cam.y < water_y;
 	if (!under_px) { ALBEDO = scene; }
 	else {
+		bool eye_in = cam.y < water_y;                          // the eye itself under the wave (not only this pixel's lens)
 		if (cam.y >= water_y) cam.y = water_y - 0.01;          // the lens is under here though the eye is over the wave
 		float depth = texture(depth_tex, SCREEN_UV).r;
 		vec4 vp = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, depth, 1.0);
 		vp.xyz /= vp.w;
 		float L = min(length(vp.xyz), max_path);
 		vec3 d = normalize((INV_VIEW_MATRIX * vec4(vp.xyz, 0.0)).xyz);
+		// (water surface thread, 28 Nov: the sea's underside draws its own water path since look/sea_under 0.4.0) a ray going
+		// up from an eye under the water ends on the underside, which is drawn over this pixel: skip the haze and god rays
+		// here (they were computed twice). Unless something under the water ends it first (nearer than the surface)
+		bool covered = sea_god.w > 0.5 && eye_in && d.y > 0.02 && (depth <= 1e-7 || cam0.y + d.y * L > water_y + 2.0 * sea_mom_r.w + 0.2);
+		if (covered) { ALBEDO = scene; } else {
 		vec3 c = water_a + water_b;
 		float z0 = water_y - cam.y;
 		float ocean = sea_bathy_ss(20.0, 120.0, sea_bathy_depth(cam.xz));   // past the reef: the open ocean's water (as sea_top)
@@ -93,5 +100,6 @@ void fragment() {
 		vec3 god = god_k > 0.5 ? god_rays(cam, d, L, FRAGCOORD.xy, god_frame) : vec3(0.0);
 		if (god_k > 1.5) ALBEDO = vec3(0.5 + 0.25 * god_acc(cam, d, L, FRAGCOORD.xy, god_frame));
 		else ALBEDO = max(scene * exp(-c * L) + (glow + god) * water_exposure, vec3(0.0));
+		}
 	}
 }
