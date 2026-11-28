@@ -122,6 +122,14 @@
    "sea": "lagoon"
   },
   {
+   "name": "surface_sun_low",
+   "tp": 4,
+   "yaw": 0.21,
+   "pitch": 0.05,
+   "hour": 17.8,
+   "sea": "lagoon"
+  },
+  {
    "name": "force12_surface",
    "tp": 4,
    "yaw": 0.0,
