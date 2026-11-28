@@ -125,6 +125,7 @@ func _aabb_world(holder: Node3D) -> AABB:
 ## keep their own offsets (meadow beds) are seated by their footprint's lowest point, 1.5 cm into the sand (habitat.seat_blades).
 func seat(space: PhysicsDirectSpaceState3D, sink := 0.015) -> Dictionary:
 	var rep := {"seated": 0, "no_ground": 0, "dy": []}
+	var moved := {}   # body RID -> dy this pass: the physics space still holds bodies where they were until the next physics step
 	for e in items:
 		var h: Node3D = e.node
 		var keep: bool = int(e.item.get("keep", 0)) == 1
@@ -134,13 +135,15 @@ func seat(space: PhysicsDirectSpaceState3D, sink := 0.015) -> Dictionary:
 		var q := PhysicsRayQueryParameters3D.create(Vector3(probe.x, 20.0, probe.z), Vector3(probe.x, -20.0, probe.z))
 		q.collide_with_areas = false
 		var excl := []
-		for x in items: excl.append(x.node.get_node("Body").get_rid())
+		var hard := String(e.item.get("seat", "")) == "hard"   # rests on whatever hard ground is under it: rock (seated above) or sand (key frame v7)
+		for x in items:
+			if not hard or x == e or not (x.kind in ["rock", "skirt"]): excl.append(x.node.get_node("Body").get_rid())
 		q.exclude = excl
 		var hit := space.intersect_ray(q)
 		if hit.is_empty(): rep.no_ground += 1; continue
-		var gy: float = hit.position.y
+		var gy: float = hit.position.y + float(moved.get(hit.rid, 0.0))   # a rock seated earlier in this pass: its surface under a vertical ray moved by its dy
 		var dy := (gy - sink - bb.position.y) if keep else (gy + float(e.item.at[2]) - h.global_position.y)
-		h.global_position.y += dy; rep.seated += 1; rep.dy.append(snappedf(dy, 0.001))
+		h.global_position.y += dy; rep.seated += 1; rep.dy.append(snappedf(dy, 0.001)); moved[h.get_node("Body").get_rid()] = dy
 	# cameras stand on the sand like the items: the key frame's heights (cam 1.05 m, look 0.58 m) are over ITS sand (z 0). r7: on the
 	# drawn floor (0.17 m under the anchor here) an anchor-relative camera stood 1.22 m up, so the near corals sat ~7 % low in frame.
 	var excl2 := []
