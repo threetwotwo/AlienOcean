@@ -96,6 +96,7 @@ func _setup():
 	world.add_child(wr)
 	if OS.get_environment("AO_AGX") == "0": wr.set_agx(false)   # Godot's built-in AgX, for before/after
 	if OS.get_environment("AO_AGX_MODE") != "": wr.agx_fx.mode = int(OS.get_environment("AO_AGX_MODE"))
+	if OS.get_environment("AO_SKY_BLUE") != "": wr.agx_fx.sky_blue = float(OS.get_environment("AO_SKY_BLUE"))   # AgX SkyBlue, for checks
 	if OS.get_environment("AO_CAUS") == "pixel": wr.caustics.per_pixel = true   # the light net per pixel instead of from its map (checks)
 	if OS.get_environment("AO_CAUS_T") != "": wr.caustics.frozen_time = float(OS.get_environment("AO_CAUS_T"))   # hold the net at this second
 	if OS.get_environment("AO_GOD") == "0": wr.god_rays = false   # the god rays off (before/after)
