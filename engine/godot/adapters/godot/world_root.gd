@@ -170,6 +170,9 @@ func _init() -> void:
 	declare_globals()
 	light = DirectionalLight3D.new(); light.name = "KeyLight"
 	light.shadow_enabled = true; light.directional_shadow_max_distance = 60.0
+	# shadow levers for benches (project.godot holds the defaults: 8192 map, soft filter high): AO_SHADOW_SIZE, AO_SHADOW_Q 0-5
+	if OS.get_environment("AO_SHADOW_SIZE") != "": RenderingServer.directional_shadow_atlas_set_size(int(OS.get_environment("AO_SHADOW_SIZE")), true)
+	if OS.get_environment("AO_SHADOW_Q") != "": RenderingServer.directional_soft_shadow_filter_set_quality(int(OS.get_environment("AO_SHADOW_Q")))
 	add_child(light)
 	caustics = CausticsMap.new(); add_child(caustics)
 	env = Environment.new()
