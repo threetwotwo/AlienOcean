@@ -135,6 +135,7 @@ func _school(id: String, n: int, sd: int, home: Vector3, tether: bool, look: Dic
 	s.species_id = id; s.count = n; s.seed_ = sd; s.home = home; s.tethered = tether; s.look = look
 	s.threaded = true
 	s.smooth_look = OS.get_environment("SCHOOL_RAW") != "1"     # SCHOOL_RAW=1 films the old raw drawing (before/after)
+	s.vary_look = OS.get_environment("SCHOOL_SAME") != "1"     # SCHOOL_SAME=1 films every fish alike (before/after)
 	s.water_y = wr.water.water_y
 	world.add_child(s)
 	s.process_mode = Node.PROCESS_MODE_DISABLED   # stepped by this tool at the film's fixed rate
