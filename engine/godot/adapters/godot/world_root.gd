@@ -317,6 +317,9 @@ func apply(cam_y: float) -> Dictionary:
 	sky_mat.set_shader_parameter("under_k", 1.0)
 	sky_mat.set_shader_parameter("under_down", ek / PI)
 	sky_mat.set_shader_parameter("under_up", eu / PI)
+	# CORTAO light-weighted occlusion: each open ray counts by the field's luminance from its direction (the GI's own two halves)
+	var lum := func(v: Vector3) -> float: return v.dot(Vector3(0.2126, 0.7152, 0.0722))
+	cortao_fx.light_down = lum.call(ek); cortao_fx.light_up = lum.call(eu)
 	var amb_sky := env.sdfgi_enabled or _gi_reset > 0
 	RenderingServer.global_shader_parameter_set("water_amb_sky", 1.0 if amb_sky else 0.0)
 	var floor_amb := ek / PI      # the ambient the floor's shaders divide their fill by (water_physics w_fill_ratio), floor facing up
