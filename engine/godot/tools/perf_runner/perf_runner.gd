@@ -83,7 +83,7 @@ func _run(main) -> void:
 		"version": IssueReport._version(),
 		"machine": {"os": OS.get_name(), "cpu": OS.get_processor_name(), "gpu": RenderingServer.get_video_adapter_name(),
 			"driver": RenderingServer.get_video_adapter_api_version(), "godot": Engine.get_version_info().string},
-		"window": [root.size.x, root.size.y], "vsync": "off", "settle_s": settle_s, "measure_s": measure_s,
+		"window": [root.size.x, root.size.y], "fullscreen": DisplayServer.window_get_mode() >= DisplayServer.WINDOW_MODE_FULLSCREEN, "screen": [DisplayServer.screen_get_size().x, DisplayServer.screen_get_size().y], "vsync": "off", "settle_s": settle_s, "measure_s": measure_s,
 		"fault": fault, "label": run_label, "base_state": base_state, "missing_assets": lvl.missing_assets,
 		"stations": [], "toggles": [],
 	}

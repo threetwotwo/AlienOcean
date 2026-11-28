@@ -71,8 +71,10 @@ func _ready() -> void:
 	# Full screen by default (Gary 28 Nov: "make it fullscreen, for a more accurate reading and look"), so benches and the look
 	# are judged at the real screen size. AO_WINDOWED=1, or an explicit --resolution (cloud shots, the perf runner's window
 	# profile), keeps a window.
-	if DisplayServer.get_name() != "headless" and OS.get_environment("AO_WINDOWED") != "1" and not "--resolution" in OS.get_cmdline_args():
-		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	if DisplayServer.get_name() != "headless":
+		# project.godot opens full screen at window creation (macOS can ignore a switch made after load); a window only on request
+		var want_window := OS.get_environment("AO_WINDOWED") == "1" or "--resolution" in OS.get_cmdline_args() or "--windowed" in OS.get_cmdline_args()
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED if want_window else DisplayServer.WINDOW_MODE_FULLSCREEN)
 	# Retina (screen scale 2): render at half resolution, upscaled. Gary's M1 Pro bench, key-frame view at 2704x1696: 83 ms -> 28 ms;
 	# the picture keeps the pixel count of a non-Retina screen of the same size. AO_FULL_RES=1 keeps full resolution.
 	if DisplayServer.get_name() != "headless" and DisplayServer.screen_get_scale() >= 1.99 and OS.get_environment("AO_FULL_RES") != "1":
@@ -179,10 +181,7 @@ func set_toggle(n: String, on: bool) -> void:
 		"caustics": wr.caustics.enabled = on
 		"agx": wr.set_agx(on)
 		"taa": get_viewport().use_taa = on
-		"ssao": wr.set_ao("ssao" if on else ("off" if not wr.ao_mode in ["cortao", "gtao", "vbao"] else wr.ao_mode))
-		"cortao": wr.set_ao("cortao" if on else "ssao")   # CORTAO in place of SSAO (ao thread 28 Nov); off = back to SSAO
-		"gtao": wr.set_ao("gtao" if on else "ssao")       # AO head to head: XeGTAO in CORTAO's place
-		"vbao": wr.set_ao("vbao" if on else "ssao")       # AO head to head: visibility bitmask in CORTAO's place
+		"ssao", "cortao", "gtao", "vbao": _set_ao_toggle(wr, n, on)
 		"ssil": wr.env.ssil_enabled = on
 		"shadows": wr.light.shadow_enabled = on
 		"half_res":
@@ -485,3 +484,13 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 	bench_running = false
 	bench_done.emit(path)
 	return path
+
+var _ao_prev := "off"
+func _set_ao_toggle(wr: WorldRoot, mode: String, on: bool) -> void:
+	## the AO switches are one choice (ssao / cortao (default) / gtao / vbao): on = that one, off = back to the one before it
+	if on:
+		if wr.ao_mode != mode: _ao_prev = wr.ao_mode
+		wr.set_ao(mode)
+	elif wr.ao_mode == mode:
+		wr.set_ao(_ao_prev if _ao_prev != mode else "off")
+
