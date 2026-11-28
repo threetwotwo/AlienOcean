@@ -40,7 +40,7 @@
 ##                   breath phase only advances, at most 0.6 Hz; signal changes <= 2.5 /s, amplitude <= 1 /s, rate
 ##                          <= 1 rad/s^2 (continuous: no jumps); "effort" cases: the breath rate in the sprint is >= 1.3x
 ##                          the rate at rest and falls again after it
-##  J12 breath       (every case, the live brain; breath master clock, body_rig _breath_body / _breath_lock) the breath
+##  J13 breath       (every case, the live brain; breath master clock, body_rig _breath_body / _breath_lock) the breath
 ##                   clock (cycles + phase) never runs backwards and never faster than BRAIN_MAX_HZ; the stroke and kick
 ##                   phases never run backwards nor faster than BR_PHASE_MAX; the skeleton's sternum, shoulders and
 ##                   head facing pass J11 too. Cases with "breath": the sternum's breathing offset (mm) in the "rest" and
@@ -309,7 +309,7 @@ func _define_cases() -> void:
 	# Mac breach test: holding ascend and forward from the 2.4 m lagoon floor skimmed 20 m through the air
 	_case("B47 lagoon: breach from the floor, ascend held", "lagoon_pool", {"start": Vector3(0, -1.4, 0), "mode": Motor.Mode.SWIM}, 12.0,
 		func(_t): var k = _pk(Vector2(0, 1)); k.thrust = 1.0; k.ascend = true; return k)
-	# breath master clock (J12 windows; see the header)
+	# breath master clock (J13 windows; see the header)
 	_case("B60 breath: long idle stand, glances on the breath", "wall", {"start": Vector3(-8, 0.05, 0)}, 40.0,
 		func(_t): return _pk(), {"brain": "free", "breath": {"rest": [10.0, 40.0], "glance": true}})
 	_case("B61 breath: swim hover, cruise, sprint, rest", "pool", {"start": Vector3(0, -8, 0), "mode": Motor.Mode.SWIM}, 38.0,
@@ -1081,7 +1081,7 @@ func _film_head(pose: Dictionary) -> void:
 func _film_save(path: String) -> void:
 	root.get_texture().get_image().save_png(path)
 
-# ---------------------------------------------------------------- breath master clock (J12)
+# ---------------------------------------------------------------- breath master clock (J13)
 func _in_win(w) -> bool:
 	return w is Array and w.size() == 2 and t >= float(w[0]) and t < float(w[1])
 
@@ -1096,12 +1096,12 @@ func _check_breath(p: Dictionary, dt: float) -> void:
 	if br.has("bt"):
 		var d := (bt - float(br.bt)) / dt
 		br.bt_rate = maxf(br.bt_rate, d)
-		if d < -1e-9: _fail("J12 breath", "breath clock ran backwards %.3f cycles" % (bt - float(br.bt)))
-		elif d > BRAIN_MAX_HZ * 1.001: _fail("J12 breath", "breath clock jumped %.3f cycles in a tick (%.2f Hz)" % [bt - float(br.bt), d])
+		if d < -1e-9: _fail("J13 breath", "breath clock ran backwards %.3f cycles" % (bt - float(br.bt)))
+		elif d > BRAIN_MAX_HZ * 1.001: _fail("J13 breath", "breath clock jumped %.3f cycles in a tick (%.2f Hz)" % [bt - float(br.bt), d])
 		for k in [["arm", rig.arm_phase], ["kick", rig.kick_phase]]:
 			var dp: float = (float(k[1]) - float(br[k[0]])) / dt
 			br.arm_rate = maxf(br.arm_rate, dp)
-			if dp < -1e-9 or dp > BR_PHASE_MAX: _fail("J12 phase", "%s phase rate %.2f rad/s" % [k[0], dp])
+			if dp < -1e-9 or dp > BR_PHASE_MAX: _fail("J13 phase", "%s phase rate %.2f rad/s" % [k[0], dp])
 	br.bt = bt; br.arm = rig.arm_phase; br.kick = rig.kick_phase
 	br.exhales = int(o.get("exhaleCount", 0)); br.uw = rig.underwater_exhales
 	# the skeleton's breathing bones pass J11 like the joints
@@ -1149,23 +1149,23 @@ func _breath_end() -> String:
 	if spec.is_empty(): return txt
 	if spec.has("rest"):
 		txt += ", sternum rest %.1f mm" % br.rest
-		if br.rest < BR_REST_MM.x or br.rest > BR_REST_MM.y: _fail("J12 depth", "resting breath moves the sternum %.1f mm (%.1f..%.1f)" % [br.rest, BR_REST_MM.x, BR_REST_MM.y])
+		if br.rest < BR_REST_MM.x or br.rest > BR_REST_MM.y: _fail("J13 depth", "resting breath moves the sternum %.1f mm (%.1f..%.1f)" % [br.rest, BR_REST_MM.x, BR_REST_MM.y])
 	if spec.has("exert"):
 		txt += ", sternum exertion %.1f mm" % br.exert
-		if br.exert < BR_EXERT_MM.x or br.exert > BR_EXERT_MM.y: _fail("J12 depth", "breath after effort moves the sternum %.1f mm (%.1f..%.1f)" % [br.exert, BR_EXERT_MM.x, BR_EXERT_MM.y])
-		if spec.has("rest") and br.exert < br.rest * BR_EXERT_GAIN: _fail("J12 depth", "effort breath %.1f mm not %.1fx the resting %.1f" % [br.exert, BR_EXERT_GAIN, br.rest])
+		if br.exert < BR_EXERT_MM.x or br.exert > BR_EXERT_MM.y: _fail("J13 depth", "breath after effort moves the sternum %.1f mm (%.1f..%.1f)" % [br.exert, BR_EXERT_MM.x, BR_EXERT_MM.y])
+		if spec.has("rest") and br.exert < br.rest * BR_EXERT_GAIN: _fail("J13 depth", "effort breath %.1f mm not %.1fx the resting %.1f" % [br.exert, BR_EXERT_GAIN, br.rest])
 	if spec.has("lock"):
 		txt += ", lock err arm %.3f kick %.3f turns" % [br.lock_arm, br.lock_kick]
-		if br.lock_arm > BR_LOCK_ERR or br.lock_kick > BR_LOCK_ERR: _fail("J12 lock", "stroke %.3f turns off the breath / kick %.3f off the stroke (max %.2f)" % [br.lock_arm, br.lock_kick, BR_LOCK_ERR])
+		if br.lock_arm > BR_LOCK_ERR or br.lock_kick > BR_LOCK_ERR: _fail("J13 lock", "stroke %.3f turns off the breath / kick %.3f off the stroke (max %.2f)" % [br.lock_arm, br.lock_kick, BR_LOCK_ERR])
 	if spec.has("land_lock"):
 		for a in br.get("land_acc", []):
 			var off := absf(float(a[0]) / maxf(1e-6, float(a[1])) - float(a[2]))
 			if off >= br.land: br.land = off; br.land_n = int(a[2])
 			txt += ", steps/breath %.2f (N=%d)" % [float(a[0]) / maxf(1e-6, float(a[1])), int(a[2])]
-		if br.land > BR_LAND_RATIO or br.land_n == 0: _fail("J12 lock", "breath %.2f off a whole fraction (N=%d) of the step cadence" % [br.land, br.land_n])
+		if br.land > BR_LAND_RATIO or br.land_n == 0: _fail("J13 lock", "breath %.2f off a whole fraction (N=%d) of the step cadence" % [br.land, br.land_n])
 	if spec.get("glance", false):
 		txt += ", free looks on the breath %d/%d (%d looks in all)" % [br.on_breath, br.glances, br.get("all_looks", 0)]
-		if br.glances == 0 or float(br.on_breath) < BR_GLANCE_SHARE * br.glances: _fail("J12 glance", "only %d of %d new looks began as the breath turned" % [br.on_breath, br.glances])
+		if br.glances == 0 or float(br.on_breath) < BR_GLANCE_SHARE * br.glances: _fail("J13 glance", "only %d of %d new looks began as the breath turned" % [br.on_breath, br.glances])
 	return txt
 
 func _end_case() -> void:

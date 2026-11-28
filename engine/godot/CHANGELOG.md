@@ -29,12 +29,12 @@
   shortened pelvis-waist up to 22 %; the waist is re-placed so both segments keep their length (no side flip near straight).
 - FIX (stress B42 at 30 Hz, found once the kick followed the breath): rising past a slab edge at 4 m/s a trailing ankle sat
   inside the slab, where the toe/heel rays start in rock; rays from the hip to the ankle and sole plate bring it back out.
-- Body stress J12 (every case): breath clock (cycles + phase) never backwards nor over 0.6 Hz, stroke / kick phase rates in
+- Body stress J13 (every case): breath clock (cycles + phase) never backwards nor over 0.6 Hz, stroke / kick phase rates in
   0..14 rad/s, the skeleton's sternum, shoulders and head facing pass J11. New cases: B60 long idle stand among still
   things (rest depth, free looks on the breath 5/5), B61 swim hover > cruise > sprint > rest (depth rest / exertion, stroke
   within 0.10 turn of its beat on the breath and kick 0.065 of the stroke in the cruise, sprint and rest windows), B62
   walk > run > stop (steps per breath 10.0 / 8.0 against N 10 / 8, depth after the run). Planted fault --fault breathjump
-  (phase skips 0.35 cycle) caught by J9 and J12; in run_all.sh. Results: 52/52 at 30, 60 and 120 Hz; J11 worst 6 (B15 at
+  (phase skips 0.35 cycle) caught by J9 and J13; in run_all.sh. Results: 52/52 at 30, 60 and 120 Hz; J11 worst 6 (B15 at
   120 Hz, as on main), else <= 5.
 - Open: no land gait phase lock (the breath matches the step frequency, not the footfall); bubbles themselves; the brain's
   ping-pong rule fails a long idle stand in the "senses" world where the camera sweeps (circler > ahead > sound > circler by
