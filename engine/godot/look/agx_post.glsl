@@ -25,7 +25,7 @@ layout(set = 0, binding = 3, std140) uniform Params {
 	vec4 p5;          // width, height
 	vec4 p6;          // Bloom (0 off, 1 key frame), BloomThr (exposed units), Vignette (corner light lost), BloomMax (excess cap)
 	vec4 p7;          // PSF weights 0-3
-	vec4 p8;          // PSF weight 4
+	vec4 p8;          // PSF weight 4, Keep (1 energy kept, 0 added glow)
 } P;
 layout(set = 0, binding = 4) uniform sampler2D glare0;
 layout(set = 0, binding = 5) uniform sampler2D glare1;
@@ -116,7 +116,7 @@ void main() {
 		vec3 ex = clamp(c - P.p6.y, vec3(0.0), vec3(P.p6.w));
 		vec3 g = P.p7.x * texture(glare0, uv).rgb + P.p7.y * texture(glare1, uv).rgb + P.p7.z * texture(glare2, uv).rgb
 		       + P.p7.w * texture(glare3, uv).rgb + P.p8.x * texture(glare4, uv).rgb;
-		c = max(c + P.p6.x * (g - ex), vec3(0.0));
+		c = max(c + P.p6.x * (g - P.p8.y * ex), vec3(0.0));
 	}
 	// natural vignette: corners keep (1 - Vignette) of their light (art bible round 6 post.py)
 	if (P.p6.z > 0.0) {

@@ -75,6 +75,9 @@ func bathymetry() -> Bathymetry:
 ## bloom 1 = the key frame's glare (develop_v7.py bloom 1), 0 = off; bloom_thr in exposed units (0.18 = middle grey).
 @export var bloom := 1.0
 @export var bloom_thr := 4.5
+## "glare" = the key frame's camera glare (energy kept, only true highlights: sun, glints); "glow" = the art bible round 6 soft
+## glow (added on top of bright areas from ~L* 78, mostly wide halo). set_bloom_style() sets threshold, strength and PSF.
+var bloom_style := "glare"
 ## vignette: light lost at the frame corners (0.15 = corners keep 85 %), natural falloff in scene light; 0 = off
 @export var vignette := 0.0
 @export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
@@ -197,11 +200,21 @@ func _init() -> void:
 	var comp := Compositor.new(); comp.compositor_effects = [cortao_fx, agx_fx]; we.compositor = comp
 	set_agx(true)
 	# bloom / vignette levers for benches and shots (any runner): AO_BLOOM (1 key frame, 0 off), AO_BLOOM_THR, AO_VIG
+	if OS.get_environment("AO_BLOOM_STYLE") != "": set_bloom_style(OS.get_environment("AO_BLOOM_STYLE"))
 	if OS.get_environment("AO_BLOOM") != "": bloom = float(OS.get_environment("AO_BLOOM"))
 	if OS.get_environment("AO_BLOOM_THR") != "": bloom_thr = float(OS.get_environment("AO_BLOOM_THR"))
 	if OS.get_environment("AO_VIG") != "": vignette = float(OS.get_environment("AO_VIG"))
 	cam_attr = CameraAttributesPhysical.new(); cam_attr.auto_exposure_enabled = false
 	cam_attr.frustum_near = 0.02; cam_attr.frustum_far = 400.0
+
+func set_bloom_style(style: String) -> void:
+	bloom_style = style
+	if style == "glow":
+		bloom = 0.35; bloom_thr = 1.2; agx_fx.bloom_keep = 0.0
+		agx_fx.bloom_w = PackedFloat32Array([0.05, 0.35, 0.3, 0.2, 0.1])
+	else:
+		bloom = 1.0; bloom_thr = 4.5; agx_fx.bloom_keep = 1.0
+		agx_fx.bloom_w = PackedFloat32Array([0.45, 0.25, 0.17, 0.09, 0.04])
 
 func set_ao(mode: String) -> void:
 	## "ssao" = Godot's SSAO (the look until now), "cortao" = CORTAO (third_party/cortao) through look/screen_ao.gdshaderinc, "off" = none.

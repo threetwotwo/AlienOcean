@@ -25,7 +25,8 @@ var mode := 0                  # 0 AgX, 1 identity (calibration), 2 constant 0.5
 ## Bloom 0.1.0 (bloom thread, 28 Nov): the key frame's veiling glare (look/bloom.glsl). bloom 1 = the key frame, 0 = off.
 var bloom := 1.0
 var bloom_thr := 4.5           # exposed units (0.18 = middle grey): key frame threshold 3.0 before its exposure +0.6 stop
-var bloom_max := 64.0          # excess cap per pixel (exposed units): stops a sub-pixel glint pulsing a big halo (look/bloom.glsl)
+var bloom_max := 2048.0        # excess cap per pixel (exposed units): high enough for the sun's halo, stops a stray hot pixel ruling the frame
+var bloom_keep := 1.0          # 1 = energy kept (the key frame's glare: light leaves its pixel), 0 = the glow is added on top (round 6 look)
 var bloom_w := PackedFloat32Array([0.45, 0.25, 0.17, 0.09, 0.04])   # PSF weights for sigma BLOOM_SIG (key frame develop_v7.py)
 const BLOOM_SIG := [1.5, 4.0, 12.0, 36.0, 90.0]                     # px at 960 wide; scaled to the internal width
 ## Vignette: light lost at the corners as a share (0.15 = corners keep 85 %), natural cos^4-like falloff, in scene light
@@ -219,7 +220,7 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 			emit_keep, emit_from, night_sky, float(mode),
 			float(size.x), float(size.y), 0.0, 0.0,
 			bloom if glare.size() == 5 else 0.0, bloom_thr, vignette, bloom_max,
-			bloom_w[0], bloom_w[1], bloom_w[2], bloom_w[3], bloom_w[4], 0.0, 0.0, 0.0])
+			bloom_w[0], bloom_w[1], bloom_w[2], bloom_w[3], bloom_w[4], bloom_keep, 0.0, 0.0])
 		rd.buffer_update(ubo, 0, f.size() * 4, f.to_byte_array())
 		var u0 := RDUniform.new(); u0.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE; u0.binding = 0; u0.add_id(color)
 		var u1 := RDUniform.new(); u1.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE; u1.binding = 1; u1.add_id(sampler); u1.add_id(copy)
