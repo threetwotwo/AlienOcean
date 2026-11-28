@@ -418,3 +418,25 @@ def test_traced_tables_are_faired_and_the_loft_has_no_crease_or_ripple(tmp_path)
     G = Form(rec('corner', 0.0, 0.0)); ph = G.SECT['phi']; c_, s_ = np.abs(np.cos(ph)), np.sin(ph)     # a rhombus, drawn row to row
     G.SECT['rho'][:] = 1 / (c_ + s_); G.SECT['drho'][:] = -(np.where(ph < np.pi / 2, -s_, s_) + np.cos(ph)) / (c_ + s_) ** 2
     assert form_fair(G)['FM1_crease_deg'] > FM1_CREASE_MAX
+
+
+def test_blockout_follows_the_record_and_catches_planted_faults(tmp_path):
+    """the blockout (ellipsoid chain + fin plates) matches the record's side and top outline (BK1, BK2) and its fin plates cover the
+    traced fin outlines (BK3); a body squashed to 70 % height, or a fin plate grown by 1.25, fails."""
+    import copy
+    from creature_maker.blockout import blockout, checks, segments
+    from creature_maker.record import adapt
+    from creature_maker.form import Form
+    from creature_maker.fins import build_fins
+    D = blockout(REC, str(tmp_path / 'bk'), log=lambda *a: None)
+    assert D['checks']['BK1_pass'] and D['checks']['BK2_pass'] and D['checks']['BK3_pass']
+    assert len(D['segments']) == 2 * D['bones'] and D['tris'] < 8000
+    rec = adapt(REC); form = Form(rec); segs, x_end = segments(form, rec); os.makedirs(tmp_path / 'f'); fins = build_fins(form, rec, str(tmp_path / 'f'))
+    sq = copy.deepcopy(segs)
+    for s in sq: s['r'][1] *= 0.7
+    assert not checks(form, sq, x_end, fins, rec)['BK1_pass']
+    # BK3 on a traced fin: give the record's dorsal fin a traced edge equal to its own card's outline, then grow the plate
+    m = rec['fins']['median'][0]; Mb = len(fins[m['name']]['lens']); m['edge'] = np.asarray(fins[m['name']]['V'])[-Mb:, :2].tolist()
+    ok = checks(form, segs, x_end, fins, rec)['BK3_fin_iou'][m['name']]; assert ok >= 0.85, ok
+    big = copy.deepcopy(fins); V = np.asarray(big[m['name']]['V']); c = V[:, :2].mean(0); V[:, :2] = c + (V[:, :2] - c) * 1.25; big[m['name']]['V'] = V
+    assert checks(form, segs, x_end, big, rec)['BK3_fin_iou'][m['name']] < ok - 0.1
