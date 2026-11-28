@@ -42,7 +42,7 @@
   them), B64 near object (vergence 0.34 rad at 0.32 m, 0.018 far), B65 rest > sprint > rest (blinks 15 -> 20 /min, jaw
   0.094 rad after the sprint, 0 at rest), B66 swim prone looking up and down (jaw shut under water), B67 30 s stare
   (20 micro-saccades, no saccade, eyes within 0.007 rad of the target). Planted fault --fault eyelimit (eyes without
-  limits) caught by J40; in run_all.sh. Results: 57/57 at 30, 60 and 120 Hz; J11 worst as on main (6 B47 at 120 Hz).
+  limits) caught by J40; in run_all.sh. Results (merged with rest and ride): 97/97 at 30, 60 and 120 Hz; J11 worst 5.
 - Open (found, not changed here): _skeleton runs once per update_swim with the last sub-step's dt, so at 30 Hz (two 1/60
   sub-steps) the follow-through, girdle and soft-arm springs see half the frame's time (and the follow-through twice the
   pelvis speed); the head's clocks take the whole frame. No lower-lid motion, brows or speech; the eyes are pinned at
