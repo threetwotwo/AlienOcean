@@ -57,6 +57,7 @@ class Form:
         self.rec = rec; O = self.O = rec['outline']
         self._TOP0, self.BOT, self.HW, self.NUP, self.NLO = (pch(O[k]) for k in ('top', 'bot', 'hw', 'nUp', 'nLo'))
         self.XEND = O['top'][-1][0]
+        self.SECT = self._sections(O.get('sections'))
         self.EY = EY = rec['eye']; self.CV = CV = rec['cover']; self.MO = MO = rec['mouth']
         self.ex, self.eyy, self.er = EY['x'], EY['y'], EY['d'] / 2
         # structure rule: the orbit shapes the head profile. Where the record's eye (plus a skin margin for the eye loops)
@@ -137,6 +138,51 @@ class Form:
         k = 0.004; h = np.clip(0.5 + 0.5 * (bump - t0) / k, 0, 1)
         return t0 * (1 - h) + bump * h + k * h * (1 - h)              # smooth max
 
+    # ---- the cross-section. Without traced sections it is two half superellipses (record nUp above, nLo below the
+    # section centre), widest at mid-height. A traced section (record outline.sections) is the photo's own shape: half-width
+    # w (0..1 of the record half-width) at normalised height s (-1 ventral edge, +1 dorsal edge), so a keel, a flat flank or
+    # a widest point above the middle come from the reference. Between stations the shape blends linearly in x; before the
+    # first and after the last it holds. Width stays the record hw; height stays top/bot (front and top silhouette: SIL2).
+    SECT_S, SECT_PHI = 129, 361          # DEFAULTS: samples down a traced section and round its polar boundary
+
+    def _sections(self, S):
+        if not S: return None
+        S = sorted(S, key=lambda q: q['x']); ss = np.linspace(-1, 1, self.SECT_S); phi = np.linspace(0, np.pi, self.SECT_PHI)
+        X, W, RHO = [], [], []
+        for q in S:
+            w = np.array(q['w'], float); w = w[np.argsort(w[:, 0])]
+            ws = np.clip(np.interp(ss, w[:, 0], w[:, 1]), 0, None); ws = ws / max(ws.max(), 1e-9)
+            ws[0] = ws[-1] = 0.0                                             # the section closes on the midline at both edges
+            ang = np.arctan2(ws, ss); rad = np.hypot(ws, ss)                 # polar boundary in normalised (u = s, v = w)
+            o = np.argsort(ang); X.append(q['x']); W.append(ws); RHO.append(np.interp(phi, ang[o], rad[o]))
+        return dict(x=np.array(X), s=ss, w=np.array(W), phi=phi, rho=np.array(RHO))
+
+    def _blend(self, x, T):
+        S = self.SECT; x = np.asarray(x, float); k = np.clip(np.searchsorted(S['x'], x) - 1, 0, len(S['x']) - 1)
+        k1 = np.minimum(k + 1, len(S['x']) - 1); span = np.maximum(S['x'][k1] - S['x'][k], 1e-9)
+        t = np.clip((x - S['x'][k]) / span, 0, 1)[..., None]
+        return (1 - t) * T[k] + t * T[k1]
+
+    def rnorm(self, x, u, v, n=None):
+        """how far (u, v) = (dy / a, dz / b) lies out from the section centre, in units of the boundary (1 = on the skin)."""
+        if self.SECT is None:
+            n = np.where(u > 0, self.NUP(x), self.NLO(x)) if n is None else n
+            return (np.abs(u) ** n + np.abs(v) ** n) ** (1 / n)
+        S = self.SECT; R = self._blend(np.broadcast_to(x, np.broadcast(x, u).shape), S['rho'])
+        ph = np.arctan2(np.abs(v), u) / np.pi * (len(S['phi']) - 1); i = np.clip(ph.astype(int), 0, len(S['phi']) - 2); f = ph - i
+        rb = np.take_along_axis(R, i[..., None], -1)[..., 0] * (1 - f) + np.take_along_axis(R, (i + 1)[..., None], -1)[..., 0] * f
+        return np.hypot(u, v) / np.maximum(rb, 1e-9)
+
+    def wnorm(self, x, s):
+        """half-width (0..1 of the record half-width) of the section at normalised height s."""
+        if self.SECT is None:
+            nn = np.where(s > 0, self.NUP(x), self.NLO(x))
+            return np.maximum(1 - np.minimum(np.abs(s), 1) ** nn, 1e-6) ** (1 / nn)
+        S = self.SECT; Wx = self._blend(np.broadcast_to(x, np.broadcast(x, s).shape), S['w'])
+        q = (np.clip(s, -1, 1) + 1) / 2 * (len(S['s']) - 1); i = np.clip(q.astype(int), 0, len(S['s']) - 2); f = q - i
+        w = np.take_along_axis(Wx, i[..., None], -1)[..., 0] * (1 - f) + np.take_along_axis(Wx, (i + 1)[..., None], -1)[..., 0] * f
+        return np.maximum(w, 1e-6)
+
     def sec(self, x):
         t, b, w = self.TOP(x), self.BOT(x), self.HW(x)
         return (t + b) / 2, (t - b) / 2, w
@@ -144,9 +190,7 @@ class Form:
     def loft_point(self, x, th):
         """exact point of the record loft at body coords (x, theta)."""
         c, a, b = self.sec(x); dy, dz = np.cos(th), np.sin(th)
-        n = np.where(dy > 0, self.NUP(x), self.NLO(x))
-        r = (np.abs(dy / a) ** n + np.abs(dz / b) ** n) ** (1 / n)
-        rho = 1 / r
+        rho = 1 / self.rnorm(x, dy / a, dz / b)
         return np.stack([x, c + rho * dy, rho * dz], -1)
 
     def theta_of(self, x, y, z):
@@ -154,8 +198,7 @@ class Form:
 
     def z_on(self, x, y):
         """flank z of the loft at side-view point (x, y)."""
-        c, a_, b_ = self.sec(x); dy = y - c; nn = np.where(dy > 0, self.NUP(x), self.NLO(x))
-        return b_ * np.maximum(1 - np.minimum(np.abs(dy / a_), 1) ** nn, 1e-6) ** (1 / nn)
+        c, a_, b_ = self.sec(x); return b_ * self.wnorm(x, (y - c) / a_)
 
     def radial(self, p):
         """unit direction from the section centre line to p, in the section plane."""
@@ -166,14 +209,14 @@ class Form:
         XEND = self.XEND
         x, y, z = P[..., 0], P[..., 1], P[..., 2]
         xc = np.clip(x, 0, XEND); c, a, b = self.sec(xc)
-        dy = y - c; n = np.where(dy > 0, self.NUP(xc), self.NLO(xc))
-        r = (np.abs(dy / a) ** n + np.abs(z / b) ** n) ** (1 / n)
+        dy = y - c; n = None if self.SECT is not None else np.where(dy > 0, self.NUP(xc), self.NLO(xc))
+        r = self.rnorm(xc, dy / a, z / b, n)
         q = np.sqrt(dy * dy + z * z) + 1e-9
         d = q * (1 - 1 / np.maximum(r, 1e-6))
         h = 2e-3  # slope correction so the field stays close to a distance
         s = (q / np.maximum(r, 1e-6))
         c2, a2, b2 = self.sec(np.clip(xc + h, 0, XEND))
-        r2 = (np.abs((y - c2) / a2) ** n + np.abs(z / b2) ** n) ** (1 / n)
+        r2 = self.rnorm(np.clip(xc + h, 0, XEND), (y - c2) / a2, z / b2, n)      # same exponents as r: a slope, not a new shape
         s2 = q / np.maximum(r2, 1e-6)
         d = d / np.sqrt(1 + ((s2 - s) / h) ** 2)
         return np.maximum(d, np.maximum(-x, x - XEND))

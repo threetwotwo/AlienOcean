@@ -160,3 +160,25 @@ def test_ventral_vs_from_the_record():
     for s in B.gill.slits:
         assert len(s['loop']) == len(s['hole']) == 2 * g['ne']
         assert abs(B.V[s['loop'][g['ne']]][2]) < abs(B.V[s['loop'][g['nj']]][2])    # the leg runs in toward the midline
+
+
+def test_traced_cross_section_reaches_the_form_and_the_front_gate(tmp_path):
+    """a traced section (outline.sections: widest above the middle, a thin keel below) is the loft's own shape at its station,
+    the skin lies on it (rnorm = 1 on the boundary), and the front gate (SIL2) tells it from the default oval."""
+    from creature_maker.record import adapt
+    from creature_maker.form import Form
+    from creature_maker import silhouette as S
+    D = json.load(open(REC)); SL = D['record']['outline']['end']; s = np.linspace(-1, 1, 21)
+    w = np.where(s > 0.3, np.sqrt(np.clip(1 - ((s - 0.3) / 0.7) ** 2, 0, 1)), np.clip(1 - np.abs((s - 0.3) / 1.3) ** 1.4, 0, 1) ** 0.9)
+    D['record']['outline']['sections'] = [dict(u=0.4 * SL, w=[[float(a), float(b)] for a, b in zip(s, w)])]
+    rp = str(tmp_path / 'sec.json'); json.dump(D, open(rp, 'w'))
+    F = Form(adapt(rp)); x = np.full(5, 0.4); ss = np.array([-0.8, -0.3, 0.3, 0.6, 0.9])
+    assert np.allclose(F.wnorm(x, ss), np.interp(ss, s, w) / w.max(), atol=0.02)
+    th = np.linspace(0.1, np.pi - 0.1, 9); P = F.loft_point(np.full(9, 0.4), th); c, a, b = F.sec(0.4)
+    assert np.allclose(F.rnorm(np.full(9, 0.4), (P[:, 1] - c) / a, P[:, 2] / b), 1, atol=1e-6)
+    o1, o2 = str(tmp_path / 'oval'), str(tmp_path / 'sec')
+    build(REC, o1, res=64, dense_form=False, log=lambda *a: None); build(rp, o2, res=64, dense_form=False, log=lambda *a: None)
+    load = lambda o: (json.load(open(os.path.join(o, 'cage.json'))), np.load(os.path.join(o, 'cage.npz'))['V'])
+    (C1, V1), (C2, V2) = load(o1), load(o2)
+    ref = dict(front=S.outline2(C2, V2, 'front'))
+    assert S.score2(C2, V2, ref)['SIL2_pass'] and not S.score2(C1, V1, ref)['SIL2_pass']

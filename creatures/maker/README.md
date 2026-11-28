@@ -91,6 +91,13 @@ holes filled) must overlap its traced reference outline by IoU 0.90 or more, for
 with no traced reference fails SIL1 with the note "no traced reference silhouette yet". `silhouette.overlay` draws built
 (red) over reference (blue).
 
+**Front and top (SIL2, Gary 28 Nov).** The side view cannot see girth, the cross-section's shape or head width. The same
+reference file may carry `"front": [[z, y], ...]` (head-on: body and median fins, no paired fins) and `"top": [[x, z], ...]`
+(from above: body only), in SL units; each must overlap by IoU 0.90. The cross-section itself can be traced:
+`outline.sections: [{"u": <record units>, "w": [[s, w], ...]}]`, half-width share w (0..1) at normalised height s (-1 ventral
+edge, +1 dorsal edge), blended linearly between stations. Without it the section is the default (two half superellipses
+from nUp/nLo, widest at mid-height, listed as a DEFAULT row) and builds byte-identical to before.
+
 **Traced fins.** A median fin (or the caudal) may carry `edge`: its free outline from the photo, in record units, from
 where the leading edge leaves the body to where the rear margin meets it (dorsal and anal front to back, caudal top to
 bottom). The fin card then spans its root and that outline, with the rows between relaxed so swept lobes and filaments
