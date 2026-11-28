@@ -25,6 +25,9 @@ echo "== Bathymetry (the reef drop-off's stress-test world)"
 echo "== Overcast (look)"
 "$G" --headless --path . --script res://tests/test_overcast.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_overcast.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_overcast.gd -- --fault >/dev/null 2>&1 && { echo "OVERCAST PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Overcast planted fault caught"
+echo "== Image quality (look: soft shadows, temporal upscaler)"
+"$G" --headless --path . --script res://tests/test_image_quality.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_image_quality.gd >/dev/null 2>&1 || rc=1
+"$G" --headless --path . --script res://tests/test_image_quality.gd -- --fault >/dev/null 2>&1 && { echo "IMAGE QUALITY PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Image quality planted fault caught"
 echo "== Marine snow drift"
 "$G" --headless --path . --script res://tests/test_marine_snow.gd 2>&1 | grep -E "PASS|FAIL"; "$G" --headless --path . --script res://tests/test_marine_snow.gd >/dev/null 2>&1 || rc=1
 "$G" --headless --path . --script res://tests/test_marine_snow.gd -- --fault >/dev/null 2>&1 && { echo "MARINE SNOW PLANTED FAULT NOT CAUGHT"; rc=1; } || echo "Marine snow planted fault caught"

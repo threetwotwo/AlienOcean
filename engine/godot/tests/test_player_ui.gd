@@ -9,6 +9,7 @@
 ##   U5 remap from the menu: Controls page refuses the Create button, accepts a free button, the new button drives interact
 ##   U6 controller loss pauses with the reconnect line; resume clears the disconnect hold
 ##   U7 in the level: swimming into a school offers "Sample DNA", holding Square takes a sample (toast + rumble event logged)
+##   U7d the offered target reaches her brain as the 'interact' objective focus (her look-at)
 ##   U8 glyphs: every remappable action has a non-empty glyph on playstation, xbox, nintendo and keyboard
 ## Planted faults (--fault): "flicker" (no switch margin) must fail U1; "nolatch" (hold repeats) must fail U2.
 ## Run: godot --headless --fixed-fps 60 --path . --script res://tests/test_player_ui.gd [-- --fault flicker|nolatch]
@@ -192,6 +193,11 @@ func _sample_checks(ui: PlayerUI) -> void:
 		await physics_frame
 		if not ui.picker.current.is_empty(): offered = true; break
 	ok(offered and ui.picker.current.get("verb", "") == "Sample DNA", "U7b swimming to a school offers Sample DNA", str(ui.picker.current.get("id", "none")))
+	await ticks(2)
+	var br = g.brig.brain
+	var of = br.get("objective_focus")
+	ok(of != null and of.label == "interact" and of.pos is Vector3 and of.pos.distance_to(ui.picker.current.pos) < 0.5,
+		"U7d her brain holds the offered target (look-at)", str(of.label if of != null else "none"))
 	ui.reader.family = "playstation"; ui.reader.last_pad = 0; ui.reader.haptics._last_ms = -1e9
 	var n0 := ui.events.size()
 	pad_button(JOY_BUTTON_X, true)                       # Square

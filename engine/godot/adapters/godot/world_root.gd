@@ -170,6 +170,9 @@ func _init() -> void:
 	declare_globals()
 	light = DirectionalLight3D.new(); light.name = "KeyLight"
 	light.shadow_enabled = true; light.directional_shadow_max_distance = 60.0
+	# shadow levers for benches (project.godot holds the defaults: 8192 map, soft filter high): AO_SHADOW_SIZE, AO_SHADOW_Q 0-5
+	if OS.get_environment("AO_SHADOW_SIZE") != "": RenderingServer.directional_shadow_atlas_set_size(int(OS.get_environment("AO_SHADOW_SIZE")), true)
+	if OS.get_environment("AO_SHADOW_Q") != "": RenderingServer.directional_soft_shadow_filter_set_quality(int(OS.get_environment("AO_SHADOW_Q")))
 	add_child(light)
 	caustics = CausticsMap.new(); add_child(caustics)
 	env = Environment.new()
@@ -223,10 +226,15 @@ func attach_camera(cam: Camera3D) -> void:
 
 func _process(_dt: float) -> void:
 	## the god rays' start point moves on each frame only where TAA averages it (Unreal: StateFrameIndexMod8 under TSR);
-	## without TAA it holds still, or the shafts would boil.
+	## without TAA it holds still, or the shafts would boil. A temporal upscaler (FSR 2, MetalFX temporal) averages frames as TAA does.
 	if under_mat == null: return
 	var vp := get_viewport()
-	under_mat.set_shader_parameter("god_frame", float(Engine.get_frames_drawn() % 8) if vp and vp.use_taa else 0.0)
+	under_mat.set_shader_parameter("god_frame", float(Engine.get_frames_drawn() % 8) if vp and temporal(vp) else 0.0)
+
+static func temporal(vp: Viewport) -> bool:
+	## frames are averaged on this viewport (TAA, FSR 2 or MetalFX temporal), so per-frame noise may move on each frame
+	var m := vp.scaling_3d_mode
+	return vp.use_taa or (vp.scaling_3d_scale < 0.999 and (m == Viewport.SCALING_3D_MODE_FSR2 or m == Viewport.SCALING_3D_MODE_METALFX_TEMPORAL))
 
 func set_fov(fov_deg: float) -> void:
 	## CameraAttributesPhysical owns the field of view: Godot takes the vertical FOV from a 24 mm sensor height (12 mm

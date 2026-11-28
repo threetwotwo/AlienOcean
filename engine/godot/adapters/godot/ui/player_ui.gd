@@ -110,15 +110,12 @@ func _physics_process(dt: float) -> void:
 func focus_point():
 	return null if picker.current.is_empty() else picker.current.pos
 
-## Push the offered target into her brain every tick it holds (body thread 28 Nov: core never calls the UI; the brain releases
-## the hold by itself hold_sec after the calls stop). Thalassa CharacterBrain.engageObjectiveFocus, ported as
-## engage_objective_focus; girl.focus(label, pos) once the body thread adds it. Guarded so this runs before that port lands.
+## Push the offered target into her brain every tick it holds (body thread 28 Nov: core never calls the UI; a repeat call with the
+## same label refreshes the target, and the brain releases the hold by itself hold_sec after the calls stop). Her eyes and head
+## turn to it ahead of curiosity glances. ActorRig.engage_objective_focus (port of Thalassa CharacterBrain.engageObjectiveFocus).
 func _focus_girl(girl, cur: Dictionary) -> void:
 	if cur.is_empty(): return
-	if girl.has_method("focus"): girl.focus("interact", cur.pos); return
-	var rig = girl.body.get("rig") if girl.body != null else null
-	var brain = rig.get("brain") if rig != null else null
-	if brain != null and brain.has_method("engage_objective_focus"): brain.engage_objective_focus("interact", cur.pos)
+	if girl.has_method("engage_objective_focus"): girl.engage_objective_focus("interact", cur.pos)
 
 func toast(text: String, _sec := 2.6) -> void:
 	toast_text = text; toast_t = 0.0
