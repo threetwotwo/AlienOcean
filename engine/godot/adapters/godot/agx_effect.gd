@@ -10,7 +10,7 @@ var stops_above := 6.5
 var punch := 0.4
 var saturation := 1.0
 var white_temp := 0.0          # 0 = follow the light (white_now)
-var sky_blue := 1.2
+var sky_blue := 0.4             # Unreal 1.2; 0.4 since the dome's air is truly blue (28 Nov): 1.2 made a cyan step at 10-20 deg
 var night_look := 1.0
 var hue_keep := 0.6
 var star_keep := 1.0

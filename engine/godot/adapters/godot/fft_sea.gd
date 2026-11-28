@@ -70,6 +70,8 @@ static func declare_globals() -> void:
 	rs.global_shader_parameter_add("sea_deriv", rs.GLOBAL_VAR_TYPE_SAMPLER2DARRAY, null)
 	rs.global_shader_parameter_add("sea_patch", rs.GLOBAL_VAR_TYPE_VEC4, Vector4(250.0, 21.4, 2.56, 0.32))
 	rs.global_shader_parameter_add("sea_ring_hi", rs.GLOBAL_VAR_TYPE_VEC4, Vector4(32, 32, 32, 64))
+	rs.global_shader_parameter_add("sea_open_gain", rs.GLOBAL_VAR_TYPE_FLOAT, float(OS.get_environment("AO_OPEN_GAIN")) if OS.get_environment("AO_OPEN_GAIN") != "" else 2.0)   # look/sea_top: open water art levers (1, 0 = the physical deep sea; 2, 0.5 = the lifted Abzu blue, 28 Nov)
+	rs.global_shader_parameter_add("sea_open_teal", rs.GLOBAL_VAR_TYPE_FLOAT, float(OS.get_environment("AO_OPEN_TEAL")) if OS.get_environment("AO_OPEN_TEAL") != "" else 0.5)
 	rs.global_shader_parameter_add("sea_mom_x", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
 	rs.global_shader_parameter_add("sea_mom_y", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
 	rs.global_shader_parameter_add("sea_mom_r", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)

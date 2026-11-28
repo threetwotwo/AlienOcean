@@ -165,6 +165,7 @@ def apply(D, T, trace_name, photo, parts=PARTS):
             M[k]['_origin_edge'] = ('MEASURED: free outline traced on the photo (trace fins.' + k + '.edge), '
                                     + ('top to bottom' if k == 'caudal' else 'front to back') + ', record units')
             rep['measured'].append(f'skeleton.median.{k}.edge')
+    paired_edges(sk, T, fr, rep)
     for k, key in (('pect', 'pectoral'), ('pelvic', 'pelvic')):
         if k in L and key in sk and isinstance(sk[key].get('base'), dict):
             sk[key]['base']['u'], sk[key]['base']['y'] = r2(L[k][0]), r2(L[k][1]); rep['measured'].append(f'skeleton.{key}.base')
@@ -180,3 +181,28 @@ def apply(D, T, trace_name, photo, parts=PARTS):
     D['_trace'] = dict(tool=f'species_tracer {VERSION}', trace=trace_name, photo=photo, frame='u along snout tip -> caudal base (= SL), y up, snout (0, 0)',
                        measured=rep['measured'], estimate=rep['estimate'], notes=rep['notes'])
     return D, rep
+
+
+def paired_edges(sk, T, fr, rep=None):
+    """the traced side-view outline of each paired fin (maker reads skeleton.pectoral/pelvic.edge and .base_line, record units):
+    edge runs from the upper (pectoral) or front (pelvic) root round the tip to the other root; base_line = root to root.
+    The pectoral comes from trace fins.pect.edge, the pelvic from fins.pelvic.silhouette; a fin with neither is left as drafted."""
+    for k, key, src in (('pect', 'pectoral', 'edge'), ('pelvic', 'pelvic', 'silhouette')):
+        F = (T.get('fins') or {}).get(k) or {}
+        if key not in sk or len(F.get(src) or []) < 3: continue
+        e = fr.to_rec(F[src])
+        if F.get('tip') and F.get('base'):        # a stub that stops short of the marked tip is a failed trace, not the fin
+            b, t = fr.to_rec([F['base'], F['tip']])
+            if np.hypot(*(e - b).T).max() < 0.6 * np.hypot(*(t - b)):
+                if rep is not None: rep['notes'].append(f'skeleton.{key}.edge not written: traced outline stops short of the marked tip')
+                continue
+        if (key == 'pectoral' and e[0, 1] < e[-1, 1]) or (key == 'pelvic' and e[0, 0] > e[-1, 0]): e = e[::-1]
+        sk[key]['edge'] = [[r2(a), r2(b)] for a, b in e]
+        bl = [e[0]] + ([fr.to_rec([F['base']])[0]] if F.get('base') else []) + [e[-1]]
+        sk[key]['base_line'] = [[r2(a), r2(b)] for a, b in bl]
+        sk[key]['_origin_edge'] = (f'MEASURED: free outline traced on the photo (trace fins.{k}.{src}), '
+                                   + ('upper root round the tip to lower root' if key == 'pectoral' else 'front root round the tip to rear root')
+                                   + '; base_line root to root through the marked base; record units'
+                                   + ('; pose ' + F['pose'] if F.get('pose') else ''))
+        if rep is not None: rep['measured'] += [f'skeleton.{key}.edge', f'skeleton.{key}.base_line']
+
