@@ -69,6 +69,17 @@ V = Z['V']
 tmp_m = bpy.data.materials.new('bake_tmp'); tmp_m.use_nodes = True
 body = mesh_obj('body', V, C['faces'], C['uv'], tmp_m)
 INT_IDX, INT_SKIP = interior.slot(body, C)     # interior faces off the skin's bake target before anything is baked
+# the skin's shading stops where the skin does: the edges between a skin face and an interior face (the lip rolls, the gill
+# slits' lips) are sharp, so a lip vertex takes its normal from the skin faces only. Averaged with the lining, which turns
+# inward there, the lip normals leaned up to 90 deg into the opening and the bake wrote the opposite lean over every skin face
+# that touches a lip: one large face at the corner of the gill slit carried most of the map's steepest texels and all but one
+# of its specks (export r5).
+_ek = {}
+for _p in body.data.polygons:
+    for _k in _p.edge_keys: _ek.setdefault(_k, set()).add(C['ftag'][_p.index] in interior.INNER)
+SHARP = sum(1 for _e in body.data.edges if len(_ek.get(tuple(sorted(_e.vertices)), ())) == 2)
+if os.environ.get('CREATURE_PLANT_BAKE_FAULT', '') != 'lips_shaded_with_lining':   # tests only: the lean back, to show P6 catches it
+    for _e in body.data.edges: _e.use_edge_sharp = len(_ek.get(tuple(sorted(_e.vertices)), ())) == 2
 # orbit linings (the tuck ring of each eye patch) turn into the socket and lie inside the form by design, up to 1.6 % SL deep,
 # further than the bake cage reaches out: their rays start inside the solid and hit the form's far side from behind. They do not
 # sample the form: they wait on the throwaway slot too, and take a flat tangent normal (the cage's own shading) and the rim's AO.

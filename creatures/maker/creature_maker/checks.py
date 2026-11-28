@@ -14,8 +14,10 @@ Cage checks (no Blender):
       and the lips reach each gill slit through interior faces only
   OP2 every interior-only vertex lies inside the body (signed distance < -0.1 % SL)
   OP3 no fold (> 60 deg between neighbouring faces) outside the designed creases (rolls, junctions, commissures)
-Export checks (after Blender): P1 triangle budget + LODs, P6 the normal map carries the form, faces out and is the same on
-both sides, P7 bones, P8 Khronos
+  FM1 the body loft is fair: no crease round a section and no ripple of the flank along the body (what the normal bake
+      would write as stripes and bands)
+Export checks (after Blender): P1 triangle budget + LODs, P6 the normal map carries the form, faces out, is the same on
+both sides and is clean (1st percentile of normal z >= 0.8, at most 2 specks), P7 bones, P8 Khronos
 validator, P11 silhouette against the ceiling frame (info), and the export stage's own rows:
   EX1 Blender's skinning at the real gape equals the stress test's gape pose (pose.gape) within 0.01 % SL, and the jaw moves
   EX2 the same for the gill covers at the real flare (pose.flare)
@@ -189,6 +191,55 @@ def eyeball_checks(C):
 EYE_SHELL_TRIS_MAX = 300    # DEFAULT: iris + lens + cornea of both eyes. The ceiling fish (the Nestaeric alfonsino) is about 8.8k
                             # triangles whole with its eyes a separate material; 300 is 3.4 % of that. The shells this replaces took 864
 
+FM1_STEP = 0.00005      # DEFAULT: arc (SL) over which a crease is looked for: a tenth of a texel of the 2048 body map, so the
+                        # rounding of a narrow back or keel (radius >= 0.1 % SL: under 3 deg over this arc) is not a crease
+FM1_CREASE_MAX = 8.0    # DEFAULT: most the loft's normal may turn over FM1_STEP (deg). The 28 traced records: <= 3.1; straight
+                        # lines between the rows of a traced section: 19 to 42 (export r5, stripes along the body, dark rims)
+FM1_WINDOW = 0.06       # DEFAULT: a ripple is what is left of the flank normal's fore-aft angle after its mean over this length (SL)
+FM1_RIPPLE_MAX = 1.5    # DEFAULT: rms of that ripple (deg). The 28 traced records: <= 1.0; a top view's trace jitter carried into
+                        # the half-width: 2.9 (export r5, vertical bands)
+
+
+def _loft_normal(form, P, e):
+    g = np.stack([form.sd_body(P + v) - form.sd_body(P - v) for v in np.eye(3) * e], -1)
+    return g / (np.linalg.norm(g, axis=-1, keepdims=True) + 1e-15)
+
+
+FM1_ORBIT_GATED = False  # the periorbital tissue (PR #109) still leaves a crease where it meets the brow and snout (the boxy roof,
+                         # 28-37 deg on the 28 traced fish): listed as FM1_orbit_crease_deg, gated once the head is held to the scan line
+
+
+def form_fair(form):
+    """FM1 on the record loft (the tissue round the eye set aside), with the tissue's own crease listed. See _form_fair."""
+    orb = getattr(form, '_orb', None)
+    try:
+        form._orb = None; R = _form_fair(form)
+    finally:
+        form._orb = orb
+    if orb is not None:
+        T = _form_fair(form); R['FM1_orbit_crease_deg'] = T['FM1_crease_deg']; R['FM1_orbit_crease_at_xy'] = T['FM1_crease_at_xy']
+        if FM1_ORBIT_GATED: R['FM1_pass'] = R['FM1_pass'] and T['FM1_crease_deg'] <= FM1_CREASE_MAX
+    return R
+
+
+def _form_fair(form):
+    """FM1: the body loft (level 0, before plates) is fair. crease = the most its normal turns, in the section plane, over
+    FM1_STEP of arc round a section (15 sections along the body); ripple = rms of the flank normal's fore-aft angle along
+    the widest line, less its running mean over FM1_WINDOW. Both are zero on a smooth loft and neither needs a bake."""
+    X = form.XEND; th = np.linspace(0, np.pi, 20001); crease = 0.0; at = None
+    for x in np.linspace(0.08, 0.92, 15) * X:
+        P = form.loft_point(np.full(th.shape, x), th); n = _loft_normal(form, P, 5e-6); n[:, 0] = 0
+        n /= np.linalg.norm(n, axis=1, keepdims=True) + 1e-15
+        arc = np.r_[0, np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))]
+        j = np.clip(np.searchsorted(arc, arc + FM1_STEP), 0, len(th) - 1)
+        t = np.degrees(np.arccos(np.clip((n * n[j]).sum(1), -1, 1))); k = int(t.argmax())
+        if t[k] > crease: crease = float(t[k]); at = [round(float(x), 3), round(float(P[k, 1]), 3)]
+    xs = np.arange(0.05 * X, 0.95 * X, 0.001); k = int(FM1_WINDOW / 0.001) | 1
+    ax = np.degrees(np.arcsin(np.clip(_loft_normal(form, form.loft_point(xs, np.full(xs.shape, np.pi / 2)), 1e-4)[:, 0], -1, 1)))
+    hp = ax - np.convolve(np.pad(ax, k // 2, mode='edge'), np.ones(k) / k, 'valid'); ripple = float(np.sqrt((hp ** 2).mean()))
+    return dict(FM1_crease_deg=round(crease, 1), FM1_crease_at_xy=at, FM1_ripple_deg=round(ripple, 2),
+                FM1_pass=crease <= FM1_CREASE_MAX and ripple <= FM1_RIPPLE_MAX)
+
 
 def cage_checks(C, V, form, rec):
     R = {}; faces, tags = C['faces'], C['ftag']
@@ -248,6 +299,7 @@ def cage_checks(C, V, form, rec):
     by, dmax = folds(C, V)
     R['OP3_folds_by_region'] = by; R['OP3_folds'] = int(sum(by.values())); R['OP3_designed_crease_max_deg'] = round(dmax)
     R['OP3_pass'] = R['OP3_folds'] == 0
+    R.update(form_fair(form))
     return R
 
 
@@ -269,13 +321,23 @@ def pose_checks(C, V, rec, jaw_w=None, sweep=True):
 
 P6_BACK_MAX = 1e-4      # DEFAULT: share of skin texels that may face into the skin (single rays at the tail pole); a face baked
                         # from the wrong side is hundreds of texels
+P6_Z_P1_MIN = 0.8       # DEFAULT: 1st percentile of the tangent normal's z. Below it more than 1 % of the skin is tilted over 37 deg
+                        # from the cage's own shading: the map is carrying shape the cage should (dark rims, export r5: 0.60; r3: 0.83)
+P6_SPECKS_MAX = 2       # DEFAULT: isolated texels left after the bake's own speck repair (export r3: 1, r5: 13)
 P6_SIDE_DEG, P6_SIDE_MAX = 25.0, 0.02   # DEFAULT: twin texels of the two sides may differ by more than 25 deg (the speck
                                         # limit) on at most 2 % of them (edges that fall on different texel rows)
 
 
-def p6(N, Mk):
-    """the normal map carries the form: every third of the body has >= 10 % of texels tilted > 3 deg, the map is not
-    inverted, no isolated specks remain (> 25 deg from all 8 neighbours), no texel faces into the skin, and the two sides
+P6_RELIEF_MIN = 0.10    # DEFAULT: a third of the body is expected to show tilt where at least this share of it has fine relief
+                        # (scales) in the height map. Smooth naked skin on a fair loft that the cage follows bakes flat, and should:
+                        # the pufferfish trunk showed 53 % tilt only while its traced tables were rippled (6 % once faired)
+
+
+def p6(N, Mk, H=None):
+    """the normal map carries the form: every third of the body that has fine relief (all of them when no height map H is
+    given) has >= 10 % of texels tilted > 3 deg, at least one third does (a flat map is a failed bake), the map is not
+    inverted and not carrying the cage's shape (1st percentile of z >= P6_Z_P1_MIN), at most P6_SPECKS_MAX isolated specks remain
+    (> 25 deg from all 8 neighbours), no texel faces into the skin, and the two sides
     carry the same map. The left island lies in the upper half of the texture and the right island at the same place in
     the lower half (uv.py), so a texel and the one half a texture below it are twins on a body that is the same on both
     sides (every body the maker builds so far). A bake fault is never the same on both sides: the interior faces baked
@@ -283,7 +345,10 @@ def p6(N, Mk):
     if Mk.shape != N.shape[:2]: Mk = np.asarray(Image.fromarray(Mk.astype(np.uint8) * 255).resize(N.shape[:2][::-1])) > 127
     Nn = N / (np.linalg.norm(N, axis=-1, keepdims=True) + 1e-9)
     tilt = Nn[..., 2] < np.cos(np.radians(3)); cols = np.where(Mk.any(0))[0]; a, b = cols.min(), cols.max()
-    thirds = [float(tilt[:, a + k * (b - a) // 3: a + (k + 1) * (b - a) // 3][Mk[:, a + k * (b - a) // 3: a + (k + 1) * (b - a) // 3]].mean()) for k in range(3)]
+    third = lambda A, k: A[:, a + k * (b - a) // 3: a + (k + 1) * (b - a) // 3][Mk[:, a + k * (b - a) // 3: a + (k + 1) * (b - a) // 3]]
+    thirds = [float(third(tilt, k).mean()) for k in range(3)]
+    if H is not None and H.shape != N.shape[:2]: H = np.asarray(Image.fromarray(H.astype(np.float32)).resize(N.shape[:2][::-1]))
+    relief = [True] * 3 if H is None else [bool(float((third(H, k) > 0.05).mean()) >= P6_RELIEF_MIN) for k in range(3)]
     best = np.full(Nn.shape[:2], -1.0)
     for dy in (-1, 0, 1):
         for dx in (-1, 0, 1):
@@ -294,8 +359,8 @@ def p6(N, Mk):
     side = float((dot[both] < np.cos(np.radians(P6_SIDE_DEG))).mean()) if both.any() else 1.0
     twins = float(both.sum() / max(Mk.sum() / 2, 1))          # share of skin texels that have a twin: the islands are packed as twins
     return dict(P6_tilted_share_head_trunk_tail=[round(t, 3) for t in thirds], P6_specks=specks, P6_normal_z_p1=round(zp1, 3),
-                P6_backward_texels=back, P6_sides_differ_share=round(side, 4), P6_twin_texel_share=round(twins, 3),
-                P6_pass=min(thirds) >= 0.10 and specks <= 10 and zp1 > 0.2 and back <= P6_BACK_MAX * Mk.sum() and side <= P6_SIDE_MAX and twins >= 0.95)
+                P6_backward_texels=back, P6_sides_differ_share=round(side, 4), P6_twin_texel_share=round(twins, 3), P6_thirds_with_relief=relief,
+                P6_pass=min(t for t, r in zip(thirds + [max(thirds)], relief + [True]) if r) >= 0.10 and specks <= P6_SPECKS_MAX and zp1 >= P6_Z_P1_MIN and back <= P6_BACK_MAX * Mk.sum() and side <= P6_SIDE_MAX and twins >= 0.95)
 
 
 def validator(path):
@@ -316,7 +381,8 @@ def export_checks(out, st):
     npath = os.path.join(out, 'body_normal.png')
     if os.path.exists(npath):
         N = np.asarray(Image.open(npath)).astype(float) / 127.5 - 1
-        R.update(p6(N, np.load(os.path.join(out, 'body_mask.npy'))[::-1]))
+        hp = os.path.join(out, 'body_height.npy')
+        R.update(p6(N, np.load(os.path.join(out, 'body_mask.npy'))[::-1], np.load(hp)[::-1] if os.path.exists(hp) else None))
     for name in ('fish.glb', 'fish_LOD1.glb', 'fish_LOD2.glb'):
         if os.path.exists(os.path.join(out, name)): R[f'P8_validator_{name}'] = validator(os.path.join(out, name))
     R['P8_pass'] = all(v.get('errors', 1) == 0 for k, v in R.items() if k.startswith('P8_validator'))
@@ -408,13 +474,32 @@ def planted(C0, V0, VN0, form, rec):
     c = copy.deepcopy(C0); bodyf = [i for i, t in enumerate(C0['ftag']) if t == 'body']; a_, b_ = (np.array(c['uv'][bodyf[i]]) for i in (0, 40))
     c['uv'][bodyf[0]] = (a_ + b_.mean(0) - a_.mean(0)).tolist()
     PL['P5 (one skin face laid over another in UV)'] = run(c, V0)['P5_uv_overlap_texels'] > 0
-    yy, xx = np.mgrid[0:64, 0:64]; g = np.sin(xx / 5.0) * 0.9; nm = np.dstack([g, np.cos(yy % 32 / 4.0) * 0.3, np.ones((64, 64))])   # the same relief on both halves
+    yy, xx = np.mgrid[0:64, 0:64]; g = np.sin(xx / 5.0) * 0.5; nm = np.dstack([g, np.cos(yy % 32 / 4.0) * 0.3, np.ones((64, 64))])   # the same relief on both halves
     PL['P6 planted baseline passes'] = p6(nm, np.ones((64, 64), bool))['P6_pass']
     n2 = nm.copy(); n2[40:52, 10:30] = [0, 0, 1.0]
     PL['P6 (flat panel baked on one side only)'] = p6(n2, np.ones((64, 64), bool))['P6_sides_differ_share'] > P6_SIDE_MAX
     n2 = nm.copy(); n2[8:12, 10:20] = [0.3, 0, -0.95]; n2[40:44, 10:20] = [0.3, 0, -0.95]
     PL['P6 (patch baked from the inside, facing into the skin)'] = p6(n2, np.ones((64, 64), bool))['P6_backward_texels'] > P6_BACK_MAX * 64 * 64
     PL['P6 (flat normal map)'] = not p6(np.dstack([np.zeros((64, 64)), np.zeros((64, 64)), np.ones((64, 64))]), np.ones((64, 64), bool))['P6_pass']
+    n2 = nm.copy(); n2[4:28, 0:8] = [1.2, 0, 1.0]; n2[36:60, 0:8] = [1.2, 0, 1.0]
+    PL['P6 (a rim tilted 50 deg on both sides: the map carries the cage\'s shape)'] = p6(n2, np.ones((64, 64), bool))['P6_normal_z_p1'] < P6_Z_P1_MIN
+    n2 = nm.copy()
+    for y_, x_ in ((5, 5), (9, 20), (14, 40)): n2[y_, x_] = n2[y_ + 32, x_] = [0.9, 0.9, 0.3]
+    PL['P6 (three specks left on each side)'] = p6(n2, np.ones((64, 64), bool))['P6_specks'] > P6_SPECKS_MAX
+    from .form import Form
+    PL['FM1 planted baseline passes'] = form_fair(form)['FM1_pass']
+    r2 = copy.deepcopy(rec); xk = np.arange(0.0, form.XEND + 1e-9, 0.02); hw0 = np.array(rec['outline']['hw'])
+    r2['outline']['hw'] = [[float(x_), float(max(np.interp(x_, hw0[:, 0], hw0[:, 1]) + (0.006 if i % 2 else -0.006) * (0 < i < len(xk) - 1), 0.0))] for i, x_ in enumerate(xk)]
+    PL['FM1 (half-width rippled by 0.6 % SL from knot to knot)'] = form_fair(Form(r2))['FM1_ripple_deg'] > FM1_RIPPLE_MAX
+    f2 = Form(rec); ph = np.linspace(0, np.pi, 361); c_, s_ = np.abs(np.cos(ph)), np.sin(ph)       # a rhombus: a corner on the flank
+    f2.SECT = dict(x=np.array([0.5]), s=np.linspace(-1, 1, 3), w=np.array([[0.0, 1.0, 0.0]]), phi=ph, rho=(1 / (c_ + s_))[None],
+                   drho=(-(np.where(ph < np.pi / 2, -s_, s_) + np.cos(ph)) / (c_ + s_) ** 2)[None])
+    PL['FM1 (section with a corner on the flank)'] = form_fair(f2)['FM1_crease_deg'] > FM1_CREASE_MAX
+    flat = np.dstack([np.zeros((64, 64)), np.zeros((64, 64)), np.ones((64, 64))]); n2 = nm.copy(); n2[:, 22:42] = [0, 0, 1.0]
+    Hs = np.ones((64, 64)); Hn = Hs.copy(); Hn[:, 22:42] = 0
+    PL['P6 naked trunk (no relief in the height map) may bake flat'] = p6(n2, np.ones((64, 64), bool), Hn)['P6_pass']
+    PL['P6 (scaled trunk baked flat)'] = not p6(n2, np.ones((64, 64), bool), Hs)['P6_pass']
+    PL['P6 (flat normal map on naked skin all over)'] = not p6(flat, np.ones((64, 64), bool), np.zeros((64, 64)))['P6_pass']
     PL['P1 (40k tris)'] = not export_checks('/nonexistent', dict(tris_total=40000, bones=10))['P1_pass']
     good = dict(EX1_gape_max_err_pctSL=0.001, EX1_gape_moved_pctSL=6.0, EX2_flare_max_err_pctSL=0.001, EX2_flare_moved_pctSL=2.0,
                 interior_faces=10, lods=dict(LOD1=dict(tris=1, interior_tris=5), LOD2=dict(tris=1, interior_tris=2)),
