@@ -560,6 +560,10 @@ func _check(p: Dictionary, dt: float) -> void:
 	for side in ["L", "R"]:
 		var fin: Transform3D = p["leg" + side].finMat
 		var soles := _sole_points_full(fin)
+		if p["leg" + side].has("toeMat"):
+			# with a toe joint the toe end of the plate follows the toe bone (bent at the ball, toe frame origin = ball on the sole line)
+			var tm: Transform3D = p["leg" + side].toeMat
+			soles[2] = tm * Vector3(0, SOLE_TOE - 0.11, 0); soles[5] = tm * Vector3(SOLE_X, SOLE_TOE - 0.11, 0); soles[6] = tm * Vector3(-SOLE_X, SOLE_TOE - 0.11, 0)
 		var lowest_gap := INF
 		for sp_ in soles:
 			var h: Dictionary = wq.ray_down(sp_.x, sp_.z, sp_.y + 0.6, 2.0)
