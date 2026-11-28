@@ -3,7 +3,7 @@ tuck ring that turns the skin into the orbit (a real opening for the eye shells)
 
 Rules: the block takes the columns that pass within the eye margin of the rim, plus one each side; the rings are laid out in
 the loft's (x, theta) plane with radial spokes and spaced by length on the skin (no fold possible); the rim lies on the
-record eye circle in the side view (EY1); the tuck goes down the socket axis, scaled to the eye, and stays on its side.
+record eye circle in the side view (EY1); the tuck goes down the eye's axis, scaled to the eye, and stays on its side.
 """
 import numpy as np
 
@@ -23,10 +23,9 @@ def rim3(form, sg, ph):
 
 
 def socket_axis(form, sg):
-    """the rim's best plane normal, pointing out of the body."""
-    R = rim3(form, sg, np.linspace(0, 2 * np.pi, 360, endpoint=False)); c3 = R.mean(0)
-    ax = np.linalg.svd(R - c3)[2][2]
-    return ax if ax @ form.radial(c3) > 0 else -ax
+    """the eye's aim on side sg (form.Form._orbit): the orbit lining goes down it. Up to 0.5.x this was the rim's own best
+    plane on the loft, which leans up wherever the head falls away above the eye."""
+    return form.eye_axis(sg)
 
 
 def col_dist(B, j, xs, sg):
@@ -132,11 +131,13 @@ def build_patches(B):
 
 
 def shells(B, V):
-    """eye shell placement (iris dome + cornea are made in the exporter), seated on each rim ring."""
+    """eye shell placement (iris dome + cornea are made in the exporter), seated on each rim ring and aimed down the eye's
+    own axis. The rim lies in the plane square to that axis (the form's periorbital tissue carries the skin out to it), so
+    the shells sit true in the opening. Up to 0.5.x the aim was the normal of three rim points: the skin's facing at the
+    eye, further up than the skin round it, where real eyes aim below it."""
     eyes = []
     for sg, rim in B.eye['rims']:
-        R = V[rim]; ctr = R.mean(0); nrm = np.cross(R[len(R) // 4] - R[0], R[len(R) // 2] - R[0]); nrm /= np.linalg.norm(nrm)
-        if nrm[2] * sg < 0: nrm = -nrm
+        R = V[rim]; ctr = R.mean(0); nrm = B.form.eye_axis(sg)
         eyes.append(dict(c=ctr, n=nrm, r=float(np.linalg.norm(R - ctr, axis=1).mean()),
                          r_side=float(np.linalg.norm((R - ctr)[:, :2], axis=1).mean()), side=sg))
     return eyes

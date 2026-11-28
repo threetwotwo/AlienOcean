@@ -22,6 +22,9 @@ def dget(d, key, default, where):
     if isinstance(d, dict) and key in d: return d[key]       # a record may hold a bare number where a block is expected (0 = none)
     DEFAULTS.append(dict(input=f'{where}.{key}', source='DEFAULT', value=default)); return default
 
+EYE_BULGE, EYE_OVER, EYE_GROOVE = 0.12, 0.14, 0.1     # DEFAULTS: the old builder's periorbital bulge, brow overhang and groove, the values every Species record carries in record.eye
+GAZE_UNMEASURED = [0.15, 0.1, 0.98]    # the stand-in gaze Species writes where none was measured (gapfill README "Eye aim, round 1": fieldmap _unmeasured)
+
 def hex_rgb(h):
     h = h.lstrip('#'); return [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
 
@@ -70,6 +73,29 @@ def adapt(path, style=None):
     out['eye'] = dict(x=E['u'] * f, y=E['y'] * f, d=2 * E['R'] * f, orbit=dget(E, 'orbitR', E['R'] / 0.8, 'skeleton.eye') * f,
                       iris=get(E, 'iris', [0.92, 0.62, 0.18], need=False, where='skeleton.eye'), pupil=get(E, 'pupil', 0.42, need=False, where='skeleton.eye'))
     P('eye opening', 'record.skeleton.eye.u/y/R (R = visible eye, 0.8 orbitR); orbit ring from orbitR')
+    # tissue round the eye (form.Form._orbit): record.eye.bulge = how far the periorbital tissue stands the eye's edge proud
+    # of the skin, record.eye.over = how far the brow carries on above the eye; record.eye.groove = how far the
+    # eye's edge may lie under the skin (the furrow between tissue and globe); all read as shares of the eye radius.
+    PO = R.get('eye') if isinstance(R.get('eye'), dict) else {}
+    for k_, v_ in (('bulge', EYE_BULGE), ('over', EYE_OVER), ('groove', EYE_GROOVE)): out['eye'][k_] = float(dget(PO, k_, v_, 'eye'))
+    P('periorbital tissue', 'record.eye.bulge, record.eye.over, record.eye.groove (x eye radius)')
+    # the eye's aim, degrees: skeleton.eye.aim {up, fwd} when a record carries a measured one. Else the elevation of
+    # skeleton.eye.gaze where a record states its own (the stand-in GAZE_UNMEASURED on most records is no measurement, and
+    # the sign of its x is not settled between the old builder and the scans, so only the elevation is read). Else the
+    # form's rule: the skin ring's facing less the scans' offset (form.AIM_BELOW_SKIN).
+    aim = get(E, 'aim', None, need=False); gz = get(E, 'gaze', None, need=False)
+    if isinstance(aim, dict) and (aim.get('up') is not None or aim.get('fwd') is not None):
+        out['eye']['aim'] = dict(up=aim.get('up'), fwd=aim.get('fwd')); out['eye']['aim_source'] = 'record skeleton.eye.aim'
+        P('eye aim', 'record.skeleton.eye.aim (up, fwd; degrees)')
+    elif gz is not None and [round(float(v), 3) for v in gz] != GAZE_UNMEASURED:
+        g = np.array(gz, float); out['eye']['aim'] = dict(up=float(np.degrees(np.arcsin(g[1] / np.linalg.norm(g)))), fwd=None)
+        out['eye']['aim_source'] = 'elevation from record skeleton.eye.gaze; forward angle from the skin ring (DEFAULT)'
+        P('eye aim (elevation)', 'record.skeleton.eye.gaze (a stated gaze, not the unmeasured stand-in)')
+    else: DEFAULTS.append(dict(input='skeleton.eye.aim', source='DEFAULT', value='skin ring facing - 7.5 deg, kept in the scan range (form.AIM_BELOW_SKIN, AIM_UP, AIM_FWD)'))
+    # the skin ring's own target (checks EA1) may be stated by a record that has a same-genus scan
+    su = get(E, 'skin_up', None, need=False)
+    if su is not None: out['eye']['skin_up'] = float(su); P('skin facing round the eye (EA1 target)', 'record.skeleton.eye.skin_up (degrees)')
+    else: DEFAULTS.append(dict(input='skeleton.eye.skin_up', source='DEFAULT', value='scan line from eye height (checks.EA1_LINE)'))
     seam = np.array(get(R, 'mouth.seam')) * f
     out['mouth'] = dict(line=seam.tolist(), maxilla_h=float(get(R, 'mouth.maxilla_h', 0.18 * (seam[-1, 0] - seam[0, 0]) + 0.012, need=False)))
     P('mouth cleft + maxilla', 'record.mouth.seam')

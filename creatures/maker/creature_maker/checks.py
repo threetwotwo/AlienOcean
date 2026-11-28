@@ -168,7 +168,8 @@ def eye_aim_checks(C, V, form, rec):
     bu = (st['up'] - EA2_STATED_TOL, st['up'] + EA2_STATED_TOL) if st.get('up') is not None else EA2_UP
     bf = (st['fwd'] - EA2_STATED_TOL, st['fwd'] + EA2_STATED_TOL) if st.get('fwd') is not None else EA2_FWD
     R['EA2_band_up'] = list(bu); R['EA2_band_fwd'] = list(bf)
-    R['EA2_pass'] = bool(all(bu[0] <= v <= bu[1] for v in ups) and all(bf[0] <= v <= bf[1] for v in fwds) and max(seat) <= EA2_SEAT_MAX)
+    ok = lambda v, band: band[0] <= round(v, 1) <= band[1]                        # to 0.1 deg: an aim held at the band's edge is inside
+    R['EA2_pass'] = bool(all(ok(v, bu) for v in ups) and all(ok(v, bf) for v in fwds) and max(seat) <= EA2_SEAT_MAX)
     return R
 
 
