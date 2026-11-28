@@ -41,8 +41,7 @@ def rim_chart(B, sg, n=720):
     """the record's eye circle (side view) lifted onto side sg of the loft and unrolled into the chart."""
     form, chart = B.form, B.chart; ex, eyy, er = form.ex, form.eyy, form.er
     ph = np.linspace(0, 2 * np.pi, n, endpoint=False); qx = ex + er * np.cos(ph); qy = eyy + er * np.sin(ph)
-    c, a_, b_ = form.sec(qx); dy = qy - c; nn = np.where(dy > 0, form.NUP(qx), form.NLO(qx))
-    zz = b_ * np.maximum(1 - np.abs(dy / a_) ** nn, 1e-6) ** (1 / nn)
+    zz = form.z_on(qx, qy)
     return chart.chart(qx, form.theta_of(qx, qy, sg * zz))
 
 

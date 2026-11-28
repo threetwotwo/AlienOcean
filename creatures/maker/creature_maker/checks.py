@@ -366,6 +366,8 @@ def check(out, record_path, with_planted=False, sweep=True):
         R['PLANTED_caught'] = planted(C, Z['V'], Z['VN'], form, rec)
         from .silhouette import planted_sil
         R['PLANTED_caught'].update(planted_sil(C, Z['V'], rec))
+        from .silhouette import planted_sil2
+        R['PLANTED_caught'].update(planted_sil2(C, Z['V']))
     J = lambda o: bool(o) if isinstance(o, np.bool_) else (float(o) if isinstance(o, np.generic) else str(o))
     json.dump(R, open(os.path.join(out, 'checks.json'), 'w'), indent=1, default=J)
     return R
