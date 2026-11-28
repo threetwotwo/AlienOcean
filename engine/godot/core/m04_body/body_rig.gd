@@ -26,6 +26,7 @@ const HARD_MISS := 0.03     # m: a planted foot this far out of reach steps at o
 const MAX_STEP := 1.0 / 55.0     # longest rig step; a longer frame is caught up in sub-steps (30 Hz runs as two 60 Hz steps)
 const SWIM_ANKLE_RATE := 6.0
 var swim_ankle_rel := {}
+var swim_fold := {}         # per side: how far each leg is folded toward trim to keep the foot out of the sand
 var swing_floor := {"L": NAN, "R": NAN}
 var swing_floor_v := {"L": 0.0, "R": 0.0}     # the speed the swing floor is rising at
 var pelv_yaw_off := 0.0     # pelvis held back by a planted foot's hip rotation range (fast turns)
@@ -38,6 +39,10 @@ var last_stepping := {"L": false, "R": false}
 var plant_off := {"L": Vector2.ZERO, "R": Vector2.ZERO}     # where the contact touched down, against where the plant puts it
 var plant_fresh := {"L": true, "R": true}
 var land_age := {"L": 0.0, "R": 0.0}     # seconds each foot has been planted
+const SWIM_SOLE_CLEAR := 0.015   # swimming: sole plate kept this far above the floor
+const SWIM_KNEE_CLEAR := 0.07    # and the knee joint centre (the knee cap's radius plus a little)
+const SWIM_FOLD_W_IN := 40.0    # swimming leg fold spring, rad/s: folding away from the sand
+const SWIM_FOLD_W_OUT := 7.0    # and unfolding again
 const FOOT_R := 0.035       # foot half-width used for wall clearance
 ## The sole plate's heel, ball-centre and toe ends plus its four corners in the foot frame (the mannequin's sole box:
 ## centre (0, 0.058, -0.046), 0.056 x 0.168), 4 mm above its underside: what the toe lift keeps out of the ground.
@@ -216,6 +221,23 @@ func solve_noclip_arm(sh: Vector3, target: Vector3, pole: Vector3, surf, o := {}
 			ik = BM.two_bone(sh, eff_t, cp, upper_arm_len, forearm_len, sr, sm, mf)
 	return ik
 
+## how far the solved leg's sole plate (or knee) is under the floor beneath it, plus the clearance wanted
+## (a "floor" above her hips is a ledge or slab she is passing under or beside, not ground the leg can fold away from)
+func _leg_floor_short(solved: Dictionary, get_floor, clear: float) -> float:
+	var short := 0.0
+	var top: float = solved.ik.root.y - 0.10
+	# the floor is sampled once, under the lowest point of the plate (two rays a leg: this runs every swimming tick)
+	var low := Vector3(0, INF, 0)
+	for e in SOLE_PTS:
+		var q: Vector3 = solved.finMat * e
+		if q.y < low.y: low = q
+	var fy: float = get_floor.call(low.x, low.z)
+	if is_finite(fy) and fy < top: short = fy + clear - low.y
+	var kq: Vector3 = solved.ik.mid
+	var fk: float = get_floor.call(kq.x, kq.z)
+	if is_finite(fk) and fk < top: short = maxf(short, fk + SWIM_KNEE_CLEAR - kq.y)
+	return short
+
 func solve_noclip_leg(hip: Vector3, raw_ankle: Vector3, side: float, pd: Vector3, pf: Vector3, surf, lo := {}) -> Dictionary:
 	var at := raw_ankle
 	if surf != null and not thalassa_exact and surf.has("ray"):
@@ -258,6 +280,22 @@ func solve_noclip_leg(hip: Vector3, raw_ankle: Vector3, side: float, pd: Vector3
 			noclip_off[side] = off
 			if off.distance_to(want) > 0.002:
 				solved = BM.leg(hip, raw_ankle + off, side, pd, pf, thigh_len, shin_len, lo)
+			if not thalassa_exact and surf.has("ray"):
+				# FIX (stress B42 at 30 Hz, found by the swimming sole check): rising past a slab edge the toes went 15 cm
+				# into the slab, deeper than the probes' radius, so the nearest-surface probes saw nothing (and the rate limit above
+				# held the foot in). Rays from the
+				# ankle to the toe tip and the heel find a face it crosses at any depth; the foot comes back out by what is past it.
+				for _r in 2:
+					var out := Vector3.ZERO
+					var fm: Transform3D = solved.finMat
+					for tip in [solved.ik.eff + solved.finDir * 0.16, fm * Vector3(0, -0.03, -0.05)]:     # toe tip, heel
+						var th: Dictionary = surf.ray.call(solved.ik.eff, tip)
+						if not th.is_empty():
+							var o: Vector3 = th.normal * ((tip - th.position).dot(-th.normal) + 0.02)
+							if o.length() > out.length(): out = o
+					if out == Vector3.ZERO: break
+					noclip_off[side] = noclip_off.get(side, Vector3.ZERO) + out
+					solved = BM.leg(hip, solved.ik.eff + out, side, pd, pf, thigh_len, shin_len, lo)
 	return solved
 
 func solve_head(dt: float, chest_pos: Vector3, neck_anchor: Vector3, c_right: Vector3, c_up: Vector3, c_fwd: Vector3, look_dir: Vector3, lim: Dictionary) -> Dictionary:
@@ -695,6 +733,11 @@ func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary,
 			_support_y_init = true
 	var smooth_support_y: float = support_y_spring.step(raw_support_y, 0.20, dt) if is_finite(raw_support_y) else -INF
 	var clear_above := (cam_pre.y - smooth_support_y) if is_finite(smooth_support_y) else 99.0
+	if not thalassa_exact and s.vel.y < 0.0:
+		# FIX (Mac playtest, stress B44): sinking onto the bottom she levelled out only once there (the blend and the
+		# spine spring lag ~0.5 s), so she arrived still half upright with her hips at the sand and her legs in it.
+		# Judge the clearance she will have 0.9 s on, at the speed she is sinking.
+		clear_above += s.vel.y * 0.9
 	var raw_near := (1.0 - smoothstep(0.68, 1.95, clear_above)) * (1.0 - tread)
 	var near_bottom := clampf(seabed_align_spring.step(raw_near, 0.28, dt), 0.0, 1.0)
 	seabed_align_blend = near_bottom
@@ -755,7 +798,13 @@ func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary,
 	var raw_pelv_y := raw_neck.y + spine_dir.y * 0.470
 	if is_finite(smooth_support_y):
 		var min_pelv := smooth_support_y + 0.28
-		if raw_pelv_y < min_pelv: want_lift = clampf(min_pelv - raw_pelv_y, 0.0, 0.42)
+		var pelv_judge := raw_pelv_y
+		if not thalassa_exact:
+			# FIX (Mac playtest, stress B44): this lift keeps her hips off the sand, but through a 0.14 s spring it came
+			# late when she sank onto the bottom, and her hips (and legs) went into it. Lift for where the hips will be
+			# that spring's lag on, at the speed she is sinking.
+			pelv_judge += minf(0.0, s.vel.y) * 0.18
+		if pelv_judge < min_pelv: want_lift = clampf(min_pelv - pelv_judge, 0.0, 0.42)
 	var whole_lift: float = swim_lift_spring.step(want_lift, 0.14, dt)
 	var want_spine := Vector3.ZERO
 	if query != null:
@@ -1102,10 +1151,65 @@ func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary,
 			"anklePitchRad": -(0.28 + sim_foot * 0.58), "ankleRollRad": foot_roll * side, "minAnklePitchRad": -0.96,
 			"maxAnklePitchRad": 0.44, "groundBlend": gb, "groundFwd": sfw, "groundUp": floor_n}
 		var solved: Dictionary
+		var nc_saved: Vector3 = noclip_off.get(side, Vector3.ZERO)     # the clearance rate limit steps once a tick
 		if surf_env != null:
 			solved = solve_noclip_leg(hip, ankle, side, spine_dir, body_belly, surf_env, opts)
 		else:
 			solved = BM.leg(hip, ankle, side, spine_dir, body_belly, thigh_len, shin_len, opts)
+		var fold_live: bool = swim_fold.get(side, Vector2.ZERO).x > 1e-4
+		var near_sand := not is_finite(floor_y) or ankle.y - floor_y < 0.55 or minf(solved.ik.mid.y, hip.y) - floor_y < 0.30
+		if not thalassa_exact and get_floor != null and (near_sand or fold_live):
+			# FIX (Mac playtest, stress B44): settling onto the floor, the pointed feet went 30 cm into the sand. The
+			# seabed lift above only keeps the ANKLE 12 cm up, through a lagging spring, and raising the ankle alone
+			# can't help once the hips are low: the hip can't extend far enough. A diver near the bottom folds instead
+			# (knees bent toward the sand, fins up behind: trim). Measure the solved sole plate and knee against the
+			# floor and fold the leg toward that trim pose by the least amount that clears; the fold comes in as fast
+			# as the sand does and lets go slowly.
+			var fold_need := 0.0
+			var trim := hip + spine_dir * 0.40 - body_belly * 0.24 + body_right * (side * 0.06)
+			var base := ankle
+			# standing on the bottom the plate rests on the sand; sinking, the fold starts early by what 0.12 s of sinking covers
+			var clear := lerpf(SWIM_SOLE_CLEAR, 0.004, gb) + maxf(0.0, -s.vel.y) * 0.12 * (1.0 - gb)
+			# the search uses the plain leg solve (the rock-clearance passes are costly); the chosen fold gets the full one
+			var solve_at := func(f: float) -> Dictionary:
+				return BM.leg(hip, base.lerp(trim, f), side, spine_dir, body_belly, thigh_len, shin_len, opts)
+			if _leg_floor_short(solved, get_floor, clear) > 0.0005:
+				# coarse steps, then halve between the last fold that fails and the first that clears, so the fold
+				# moves continuously (1/8 steps alone made the ankle jump)
+				var lo_f := 0.0
+				var hi_f := -1.0
+				for k in range(1, 13):     # past 1 the fold carries on beyond trim (shins near vertical)
+					var f := float(k) / 8.0
+					if _leg_floor_short(solve_at.call(f), get_floor, clear) <= 0.0005:
+						hi_f = f; break
+					lo_f = f
+				if hi_f < 0.0:
+					fold_need = lo_f
+				else:
+					for _b in 5:
+						var mf := (lo_f + hi_f) * 0.5
+						if _leg_floor_short(solve_at.call(mf), get_floor, clear) <= 0.0005: hi_f = mf
+						else: lo_f = mf
+					fold_need = hi_f
+			# a critically damped spring carries the fold: quick in (the sinking look-ahead in `clear` covers its lag),
+			# slow out, and never a jump in the ankle's speed
+			var fs: Vector2 = swim_fold.get(side, Vector2.ZERO)
+			var w_f := SWIM_FOLD_W_IN if fold_need > fs.x else SWIM_FOLD_W_OUT
+			var n_sub := maxi(1, ceili(dt / 0.004))
+			for _i in n_sub:
+				var h := dt / n_sub
+				fs.y += (w_f * w_f * (fold_need - fs.x) - 2.0 * w_f * fs.y) * h
+				fs.x += fs.y * h
+			fs.x = clampf(fs.x, 0.0, 1.5)
+			swim_fold[side] = fs
+			var fold := fs.x
+			if fold > 1e-4:
+				ankle = base.lerp(trim, fold)
+				if surf_env != null:
+					noclip_off[side] = nc_saved
+					solved = solve_noclip_leg(hip, ankle, side, spine_dir, body_belly, surf_env, opts)
+				else:
+					solved = BM.leg(hip, ankle, side, spine_dir, body_belly, thigh_len, shin_len, opts)
 		solved.ik.softStress = leg_spring.get_stress()
 		solved.ik.groundContact = ground_contact
 		return {"ik": solved.ik, "finMat": solved.finMat, "finDir": solved.finDir, "groundContact": ground_contact, "floorNormal": floor_n}
