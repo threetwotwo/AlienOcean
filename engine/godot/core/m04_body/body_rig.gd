@@ -315,7 +315,135 @@ func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense
 		for i in n - 1:
 			_update_swim_step(dt / n, s, _input, total_time - dt * float(n - 1 - i) / n, env, sense, on_stroke_pull, on_shore_footstep)
 		dt /= n
-	return _update_swim_step(dt, s, _input, total_time, env, sense, on_stroke_pull, on_shore_footstep)
+	var pose := _update_swim_step(dt, s, _input, total_time, env, sense, on_stroke_pull, on_shore_footstep)
+	if not thalassa_exact:
+		pose = _skeleton(pose, dt, s, env)
+	return pose
+
+## M04 skeleton 0.7: the full bone chain the rig's anchors imply (spine_01..03, clavicles, toes), on top of the solved
+## pose. Spine: a Hermite curve from the pelvis to the chest along their up axes, twist and bend shared along it.
+## Shoulder girdle: the clavicle lifts and comes forward with the upper arm (scapulohumeral rhythm, ~1 deg of girdle
+## per 2 deg of arm past 30 deg), the arm re-solved from the moved shoulder to the same hand. Toes: bend at the ball
+## so a planted foot rolling onto its ball keeps its toes on the ground.
+var girdle := {"L": Vector3.ZERO, "R": Vector3.ZERO}
+var girdle_v := {"L": Vector3.ZERO, "R": Vector3.ZERO}
+var toe_bend := {"L": 0.0, "R": 0.0}
+const BALL_Y := 0.11          # foot local: the ball of the foot (toe joint), along the foot
+const SOLE_Z := -0.046        # foot local: the sole plane
+
+static func _ortho(b: Basis) -> Basis:
+	return b.orthonormalized()
+
+## a bone from a to b: +y along it, +z toward ref (the joint's bend side), as the skin binds it
+static func seg_xf(a: Vector3, b: Vector3, ref: Vector3) -> Transform3D:
+	var y := (b - a).normalized()
+	var z := ref - y * ref.dot(y)
+	if z.length() < 1e-4: z = y.cross(Vector3.RIGHT if absf(y.x) < 0.9 else Vector3.FORWARD)
+	z = z.normalized()
+	return Transform3D(Basis(y.cross(z), y, z), a)
+
+func _skeleton(pose: Dictionary, dt: float, s, env: Dictionary) -> Dictionary:
+	var skel := {}
+	var pm: Transform3D = pose.pelvisMat
+	var cm: Transform3D = pose.chestMat
+	var pb := _ortho(pm.basis)
+	var cb := _ortho(cm.basis)
+	var p0: Vector3 = pose.pelvisPos
+	var p3: Vector3 = pose.chestPos
+	var L := p0.distance_to(p3)
+	var t0 := pb.y * L
+	var t1 := cb.y * L
+	var qp := pb.get_rotation_quaternion()
+	var qc := cb.get_rotation_quaternion()
+	skel["pelvis"] = Transform3D(pb, p0)
+	var names := ["spine_01", "spine_02"]
+	var us := [0.36, 0.68]
+	for i in 2:
+		var u: float = us[i]
+		var h00 := 2.0 * u * u * u - 3.0 * u * u + 1.0
+		var h10 := u * u * u - 2.0 * u * u + u
+		var h01 := -2.0 * u * u * u + 3.0 * u * u
+		var h11 := u * u * u - u * u
+		var pos := p0 * h00 + t0 * h10 + p3 * h01 + t1 * h11
+		var tan := (p0 * (6.0 * u * u - 6.0 * u) + t0 * (3.0 * u * u - 4.0 * u + 1.0) + p3 * (-6.0 * u * u + 6.0 * u) + t1 * (3.0 * u * u - 2.0 * u)).normalized()
+		var b := Basis(qp.slerp(qc, u))
+		var tw := Quaternion(b.y, tan) if b.y.dot(tan) > -0.99 else Quaternion()
+		skel[names[i]] = Transform3D(Basis(tw) * b, pos)
+	skel["spine_03"] = Transform3D(cb, p3)
+	skel["neck"] = Transform3D(_ortho(pose.headMat.basis), pose.neckPos)
+	skel["head"] = Transform3D(_ortho(pose.headMat.basis), pose.headMat.origin)
+	# shoulder girdle
+	var c_up := cb.y
+	var c_right := cb.x
+	var c_fwd := -cb.x.cross(cb.y)
+	var surf = null
+	if env.get("nearest_surface") != null and s.ground_walk_blend < 0.15:
+		surf = {"floor_height": env.get("floor_height"), "nearest_surface": env.get("nearest_surface")}
+	for side in ["L", "R"]:
+		var sd := -1.0 if side == "L" else 1.0
+		var arm: Dictionary = pose["arm" + side]
+		var sh0: Vector3 = pose["shoulder" + side]
+		var sc := p3 + c_up * 0.035 + c_right * (sd * 0.018)          # sternoclavicular joint
+		var ua: Vector3 = (arm.mid - arm.root).normalized()
+		var elev := asin(clampf(ua.dot(c_up), -1.0, 1.0)) + PI * 0.5   # 0 hanging, PI overhead
+		var lift := clampf((elev - 0.52) * 0.5, 0.0, 0.62) * 0.55          # the clavicle's share of the girdle's rise
+		var reach := clampf(ua.dot(c_fwd), 0.0, 1.0) * 0.30 - clampf(-ua.dot(c_fwd), 0.0, 1.0) * 0.12
+		var want := Vector3(lift, reach, 0.0)
+		# critically damped (half-life ~60 ms): the girdle follows the arm, a beat behind, never snapping
+		var w := 11.5
+		var g: Vector3 = girdle[side]
+		var gv: Vector3 = girdle_v[side]
+		var acc := (want - g) * (w * w) - gv * (2.0 * w)
+		gv += acc * dt
+		g += gv * dt
+		girdle[side] = g; girdle_v[side] = gv
+		var cv := sh0 - sc
+		var rot := Basis(c_fwd, -sd * g.x) * Basis(c_up, sd * g.y)
+		var sh := sc + rot * cv
+		var dsh := sh - sh0
+		skel["clavicle_" + side.to_lower()] = seg_xf(sc, sh, c_fwd)
+		if dsh.length() > 1e-4:
+			var pole: Vector3 = arm.mid + (arm.mid - (arm.root + arm.eff) * 0.5).normalized() * 0.3
+			var na: Dictionary = solve_noclip_arm(sh, arm.eff, pole, surf, {"softReach": 0.985, "softMargin": 0.04})
+			var hm: Transform3D = pose["hand" + side + "Mat"]
+			hm.origin += na.eff - arm.eff
+			pose["hand" + side + "Mat"] = hm
+			pose["arm" + side] = na
+			pose["shoulder" + side] = sh
+			pose["clavicle" + side] = sc.lerp(sh, 0.45)
+		var a2: Dictionary = pose["arm" + side]
+		skel["upperarm_" + side.to_lower()] = seg_xf(a2.root, a2.mid, a2.bendAxis)
+		skel["lowerarm_" + side.to_lower()] = seg_xf(a2.mid, a2.eff, a2.bendAxis)
+		skel["hand_" + side.to_lower()] = Transform3D(_ortho(pose["hand" + side + "Mat"].basis), pose["hand" + side + "Mat"].origin)
+	# toes
+	var get_floor = env.get("floor_height")
+	for side in ["L", "R"]:
+		var lg: Dictionary = pose["leg" + side]
+		var fm: Transform3D = lg.finMat
+		var ball: Vector3 = fm * Vector3(0, BALL_Y, SOLE_Z)
+		var want_b := 0.0
+		var planted: bool = get_floor != null and s.ground_walk_blend > 0.5 and not s.shore_is_airborne
+		if planted:
+			var g_b: float = get_floor.call(ball.x, ball.z)
+			var ffw := fm.basis.y.normalized()
+			if is_finite(g_b) and ball.y - g_b < 0.012:
+				# the ball is down: the toes lie on the ground ahead of it (foot pitched toe-down = bend back)
+				var tip := ball + ffw * (0.142 - BALL_Y)
+				var g_t: float = get_floor.call(tip.x, tip.z)
+				if is_finite(g_t):
+					var drop := (ball.y - tip.y) - (g_b - g_t)       # how far the rigid toe would sink below the ground line
+					want_b = clampf(atan2(drop, 0.142 - BALL_Y), 0.0, 0.9)
+		var k := 1.0 - exp(-dt / 0.035)
+		toe_bend[side] = lerpf(toe_bend[side], want_b, k)
+		var tb := fm.basis * Basis(Vector3.RIGHT, toe_bend[side])
+		var toe := Transform3D(tb, ball)
+		lg["toeMat"] = toe
+		skel["thigh_" + side.to_lower()] = seg_xf(lg.ik.root, lg.ik.mid, lg.ik.bendAxis)
+		skel["calf_" + side.to_lower()] = seg_xf(lg.ik.mid, lg.ik.eff, lg.ik.bendAxis)
+		skel["foot_" + side.to_lower()] = Transform3D(_ortho(fm.basis), fm.origin)
+		skel["ball_" + side.to_lower()] = Transform3D(_ortho(toe.basis), toe.origin)
+	pose["skel"] = skel
+	return pose
 
 func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary, sense = null, on_stroke_pull = null, on_shore_footstep = null) -> Dictionary:
 	_step_dt = clampf(dt, 0.0001, 0.05)
