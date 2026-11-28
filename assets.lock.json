@@ -191,23 +191,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_boulder_1_L0.glb.import",
-   "md5": "cbf1d13eed675608a05e5ba05d8953b5",
-   "bytes": 1185,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_brain_2_L0.glb",
    "md5": "2715bbbbf98e4cd231f4c6ed3a74729d",
    "bytes": 27008,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_brain_2_L0.glb.import",
-   "md5": "33eefeb8a56d0a2a6bd2ca5e6319cfdf",
-   "bytes": 1179,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -219,23 +205,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_finger_4_L0.glb.import",
-   "md5": "9d173bbaa7b44a7a4bd41704f1fd85f1",
-   "bytes": 1182,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_floor_0_0_L0.glb",
    "md5": "41244c390f4e4051f957791caed9bd5d",
    "bytes": 260440,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_0_0_L0.glb.import",
-   "md5": "b7de6730bd22686dbbdbc6ff20ee96e2",
-   "bytes": 1185,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -247,23 +219,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_0_1_L0.glb.import",
-   "md5": "105846f071ef7138cf956c4e1ba03d71",
-   "bytes": 1185,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_floor_0_2_L0.glb",
    "md5": "eae05861e107dfa6f4467bd6c0ed2fbb",
    "bytes": 260424,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_0_2_L0.glb.import",
-   "md5": "739418ef0cfb9302c71927d4740a0263",
-   "bytes": 1184,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -275,23 +233,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_0_3_L0.glb.import",
-   "md5": "d002f87f4fc175b2892b97d7eb8c65b7",
-   "bytes": 1184,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_floor_1_0_L0.glb",
    "md5": "890d3f83e8f5c9884b89858b5653475c",
    "bytes": 260424,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_1_0_L0.glb.import",
-   "md5": "b573ea87dee74d4873d9531e814e877a",
-   "bytes": 1185,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -303,23 +247,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_1_1_L0.glb.import",
-   "md5": "d62cce7a110e0d74f0b9019cae513441",
-   "bytes": 1185,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_floor_1_2_L0.glb",
    "md5": "412ada88d84bfd42d9585e1e89a87e6b",
    "bytes": 260404,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_1_2_L0.glb.import",
-   "md5": "273a35c9ec5562093fb2b0eeb5d3dc92",
-   "bytes": 1185,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -331,23 +261,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_1_3_L0.glb.import",
-   "md5": "4371259ec7c4795228e9f9a05430b79e",
-   "bytes": 1184,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_floor_2_0_L0.glb",
    "md5": "9eee9807b98e3b1d46a28199420f1edc",
    "bytes": 260424,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_2_0_L0.glb.import",
-   "md5": "58d545e31017d416587ca514971e9d83",
-   "bytes": 1185,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -359,23 +275,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_2_1_L0.glb.import",
-   "md5": "53945c5aa4789597447f9a6fb450264e",
-   "bytes": 1184,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_floor_2_2_L0.glb",
    "md5": "88d80bcf6d5da30eea5488fe9c9101c2",
    "bytes": 260408,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_2_2_L0.glb.import",
-   "md5": "6a87c173013f8bb4a67ddfbd43a92d5a",
-   "bytes": 1184,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -387,23 +289,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_2_3_L0.glb.import",
-   "md5": "67b729bba82c329ee4d514f1e9e3360e",
-   "bytes": 1185,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_floor_3_0_L0.glb",
    "md5": "7af5d1af0d53897a5444369beadcacc6",
    "bytes": 260440,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_3_0_L0.glb.import",
-   "md5": "37e7457efc350c396009fa1813d1e40e",
-   "bytes": 1185,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -415,23 +303,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_3_1_L0.glb.import",
-   "md5": "9dc6d6e2ad6928a67535a023a590c666",
-   "bytes": 1185,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_floor_3_2_L0.glb",
    "md5": "7dda6c0e31cbc12d93f3190a52a08895",
    "bytes": 260420,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_3_2_L0.glb.import",
-   "md5": "3080158a4763e811accdf165cad654cd",
-   "bytes": 1184,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -443,23 +317,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_floor_3_3_L0.glb.import",
-   "md5": "d64112cd78bd23e9178e614f512747f0",
-   "bytes": 1185,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m1_0_0_L0.glb",
    "md5": "02e54c00b2da583cd7546ae037bfd1e7",
    "bytes": 3251332,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m1_0_0_L0.glb.import",
-   "md5": "d73d70dbd18b509ce7c502ae3a17c386",
-   "bytes": 1203,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -471,23 +331,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_0_0_L0.glb.import",
-   "md5": "c539502b15d2dfb4e88f5d959589cf8d",
-   "bytes": 1203,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_0_1_L0.glb",
    "md5": "21843a5a8688f444f5d7d02465ed4452",
    "bytes": 2740332,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_0_1_L0.glb.import",
-   "md5": "31778c595ea54f39a36722467ec383fe",
-   "bytes": 1203,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -499,23 +345,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_1_0_L0.glb.import",
-   "md5": "8bf539fd095d872a9b3ad26181f26ef7",
-   "bytes": 1203,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_1_1_L0.glb",
    "md5": "c74cafbecd163e3175283cc621387c9e",
    "bytes": 6521740,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_1_1_L0.glb.import",
-   "md5": "f527a954d7038edbf7ddaf9f8e0e31a8",
-   "bytes": 1203,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -527,23 +359,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_1_2_L0.glb.import",
-   "md5": "145c0d115cf12bfd8ed1329918a93036",
-   "bytes": 1203,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_1_3_L0.glb",
    "md5": "0c9188fb8f4abb3f3d3db091eb6edd14",
    "bytes": 626828,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_1_3_L0.glb.import",
-   "md5": "d1bb68398ca7121787587db79418fbc5",
-   "bytes": 1202,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -555,23 +373,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_2_0_L0.glb.import",
-   "md5": "ffd106872c490ce528b245539fd17025",
-   "bytes": 1203,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_2_1_L0.glb",
    "md5": "ba8d111025431d3373cf8094e85e82f6",
    "bytes": 3145044,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_2_1_L0.glb.import",
-   "md5": "f9dedf2621150bcca1689face9833327",
-   "bytes": 1203,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -583,23 +387,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m2_2_2_L0.glb.import",
-   "md5": "aaef62e4b66bce9cf30871a65deb2ee4",
-   "bytes": 1203,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m3_0_0_L0.glb",
    "md5": "abeef71085df1db11d05edc6fb6a8ab7",
    "bytes": 3950384,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m3_0_0_L0.glb.import",
-   "md5": "355a6393aeb02bcfea7fc8fab39d7b1d",
-   "bytes": 1203,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -611,23 +401,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_seagrass_m3_1_0_L0.glb.import",
-   "md5": "5751f54b10b0ced61b6347e1be308cae",
-   "bytes": 1203,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/lagoon_base/LG_staghorn_3_L0.glb",
    "md5": "adbd1d67983045857d359c5c395c8f04",
    "bytes": 321272,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
-   "path": "engine/godot/assets/world/lagoon_base/LG_staghorn_3_L0.glb.import",
-   "md5": "f14c541310ceff5fc52095c80a2d1c0b",
-   "bytes": 1188,
    "store": "project files plans/engine_godot/shot_assets/pieces/",
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
@@ -639,23 +415,9 @@
    "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
   },
   {
-   "path": "engine/godot/assets/world/lagoon_base/LG_table_5_L0.glb.import",
-   "md5": "ba296157af64f510aae52a81c0c20fa9",
-   "bytes": 1179,
-   "store": "project files plans/engine_godot/shot_assets/pieces/",
-   "built_by": "engine thread: lagoon pieces for tools/lagoon_shots.gd (shot_assets/pieces)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_Coat_Tree_BC.png",
    "md5": "ebc7afeec1a134df1bfdb211c2b6a64d",
    "bytes": 468254,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_Coat_Tree_BC.png.import",
-   "md5": "f143f2af32f0156ad0722715610e8f37",
-   "bytes": 968,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -667,23 +429,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_Coat_Tree_N.png.import",
-   "md5": "0ff054c035a9e767765755a655b0881d",
-   "bytes": 964,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_Coat_Tree_ORM.png",
    "md5": "b79fc6a06fccece4499c45d7deef0fb1",
    "bytes": 1062267,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_Coat_Tree_ORM.png.import",
-   "md5": "9b1d2a7b8d55a2a3a3b00db9934d1578",
-   "bytes": 971,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -695,23 +443,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_boulder_grown_BC.png.import",
-   "md5": "a811f5c77c677f2bf051210b35acda2d",
-   "bytes": 1001,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_CoralD_boulder_grown_N.png",
    "md5": "23f8c85106b7e867c6666461b1c2a36c",
    "bytes": 2283730,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_boulder_grown_N.png.import",
-   "md5": "b80e73acd397622783caec7a7d31b944",
-   "bytes": 998,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -723,23 +457,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_boulder_grown_ORM.png.import",
-   "md5": "c4e2511fbf69b14662c590dcfbfb6928",
-   "bytes": 1004,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_CoralD_brain_BC.png",
    "md5": "af6b4bebd4596fb3003dc090b62918fa",
    "bytes": 392867,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_brain_BC.png.import",
-   "md5": "2bde1afc3cc72cdd47247a5b444ec4c7",
-   "bytes": 976,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -751,23 +471,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_brain_N.png.import",
-   "md5": "18f1e32aa3d52e98ce9887938c4c1d19",
-   "bytes": 973,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_CoralD_brain_ORM.png",
    "md5": "a2ce7779a1e86a424b8f1ae7baa71afd",
    "bytes": 1358647,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_brain_ORM.png.import",
-   "md5": "bb79e8ee0b5c8928151347c877f2edb4",
-   "bytes": 980,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -779,23 +485,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_cathedral_BC.png.import",
-   "md5": "51459a58ee22ba62cf589f7858aa0dd4",
-   "bytes": 988,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_CoralD_cathedral_N.png",
    "md5": "7854483469cba4df1c5e1198e2bd212c",
    "bytes": 2268934,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_cathedral_N.png.import",
-   "md5": "df292212fdcb3063b337956b044fae30",
-   "bytes": 986,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -807,23 +499,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_cathedral_ORM.png.import",
-   "md5": "218babd755e3245abaf8822e57c92f73",
-   "bytes": 992,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_CoralD_fan_BC.png",
    "md5": "daadb534b73dd0870cfc4064a93b5ba0",
    "bytes": 145032,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_fan_BC.png.import",
-   "md5": "3a435674d66246d0c8bbdd6a6f142a5b",
-   "bytes": 971,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -835,23 +513,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_fan_N.png.import",
-   "md5": "f314ae0e82eb1e0da3f651d2750ad08f",
-   "bytes": 968,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_CoralD_fan_ORM.png",
    "md5": "00a73e2c9c7819a47eb28d935e53db39",
    "bytes": 705533,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_fan_ORM.png.import",
-   "md5": "c4a259d5ab3dc0eb232e0f530a41f30e",
-   "bytes": 974,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -863,23 +527,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_pillar_crown_BC.png.import",
-   "md5": "eef60dc73f1b6b171253344c39c944bf",
-   "bytes": 998,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_CoralD_pillar_crown_N.png",
    "md5": "9736a0797f8262e05c9e9776bdfca89b",
    "bytes": 2281909,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_pillar_crown_N.png.import",
-   "md5": "19a51ae3c2efa7268e6c6e4cdf7ade4a",
-   "bytes": 995,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -891,23 +541,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_pillar_crown_ORM.png.import",
-   "md5": "1e289e9d6b76588de70b16205cdf9d41",
-   "bytes": 1001,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_CoralD_staghorn_BC.png",
    "md5": "d3918395efb91c3c10be45626dd44225",
    "bytes": 312560,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_staghorn_BC.png.import",
-   "md5": "986454aba0f4a5e9ccd78e94e01cd7ee",
-   "bytes": 986,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -919,23 +555,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_staghorn_N.png.import",
-   "md5": "b3a4aec9ce4c7055550831dda5b069f6",
-   "bytes": 983,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_CoralD_staghorn_ORM.png",
    "md5": "9ad21b32d2dc16c28e36194e9e8f464d",
    "bytes": 1447288,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_staghorn_ORM.png.import",
-   "md5": "030ae01122708980d4d8af23a9d4d2e5",
-   "bytes": 988,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -947,23 +569,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_sun_chalice_BC.png.import",
-   "md5": "9f0cf52f0dc037503fff463c16442658",
-   "bytes": 995,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_CoralD_sun_chalice_N.png",
    "md5": "4060f7c7a98fb5e2e761750224e94edc",
    "bytes": 1547514,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_sun_chalice_N.png.import",
-   "md5": "ef5add6abf53f22d6fcd5432ec6ffe96",
-   "bytes": 992,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -975,23 +583,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_sun_chalice_ORM.png.import",
-   "md5": "89eb22d8018e50dddea11e4ace589a5c",
-   "bytes": 998,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_CoralD_table_BC.png",
    "md5": "fded994e190380a3788d18fae8931d24",
    "bytes": 309503,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_table_BC.png.import",
-   "md5": "61af9da35c963020aeba662579b5bdf9",
-   "bytes": 977,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -1003,23 +597,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_table_N.png.import",
-   "md5": "bc3ef9a5e5a6c527043a5265ce9b624e",
-   "bytes": 974,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_CoralD_table_ORM.png",
    "md5": "f11dff85c8756ee4f2ea32adad72374c",
    "bytes": 1424596,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_CoralD_table_ORM.png.import",
-   "md5": "62a8cfc7c0d60713ead443103d288d20",
-   "bytes": 979,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -1031,23 +611,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Base_BC.png.import",
-   "md5": "503a588318532a236bf21de59e61d94a",
-   "bytes": 982,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Base_N.png",
    "md5": "a38389ed798171a83c99db41aff02138",
    "bytes": 4726870,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Base_N.png.import",
-   "md5": "38ead1db270b851fdbd8bd891f9d66ca",
-   "bytes": 980,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -1059,23 +625,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Base_ORM.png.import",
-   "md5": "0e4fd807a8ac7f8f91522af563c839f3",
-   "bytes": 985,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Crust_BC.png",
    "md5": "b65f4d23eba10d03ded318afe656b671",
    "bytes": 1512121,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Crust_BC.png.import",
-   "md5": "0fc8a657c49c5e032682872c6c0ed3d4",
-   "bytes": 985,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -1087,23 +639,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Crust_N.png.import",
-   "md5": "95f48519ded371ec70db2ae157ccb214",
-   "bytes": 983,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Crust_ORM.png",
    "md5": "c0c7c611d4e114a303d551c479e598b7",
    "bytes": 2222442,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Crust_ORM.png.import",
-   "md5": "b3af3c7292a6e2ca9157162f0b470bf3",
-   "bytes": 989,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -1115,23 +653,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Turf_BC.png.import",
-   "md5": "a7c0769d3d52a81103fc234745ffb554",
-   "bytes": 983,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Turf_N.png",
    "md5": "a8e65ddbb08e6423ca550b2d140da852",
    "bytes": 8941190,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Turf_N.png.import",
-   "md5": "8d8cba3e79d78bb4c16cfd483665aaeb",
-   "bytes": 980,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -1143,23 +667,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_Rock_Reef_Turf_ORM.png.import",
-   "md5": "a86bd9c4106768db6ffe7948e0ceba5c",
-   "bytes": 986,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_SandField_A.png",
    "md5": "e5d73efa6f735df88ba8755ff879f9eb",
    "bytes": 11915334,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_SandField_A.png.import",
-   "md5": "105d374f0fc208b6dd63caa856c9c95f",
-   "bytes": 965,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -1171,23 +681,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_SandField_B.png.import",
-   "md5": "e9b1a9887246c3df5377bfad856ad427",
-   "bytes": 964,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_SandField_C.png",
    "md5": "2ed880ce1ee244bd69097ffe6ce2064d",
    "bytes": 10896411,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_SandField_C.png.import",
-   "md5": "47471b516e72a77902e23887aa54dc11",
-   "bytes": 964,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -1199,23 +695,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_SandField_D.png.import",
-   "md5": "7a4cebada96fcd7b1a282a170c2fb5d7",
-   "bytes": 964,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_SandFlow.png",
    "md5": "bc364fb60243090d775973ee04284429",
    "bytes": 1296420,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_SandFlow.png.import",
-   "md5": "909a7e2bc1947f7ca3c47e08fcc24736",
-   "bytes": 956,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -1227,23 +709,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_Sand_Debris_BCA.png.import",
-   "md5": "cffd80987832c4b0117d6a68c7f9ed32",
-   "bytes": 977,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_Sand_Debris_M.png",
    "md5": "b9c508ee513e46bf20dd847e18749091",
    "bytes": 1877925,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_Sand_Debris_M.png.import",
-   "md5": "fcea66271f8d50950cad2615c6498ad8",
-   "bytes": 971,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -1255,23 +723,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_Sand_Debris_N.png.import",
-   "md5": "eaa4cae5fd8b0e9c38d1af8d9f69e238",
-   "bytes": 971,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_Sand_Fine_BC.jpg",
    "md5": "9fb0da1042881ac95c904a987b1dcf51",
    "bytes": 1575730,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_Sand_Fine_BC.jpg.import",
-   "md5": "f78836efedc33162b4f05ee47d12f100",
-   "bytes": 968,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
@@ -1283,23 +737,9 @@
    "built_by": "world textures v12 (shot_assets/worldtex)"
   },
   {
-   "path": "engine/godot/assets/world/worldtex/T_Sand_Fine_M.png.import",
-   "md5": "fab1c56b3b49acd034a7b9a0e3c53321",
-   "bytes": 965,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
    "path": "engine/godot/assets/world/worldtex/T_Sand_Fine_N.png",
    "md5": "c458e860354d10adbc293119e727631b",
    "bytes": 8434758,
-   "store": "project files plans/engine_godot/shot_assets/worldtex/",
-   "built_by": "world textures v12 (shot_assets/worldtex)"
-  },
-  {
-   "path": "engine/godot/assets/world/worldtex/T_Sand_Fine_N.png.import",
-   "md5": "e479214a9b80f0aeb8bcc58ef2ba129a",
-   "bytes": 965,
    "store": "project files plans/engine_godot/shot_assets/worldtex/",
    "built_by": "world textures v12 (shot_assets/worldtex)"
   }
