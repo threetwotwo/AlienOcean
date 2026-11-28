@@ -1,5 +1,31 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, blockout kit 0.2.0): rideable creature stand-ins that swim like their animal
+- Gary 28 Nov 07:20Z: vary creature sizes and swimming motion for riding stress tests ("a dolphin swims differently from a
+  whale"). blockout/blockout_species.gd: dolphin 2.6 m (up-down body wave, ~1 Hz), humpback 14 m (up-down, 0.24 Hz),
+  whale shark 10 m (side-to-side, 0.24 Hz), manta 6 m span (wing flap, wave out along the span), turtle 1.1 m (flipper
+  strokes), all scalable. Swim waves and grab slots from Thalassa v20.19 (wildlife-ecosystem.js getCreatureGripWorld,
+  GPU modes 1 and 5): dolphin dorsal fin both flanks (palms 1.3 cm off the skin at any size), whale shark dorsal /
+  pectorals / tail lobe, manta dorsal chevron, turtle front shell rim; humpback pectorals and hump. Each slot has
+  hand_l, hand_r and body frames riding the swim wave. Rider 0.2.0 takes species + scale; the gym has a station each.
+- tests/test_blockout.gd Y1: each species at 0.6-1.3x swims in its own plane, beats at its own frequency, holds its speed,
+  every slot within a 1.38 m girl's reach; 81/81 at 30/60/120 Hz, rates agree 0.0 cm.
+
+## 0.6.0-dev (28 Nov 2026, blockout kit): one grey test kit, grey mode in any level, the blockout gym
+- Gary 28 Nov 06:50Z: blockouts are the standard for testing and fast iteration. blockout/blockout_kit.gd 0.1.0 is the one kit
+  (24 kinds in metres: steps, stairs, ramps, slope across, ledge, drop, gaps, beams, grown rough field, walls, corner, low
+  ceiling, mantle, ceiling slab, tubes, pools incl. 2.4 m lagoon depth, shore, stool, bench, bunk, ride, senses). Each kind
+  returns its water env, named marker frames (-Z = facing), points of interest and the rider. tests/harness/test_worlds.gd is
+  now a shim over it (same kinds and params), so the motor, camera and body stress tests run in the kit unchanged.
+- blockout/blockout_rider.gd: a 2.5 m creature stand-in on a scripted loop (straight + dive, banked turn, straight + climb),
+  pose a pure function of time; saddle, hand and foot frames, velocity. blockout/blockout_poi.gd: fixed, circling, behind, sound.
+- Grey mode (blockout/grey_mode.gd, F7 in the game via GameRoot, AO_GREY=1): flat grey with a metre grid on every level mesh,
+  collision untouched (checked shape by shape), particles hidden, originals restored.
+- Blockout gym (blockout/blockout_gym.gd, AO_BLOCKOUT=1 or run_blockout.command; F6 next station): every station in one world,
+  the blockout stress scene. tests/test_blockout.gd measures every kind with physics rays, checks the rider, senses and grey
+  mode, and runs motor cases inside the gym: 72/72 at 30/60/120 fps and at a 30/120 Hz tick, rates agree to 0.0 cm, planted
+  faults (seats 5 cm low, grey mode dropping collision) caught (tests/run_blockout.sh, in run_all.sh).
+
 ## 0.6.0-dev (28 Nov 2026, lagoon dressing): lighter coral rubble
 - Test level thread: kf_coral_rubble was 462k tris, 94 MB (flat-shaded, unshared verts) with a full-detail concave copy as its
   collider (the second mesh seen on the Mac). Now one drawn mesh decimated to 80k tris (RUBBLE_TRIS), smooth by angle 40 deg so

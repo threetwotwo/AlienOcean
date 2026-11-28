@@ -1,4 +1,4 @@
-// Sea seen from above 0.7.0 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
+// Sea seen from above 0.8.0 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
 // 0.2.0 (28 Nov): the water's own colour, one model from the lagoon's sand to the open sea (Rrs x Ed where the floor
 // fades; it read jet black: the lagoon's path only saw the floor).
 // 0.5.0 (28 Nov): the sun's glitter sparkles (the tank's moon sparkle, run for the sun).
@@ -21,6 +21,7 @@ render_mode unshaded, cull_back, world_vertex_coords, fog_disabled, shadows_disa
 #include "res://look/sky_dome.gdshaderinc"
 #include "res://look/sea_waves.gdshaderinc"
 #include "res://look/sea_bathy.gdshaderinc"
+#include "res://look/sea_floor_map.gdshaderinc"
 global uniform vec3 water_sun_air;
 global uniform float water_sun_lux;
 #include "res://look/sea_foam_shade.gdshaderinc"   // the whitecaps' look (after the lines above: it uses them)
@@ -44,6 +45,7 @@ global uniform float sea_crest_glow;    // art lever on the light through the cr
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 uniform float nq = 32.0;
 uniform float sun_size = 1.0;
+uniform float sea_horizon_lift = 1.0;   // art lever: how far up the sky the rough sea's mean mirrored ray comes from (1 = as measured)
 varying vec2 still;
 varying vec3 wi;
 
@@ -78,11 +80,13 @@ void fragment() {
 	// 0.3.0: the waves too small to draw still tilt the mirror (S.z, their slope variance, grows with distance): averaged
 	// over them the Fresnel never reaches 1 at the horizon and the mean reflected ray comes from higher, bluer sky
 	// (Bruneton, Neyret & Holzschuch 2010, meanFresnel; as a ratio to the smooth case so the near sea is unchanged)
-	float sv = sqrt(max(S.z, 0.0));
+	// 0.8.0: Bruneton's sigma is the slope spread along the view (one axis); S.z sums both axes, so half of it (the sea is
+	// near isotropic). Was the sum: the horizon's mirror ran ~0.4 where it should be ~0.55 (waterline thread, 28 Nov)
+	float sv = sqrt(0.5 * max(S.z, 0.0));
 	float R = fresnel_air(ci) * (pow(1.0 - ci, 5.0 * exp(-2.69 * sv)) / (1.0 + 22.7 * pow(sv, 1.5))) / max(pow(1.0 - ci, 5.0), 1e-6);
 	R = min(R, fresnel_air(ci));
 	vec3 Rd0 = reflect(-V, N);                            // the mirror ray of the drawn facet (the sun's glint)
-	vec3 Rd = normalize(Rd0 + vec3(0.0, 0.0, sv));
+	vec3 Rd = normalize(Rd0 + vec3(0.0, 0.0, sea_horizon_lift * 1.414 * sv));   // the mean mirrored ray from higher sky (1.414: as before the per-axis sigma; art lever)
 	vec3 refl = sky_dome_nits(sea_gdt(Rd));
 	// the sun's glint
 	vec3 Ls = sea_isl(normalize(water_sun_air));
@@ -171,20 +175,46 @@ void fragment() {
 	// (a body or rock between: sampling it there drew it twice, Gary 28 Nov "a doubling of the player body"): no shift
 	if (hb < 0.0 || hb < 0.5 * h - 0.25) uvb = SCREEN_UV;
 	vec3 scene = textureLod(screen_tex, uvb, 0.0).rgb;
-	float Lp = min(h / max(-T.z, 0.05), 400.0);
 	vec3 c = water_a + water_b;
-	vec3 under = scene * exp(-c * Lp) + w_glow(sea_gdt(T), 0.0, Lp) * water_exposure;
-	// the deep water's own light where the floor fades (H: the floor under this point; nothing drawn there = no floor,
-	// and then nothing of the screen shows through either)
-	bool nofloor = depth <= 1e-7;
-	float H = nofloor ? 1e4 : max(wi.z - q.z, 0.0);
-	if (nofloor) {
-		// 0.6.0: past the drawn floor the floor goes on (look/sea_bathy.gdshaderinc: the lagoon's sand to the reef, then down
-		// the fore reef to the open ocean), seen as the drawn floor is: its sand at that depth, faded on the way back up
-		H = sea_bathy_depth(vec2(wi.x, -wi.y));
-		float Lb = min(min(H, 60.0) / max(-T.z, 0.05), 400.0);
-		under = (sea_bathy_sand(H) * exp(-c * Lb) + w_glow(sea_gdt(T), 0.0, Lb)) * water_exposure;
+	// 0.8.0: where the bent ray really lands, followed through the floor map (adapters/godot/sea_floor_map.gd: the floor's
+	// light and top round the eye) and past it the floor beyond (sea_bathy). The screen alone cannot say: at a slant the
+	// straight view runs far past the floor under this point (down a reef's slope it found the floor 300 m on and 60 m
+	// down, so the slope read near black between the shallow cyan and the floor beyond: Gary 28 Nov "the dark blue area
+	// between the cyans"), and near the line it shows a rock a few cm under it 3 m off, which the bent ray, diving 41-49
+	// deg from the vertical, never meets (it was seen as clearly as looking down, a hard cut-out: Gary 28 Nov "a cardboard
+	// effect" at the waterline). The screen's picture is kept where its depth agrees with the landing (the near floor,
+	// rocks under the eye) and fades out as the view goes grazing, where it holds nothing the bent ray sees.
+	vec2 tl = T.xy / max(-T.z, 0.05);                       // m along per m down
+	float Hg = max(wi.z - floor_top(wi.xy), 0.0);
+	for (int k = 0; k < 4; k++) Hg = mix(Hg, max(wi.z - floor_top(wi.xy + tl * Hg), 0.0), 0.7);   // damped: walls
+	// the landing's light: the screen's, where the eye sees that very spot (the drawn floor as lit, net and all), else the
+	// floor map's, else the floor beyond's sand at that depth
+	vec3 lw = vec3(wi.xy + tl * Hg, wi.z - Hg);
+	vec4 lc = PROJECTION_MATRIX * VIEW_MATRIX * vec4(sea_gdt(lw), 1.0);
+	vec2 luv = lc.xy / lc.w * 0.5 + 0.5;
+	vec3 fl = vec3(-1.0);
+	if (lc.w > 0.0 && all(greaterThan(luv, vec2(0.002))) && all(lessThan(luv, vec2(0.998)))) {
+		float dl = texture(depth_tex, luv).r;
+		vec4 vl = INV_PROJECTION_MATRIX * vec4(luv * 2.0 - 1.0, dl, 1.0);
+		vec3 sl = sea_isl((INV_VIEW_MATRIX * vec4(vl.xyz / vl.w, 1.0)).xyz);
+		if (dl > 1e-7 && distance(sl, lw) < 0.3 + 0.01 * distance(cam, lw)) fl = textureLod(screen_tex, luv, 0.0).rgb / max(water_exposure, 1e-12);
 	}
+	if (fl.x < 0.0) fl = floor_light(lw.xy);
+	if (fl.x < 0.0) fl = sea_bathy_sand(Hg);
+	float Lg = min(min(Hg, 60.0) / max(-T.z, 0.05), 400.0);
+	vec3 under = (fl * exp(-c * Lg) + w_glow(sea_gdt(T), 0.0, Lg)) * water_exposure;
+	bool nofloor = depth <= 1e-7;                           // nothing drawn under this point (and none of the screen shows)
+	float hsc = (hb >= 0.0 && uvb != SCREEN_UV) ? hb : max(wi.z - q.z, 0.0);   // the depth of what the screen shows there
+	// the screen is kept unless it lies well deeper than the landing (the straight view ran on past the floor the bent ray
+	// meets: a reef's slope); something nearer (a rock, a body, a fish) stays where the screen has it, as the bend has
+	// already placed it (0.7.0); only the slant fades it, below
+	float agree = nofloor ? 0.0 : 1.0 - smoothstep(0.5, 1.5, max(hsc - Hg, 0.0) / max(3.0, 0.5 * Hg));
+	float wsc = agree * smoothstep(0.10, 0.30, V.z);       // the view's slant, not the facet's (waves must not flicker it)
+	if (wsc > 0.0) {
+		float Lp = min(min(hsc, 60.0) / max(-T.z, 0.05), 400.0);
+		under = mix(under, scene * exp(-c * Lp) + w_glow(sea_gdt(T), 0.0, Lp) * water_exposure, wsc);
+	}
+	float H = mix(Hg, hsc, wsc);
 	float Ed = water_sun_lux * max(water_sun_air.y, 0.0) + PI * water_sky_nits;   // lux on the level sea
 	// 0.7.0: past the reef the water is the open ocean's, not the lagoon's (an atoll's lagoon water is its own; out over
 	// the drop-off the deep's royal blue takes over as the floor falls away: the deep read near-black navy from the air)

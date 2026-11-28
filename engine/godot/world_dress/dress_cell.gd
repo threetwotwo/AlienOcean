@@ -50,10 +50,10 @@ func setup(manifest_path: String, pieces: String) -> void:
 func _template(p: String) -> Node3D:
 	if cache.has(p): return cache[p]
 	var path := pieces_dir.path_join(p + ".glb")
-	var doc := GLTFDocument.new(); var st := GLTFState.new()
-	if not FileAccess.file_exists(path) or doc.append_from_file(path, st) != OK:
+	var sc := GlbLoader.load_scene(path)    # imported GLBs bring their LODs and shadow meshes
+	if sc == null:
 		stats.missing.append(p); cache[p] = null; return null
-	cache[p] = doc.generate_scene(st)
+	cache[p] = sc
 	return cache[p]
 
 func _material_for(kind: String) -> Material:

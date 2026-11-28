@@ -18,3 +18,6 @@ __pycache__/
 creatures/maker/out/
 # creature textures Godot extracts from the glTFs at import (the glTFs are listed in assets.lock.json)
 engine/godot/assets/creatures/**/*.png
+# test level: lagoon assets copied in from project files (listed in assets.lock.json), and Gary's playtest reports
+engine/godot/assets/world/
+playtest_reports/

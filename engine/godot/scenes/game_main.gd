@@ -3,6 +3,8 @@
 ## passed in; without them the game runs on a stand-in sand floor.
 ## Env: AO_PIECES (lagoon pieces dir), AO_WORLDTEX, AO_DRESS (world_dress/<name>.json) + AO_DRESS_PIECES, AO_HOUR,
 ##      AO_DAY_MIN (minutes per game day; unset = the time of day holds), AO_SCHOOLS (count of trevally schools, default 2).
+##      AO_BLOCKOUT=1 (the blockout gym instead of the lagoon; AO_STATION=<label or kind> to start there; F6 next station),
+##      AO_GREY=1 (start in grey mode; F7 toggles it in any level).
 extends Node
 
 func _ready() -> void:
@@ -11,6 +13,7 @@ func _ready() -> void:
 	g.pieces_dir = e.call("AO_PIECES"); g.worldtex_dir = e.call("AO_WORLDTEX")
 	g.dress_manifest = e.call("AO_DRESS"); g.dress_pieces = e.call("AO_DRESS_PIECES")
 	g.start_hour = float(e.call("AO_HOUR", "12"))
+	g.blockout = e.call("AO_BLOCKOUT") == "1"; g.blockout_station = e.call("AO_STATION")
 	if e.call("AO_DAY_MIN") != "": g.hours_per_second = 24.0 / (float(e.call("AO_DAY_MIN")) * 60.0)
 	var homes := [Vector3(4, 2.0, 8), Vector3(-6, 1.6, -4), Vector3(12, 2.4, -12)]
 	for i in mini(int(e.call("AO_SCHOOLS", "2")), homes.size()):

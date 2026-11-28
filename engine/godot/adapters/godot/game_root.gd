@@ -44,6 +44,8 @@ const Packet := preload("res://core/m01_input/input_packet.gd")
 @export var reef_on := true                    # with the pieces: the reef drop-off round the lagoon (adapters/godot/reef_terrain.gd)
 @export var spawn_feet := Vector3(0, 1.6, 18)  # the girl's feet at start (the lagoon: sand at y 0, surface at 4 m)
 @export var spawn_swim := true
+@export var blockout := false                  # build the blockout gym (blockout/blockout_gym.gd) instead of the lagoon; F6 = next station
+@export var blockout_station := ""             # start at this station (label or kind), "" = the first
 @export var schools: Array = []                # [{species, home: Vector3, count, seed, tethered}]
 @export var school_sense_radius := 24.0        # how far a school looks for actors around its home (m)
 @export var use_camera := true
@@ -99,6 +101,10 @@ func _ready() -> void:
 		world_root.attach_camera(cam)
 	if not input_source.is_valid():
 		reader = InputReaderScript.new(); add_child(reader)
+	grey_toggle = preload("res://blockout/grey_mode_toggle.gd").new(); grey_toggle.roots = [lagoon, streamer]; add_child(grey_toggle)
+	if blockout:
+		var play = preload("res://blockout/blockout_play.gd").new(); play.girl = girl; play.stations = blockout_gym.stations
+		add_child(play)
 	# services
 	services.clock = clock; services.water = world_root.water; services.actors = actors; services.mounts = mounts
 	services.world_root = world_root; services.streamer = streamer
@@ -255,7 +261,19 @@ func _viewers() -> Array:
 
 # ---- the lagoon: world pieces, the authored place, collision ----
 
+var blockout_gym := {}                         # BlockoutGym.build() result in blockout mode
+var grey_toggle: Node = null                   # F7 grey mode (blockout/grey_mode_toggle.gd) over the lagoon and streamed cells
+
 func _build_lagoon() -> void:
+	if blockout:
+		blockout_gym = preload("res://blockout/blockout_gym.gd").build(lagoon, LagoonWaterField.SURFACE_Y)
+		var sts: Array = blockout_gym.stations
+		var pick: Dictionary = sts[0]
+		for st in sts:
+			if blockout_station != "" and (st.label == blockout_station or st.kind == blockout_station): pick = st; break
+		spawn_feet = pick.start.origin + Vector3(0, 0.05, 0)
+		spawn_swim = pick.water
+		return
 	if pieces_dir == "" or not DirAccess.dir_exists_absolute(pieces_dir):
 		_flat_floor()
 	else:
@@ -295,9 +313,8 @@ func _load_pieces() -> void:
 	if worldtex_dir != "": _ground = WorldTextures.make_material(worldtex_dir)
 	for f in DirAccess.get_files_at(pieces_dir):
 		if not f.ends_with(".glb"): continue
-		var doc := GLTFDocument.new(); var st := GLTFState.new()
-		if doc.append_from_file(pieces_dir.path_join(f), st) != OK: continue
-		var sc := doc.generate_scene(st)
+		var sc := GlbLoader.load_scene(pieces_dir.path_join(f))   # imported GLBs bring their LODs and shadow meshes
+		if sc == null: continue
 		lagoon.add_child(sc)
 		var lf := f.to_lower()
 		var mat: Material = seabed
