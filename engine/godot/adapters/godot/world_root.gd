@@ -243,7 +243,7 @@ func _sea_god() -> void:
 	if under_mat == null: return
 	var vp := get_viewport()
 	var tmp := vp != null and temporal(vp)
-	RenderingServer.global_shader_parameter_set(&"sea_god", Vector4(1.0 if god_rays else 0.0, float(Engine.get_frames_drawn() % 8) if tmp else 0.0, 1.0 if tmp else 0.0, 0.0))
+	RenderingServer.global_shader_parameter_set(&"sea_god", Vector4(1.0 if god_rays else 0.0, float(Engine.get_frames_drawn() % 8) if tmp else 0.0, 1.0 if tmp else 0.0, 1.0 if WaterlineEffect.sea_on else 0.0))
 
 func set_eye_wave(h: float) -> void:
 	## the wave's height over the still level at the eye (m): the under-water view treats the surface as there (GameRoot)
