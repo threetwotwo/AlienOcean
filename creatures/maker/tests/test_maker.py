@@ -558,19 +558,33 @@ def test_blockout_cutters_open_the_mouth_gills_and_eyes_and_catch_planted_faults
     from creature_maker.record import adapt
     from creature_maker.form import Form
     rec = adapt(REC); form = Form(rec); segs, _ = segments(form, rec)
-    kit = CUT.head_kit(rec, segs); carved, pieces = CUT.build(segs, kit)
-    R = CUT.cut_checks(kit, pieces); assert R['CT_pass'] and R['CT1_pass'] and R['CT2_pass'] and R['CT3_pass'], R
-    assert carved and {'jaw', 'opercleL', 'opercleR', 'eye_L', 'eye_R'} <= {p['name'] for p in pieces}
-    jaw = next(q for q in kit['blocks'] if q['kind'] == 'jaw'); up = copy.deepcopy(pieces)
-    for p in up:
-        if p['name'] == 'jaw': p['V'] = np.asarray(p['V']) + [0, 0.6 * jaw['ry_lo'], 0]
-    assert not CUT.cut_checks(kit, up)['CT1_pass']
+    kit = CUT.head_kit(rec, segs)
+    R = CUT.cut_checks(kit, segs); assert R['CT_pass'] and R['CT1_pass'] and R['CT2_pass'] and R['CT3_pass'], R
+    assert {'jaw', 'eyeball'} <= {q['kind'] for q in kit['blocks']} and kit['cover_poly']
+    k1 = copy.deepcopy(kit)
+    for q in k1['blocks']:
+        if q['kind'] == 'jaw': q['c'][1] += 0.6 * q['ry_lo']
+    assert not CUT.cut_checks(k1, segs)['CT1_pass']
     k2 = copy.deepcopy(kit); poly = np.asarray(k2['cover_poly']); poly[:, 0] -= 2 * CUT.SLIT_W; k2['cover_poly'] = poly.tolist()
-    assert not CUT.cut_checks(k2, pieces)['CT2_pass']
+    assert not CUT.cut_checks(k2, segs)['CT2_pass']
     k3 = copy.deepcopy(kit)
     for q in k3['blocks']:
         if q['kind'] == 'eyeball': q['c'][2] *= 1.0 + 3 * q['r'][0] / abs(q['c'][2])
-    assert not CUT.cut_checks(k3, pieces)['CT3_pass']
+    assert not CUT.cut_checks(k3, segs)['CT3_pass']
+
+
+def test_clean_plate_outline_fills_notches_and_cuts_burrs():
+    """clean pass round 2 (Gary 28 Nov: "spotless"): a traced fin edge's saw-teeth and burrs leave the plate outline; its shape stays."""
+    from creature_maker.blockout import _clean2d, _inside, PLATE_CLOSE, PLATE_OPEN
+    sq = np.array([[0, 0], [0.2, 0], [0.2, 0.2], [0, 0.2]], float)
+    notch = np.array([[0, 0], [0.097, 0], [0.1, 0.05], [0.103, 0], [0.2, 0], [0.2, 0.2], [0, 0.2]], float)       # a slit 0.6 % wide
+    burr = np.array([[0, 0], [0.2, 0], [0.2, 0.1], [0.26, 0.1015], [0.2, 0.103], [0.2, 0.2], [0, 0.2]], float)    # a hair 0.3 % thick
+    for Q in (notch, burr):
+        C = _clean2d(Q)
+        assert _inside(np.array([[0.1, 0.02]]), C)[0]                      # the notch is filled
+        assert not _inside(np.array([[0.23, 0.101]]), C)[0]                # the burr is gone
+        area = 0.5 * abs((C[:, 0] * np.roll(C[:, 1], -1) - np.roll(C[:, 0], -1) * C[:, 1]).sum())
+        assert abs(area - 0.04) < 0.002, area                              # the plate keeps its size
 
 
 def test_clips_have_no_jitter_at_any_tick_rate():
