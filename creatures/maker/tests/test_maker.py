@@ -313,3 +313,11 @@ def test_front_reference_marked_body_only_is_gated_without_fins():
     from creature_maker.silhouette import front_has_fins
     assert front_has_fins({}) and front_has_fins({'front_fins': True})
     assert not front_has_fins({'front_fins': False}) and not front_has_fins({'front_fins': 'body only: spine folded'})
+
+
+def test_scale_relief_covers_the_trunk(tmp_path):
+    """the head mask in maps comes from form part labels; a part that labels the bare flank (a plate whose chamfer ran out
+    still blending with the body: export r5) wiped the scale relief off the trunk. A scaled fish keeps relief on most of it."""
+    out = str(tmp_path / 'beryx'); build(REC, out, res=256, dense_form=False, log=lambda *a: None)
+    h = np.load(os.path.join(out, 'body_height.npy')); m = np.load(os.path.join(out, 'body_mask.npy')).astype(bool)
+    assert (np.abs(h - np.median(h)) > 1e-4)[m].mean() > 0.4
