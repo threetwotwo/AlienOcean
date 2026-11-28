@@ -1,5 +1,12 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, look thread): clearer water, distance fades to blue
+- Blind critique (Gemini + Fable, item 8): "fog is one teal colour". Checked with grey cards (tools/lagoon_shots.gd AO_FOG_CARDS=1,
+  flat and standing at 3-15 m): the view path already loses each band at its own rate (scene x exp(-c L) + glow), but at
+  Cdom 0.05 c = 0.37 / 0.090 / 0.087 per m: blue went as fast as green, so after red the distance settled on teal. Gary
+  picked clearer water (card 28 Nov 03:03Z): cdom 0.015, clear-lagoon CDOM, far water and rock fade to blue, near sand unchanged.
+  Standing faces read darker than sunlit sand by physics (no noon sun on them, sky + sand bounce only), so rock fades sooner.
+
 ## 0.6.0-dev (28 Nov 2026, look thread): the sky's share of the light matched to the key frame
 - Measured: the Blender key frame rig rendered as sun-only and sky-only passes (keyframe/src/scene.py sky=0 / sun=0), Godot the
   same (AO_SDFGI_SKY=0 / AO_SUN=0), key frame camera. Sun pass (incl. bounce): shadow L* Blender 39.3, Godot 38.2 (match).

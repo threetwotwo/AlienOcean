@@ -1,6 +1,7 @@
-// Sea seen from above 0.2.0 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
+// Sea seen from above 0.3.0 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
 // 0.2.0 (28 Nov): the water's own colour, one model from the lagoon's sand to the open sea (Rrs x Ed where the floor
 // fades; it read jet black: the lagoon's path only saw the floor).
+// 0.3.0 (28 Nov): the unresolved waves average the Fresnel and lift the reflected ray (the far sea mirrored a grey band).
 //  Normal: the drawn slope (TOP_NORMAL_HLSL, with open water v144's lean: a face seen nearly edge-on turns back up).
 //  Reflection: the sky along the mirrored ray (look/sky_dome.gdshaderinc: the sky overhead) x Fresnel (n 1.333), and
 //    the sun's glint: its disc widened by the facets' spread (reflection doubles a tilt: 2 S.z of angle variance),
@@ -68,8 +69,14 @@ void fragment() {
 	N = sea_foam_bump(N, fo.foam, still);
 	N = normalize(N + vec3(0.0, 0.0, 2.0 * clamp((0.05 - dot(N, V)) / 0.05, 0.0, 1.0)));   // open water v144
 	float ci = clamp(dot(N, V), 1e-3, 1.0);
-	float R = fresnel_air(ci);
+	// 0.3.0: the waves too small to draw still tilt the mirror (S.z, their slope variance, grows with distance): averaged
+	// over them the Fresnel never reaches 1 at the horizon and the mean reflected ray comes from higher, bluer sky
+	// (Bruneton, Neyret & Holzschuch 2010, meanFresnel; as a ratio to the smooth case so the near sea is unchanged)
+	float sv = sqrt(max(S.z, 0.0));
+	float R = fresnel_air(ci) * (pow(1.0 - ci, 5.0 * exp(-2.69 * sv)) / (1.0 + 22.7 * pow(sv, 1.5))) / max(pow(1.0 - ci, 5.0), 1e-6);
+	R = min(R, fresnel_air(ci));
 	vec3 Rd = reflect(-V, N);
+	Rd = normalize(Rd + vec3(0.0, 0.0, sv));
 	vec3 refl = sky_dome_nits(sea_gdt(Rd));
 	// the sun's glint
 	vec3 Ls = sea_isl(normalize(water_sun_air));
