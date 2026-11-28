@@ -10,6 +10,7 @@ var sim_time := 0.0
 var last := {}
 
 func _init() -> void:
+	SeaFloorMap.mark_mover(self)   # moves: never frozen into the sea floor map (the water drew stale copies, Gary 28 Nov)
 	custom_integrator = false
 	can_sleep = false
 	# water drag and damping come from the buoyancy core; the engine's default world damping (0.1/s against the

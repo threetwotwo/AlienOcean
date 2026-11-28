@@ -48,6 +48,25 @@
   pelvis speed); the head's clocks take the whole frame. No lower-lid motion, brows or speech; the eyes are pinned at
   their limit (riding the head) for targets behind her until the head turns, by design.
 
+## 0.6.0-dev (28 Nov 2026, M34 bubbles 0.1): air bubbles under water, Thalassa's sources with the Unreal bubbles v4 look
+- Gary 28 Nov: "bubbles: port thalassa's bubbles code, improve as you see fit. for the look, use pre-godot ue5 existing
+  work." Sources PORTED from Thalassa v20.19 (style/particles.js, style/runtime.js spawnBubble sites) as a GameRoot plug
+  (adapters/godot/bubbles.gd, GameRoot.bubbles_on): exhale on the breath master clock (PR #153 hook underwater_exhales;
+  the air follows the fall of breathSignal, ~23 bubbles an exhale at rest, more and bigger with exertion, nose 65 % with a
+  down-forward jet, mouth, an onset blurp); kick burst + sprint trail at her feet (35 % when deep); plunge (25-70 dragged
+  down, swimmer on_splash hook) and surfacing; blockout dolphin blowhole streams and humpback bubble blasts;
+  emit()/emit_burst() for later sources (vents, pearling, the sub). Fish and turtles blow none (real).
+- Motion (core/m34_bubbles/bubble_motion.gd, mirrored in the shader): closed-form in age, so it cannot jitter at any
+  frame or tick rate: coated-seawater rise table, exhaled-jet settling (STAND-IN for a missing water-jet flow, logged),
+  riding the shared water drift (motes) + 4 Kolmogorov eddies integrated along the path, wake zigzag/spiral above Re 275,
+  growth with ascent, soft landing under its cap (surface, or a ceiling found by a ray) then a dwell and a pop. Births are
+  spread over their tick (no banding at 30 Hz).
+- Look (look/bubble.gdshader, from bubbles v4 M_SL_Bubble / look_v4 optics.py): per-pixel exact ray through the bubble,
+  Fresnel + total internal reflection (silver rim), two refractions, lit by the water's own light field (w_glow, Snell's
+  window, the sand, the refracted sun); Moore / Wellek flattening, let-go ring, wobble over 2 mm averaged over 1/60 s;
+  NEW: big bubbles are spherical caps (dome over a flatter base); sub-pixel bubbles keep their energy (no twinkle).
+- tests/test_bubbles.gd (tests/run_bubbles.sh): B1-B9 pass at 30/60/120 fps and 30/120 Hz tick; planted hop caught.
+
 ## 0.6.0-dev (28 Nov 2026, M04 breath 0.1): breath as the master clock: the body breathes, strokes and glances keep its time
 - Gary 28 Nov: "Breath is also important. make sure everything syncs to the breath." The brain's breath phase
   (character_brain.gd) is now the one clock the body's secondary motion locks to. All of it is off when thalassa_exact is

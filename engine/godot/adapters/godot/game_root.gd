@@ -51,6 +51,7 @@ const Packet := preload("res://core/m01_input/input_packet.gd")
 @export var use_camera := true
 @export var use_sea := true                    # the drawn FFT sea needs a RenderingDevice (off headless)
 @export var with_mannequin := true
+@export var bubbles_on := true                 # air bubbles under water (adapters/godot/bubbles.gd, a plug: her exhales, kicks, plunges, creatures)
 @export var cells_dir := "res://test_world/cells"
 @export var apply_every_hours := 1.0 / 120.0   # re-light when the clock moved this far (30 game seconds), or the eye crossed the surface
 
@@ -65,6 +66,7 @@ var cam: Camera3D = null
 var reader = null
 var input_source := Callable()                 # (t) -> InputPacket; set by tests/films, else the InputReader
 var school_nodes: Array = []
+var bubbles: Node = null                       # Bubbles plug (bubbles thread)
 var lagoon: Node3D
 var sea: Node3D = null
 var trace: Array = []                          # phases run this tick, in order (the stress test checks TICK_ORDER)
@@ -116,6 +118,8 @@ func _ready() -> void:
 	girl.senses = bs
 	world_root.apply(spawn_feet.y + 1.0)
 	_applied_hours = clock.hours
+	if bubbles_on and OS.get_environment("AO_BUBBLES") != "0":   # AO_BUBBLES=0: off (speed A/B on the Mac)
+		bubbles = Bubbles.new(); add_child(bubbles); register_plug(bubbles)
 	ready_done = true
 
 ## A fish school (fish school thread's FishSchool, M31) plugged into the registry. Returns the node, or null when the
@@ -214,7 +218,14 @@ func _physics_process(_delta: float) -> void:
 func _world_phase(tp: int) -> void:
 	## sky, light, exposure and water uniforms (WorldRoot), then M12 streaming around the committed viewers
 	if mounts.is_mounted("world"):
-		var eye_y: float = cam.global_position.y if cam != null else girl.eye_point().y
+		var eye: Vector3 = cam.global_position if cam != null else girl.eye_point()
+		# the eye is under water when it is under the wave drawn over it, not under the still level (Gary 28 Nov, force 12:
+		# standing in a trough the eye was metres under the still level but in air, and got the under-water exposure, sky and
+		# haze: the sky blew out to white and a hard line cut the arch). The world's light and the under-water view take the
+		# eye's height above that wave as if the sea were still there.
+		var dh: float = (sea as SeaSurface).fft.height_at(eye.x, eye.z) if sea is SeaSurface and sea.visible else 0.0
+		world_root.set_eye_wave(dh)
+		var eye_y: float = eye.y - dh
 		var under := eye_y < world_root.water.level
 		if absf(clock.hours - _applied_hours) >= apply_every_hours or under != _applied_under:
 			world_root.hours = clock.hours
@@ -315,6 +326,7 @@ func _load_pieces() -> void:
 	## the rest in the water-lit seabed material; solid pieces get trimesh collision (grass stays swim-through)
 	var seabed := ShaderMaterial.new(); seabed.shader = load("res://look/seabed_surface.gdshader")
 	if worldtex_dir != "": _ground = WorldTextures.make_material(worldtex_dir)
+	var floors := []
 	for f in DirAccess.get_files_at(pieces_dir):
 		if not f.ends_with(".glb"): continue
 		var sc := GlbLoader.load_scene(pieces_dir.path_join(f))   # imported GLBs bring their LODs and shadow meshes
@@ -329,3 +341,19 @@ func _load_pieces() -> void:
 		for mi in sc.find_children("*", "MeshInstance3D", true, false):
 			for s in mi.mesh.get_surface_count(): mi.set_surface_override_material(s, mat)
 			if not "seagrass" in lf: mi.create_trimesh_collision()
+			if mat == _ground and _ground != null: floors.append(mi)
+	if not floors.is_empty() and OS.get_environment("AO_SAND_BAKE") != "0":
+		_bake_sand.call_deferred(SandBake.island_rect(floors))
+
+## The sand's fixed noise fields baked once over the floor tiles (adapters/godot/sand_bake.gd): until it lands (a couple of frames)
+## the ground shader computes them itself, and the picture is the same either way.
+var sand_bake: SandBake = null
+func _bake_sand(rect: Rect2) -> void:
+	var b := SandBake.new()
+	await b.bake(self, rect)
+	sand_bake = b
+	if _ground is ShaderMaterial: b.apply(_ground)
+	print("SAND BAKE %dx%d texels over %.0fx%.0f m, %.1f MB, %.0f ms%s" % [b.px.x, b.px.y, b.box.z, b.box.w, b.bytes() / 1048576.0, b.ms, " (from the disk cache)" if b.cached else ""])
+
+func set_sand_bake(on: bool) -> void:
+	if sand_bake and _ground is ShaderMaterial: _ground.set_shader_parameter("sand_on", 1.0 if on else 0.0)

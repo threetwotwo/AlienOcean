@@ -48,6 +48,7 @@ var vbao_thickness := 0.4         # m: how deep an occluder is assumed to be (bi
 var half_res_ao := OS.get_environment("CORTAO_HALF") != "0"
 var capture_next := false         # checks: copy the next result into `captured` (stalls the GPU; tests only)
 var captured: Image
+var captured_shape_n: Image       # the prepass's shape normal (n * 0.5 + 0.5, view space), same capture
 var gpu_ms := 0.0                 # the three passes' GPU time, last frame read back (RD timestamps; 0 until measured)
 
 var rd: RenderingDevice
@@ -82,6 +83,11 @@ var ubo: RID
 var ubo_main: RID
 var out: RID
 var tex := Texture2DRD.new()      # main thread side of `out`
+# A resize (fullscreen at start, FSR scale changes) remakes the targets. The materials sample `out` through `tex` until the new one
+# is published on the main thread, so the old `out` lives until then plus a few frames: freed at once, every lit material's
+# uniform set died with it ("Uniforms were never supplied for set (3)" for each draw, Mac 28 Nov, and Godot freeing dead sets).
+var retired: Array = []           # [rid, frames left (-1 = not yet replaced in tex)]
+var published := RID()
 var frame := 0
 var ok := false
 
@@ -94,6 +100,8 @@ func _init() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and rd:
+		for e in retired:
+			if e[0].is_valid(): rd.free_rid(e[0])
 		for r in packed_mips + [packed, raw, raw2, half_packed, shape_n, out, ubo, ubo_main, lut, smp_border, smp_clamp, pl_pre, pl_main, pl_filt, pl_filt2, pl_gtao, pl_vbao, pl_filt3, pl_up, sh_pre, sh_main, sh_filt, sh_filt2, sh_gtao, sh_vbao, sh_filt3, sh_up]:
 			if r.is_valid(): rd.free_rid(r)
 
@@ -140,7 +148,8 @@ func _compile(path: String, defines := "", fine := false) -> RID:
 func _init_compute() -> void:
 	rd = RenderingServer.get_rendering_device()
 	if rd == null: return
-	sh_pre = _compile("res://look/cortao/cortao_prepass.glsl")
+	# checks only: env CORTAO_FAULT_EDGE=1 plants the old edge-normal bug (cortao_check --fault edge must fail C7)
+	sh_pre = _compile("res://look/cortao/cortao_prepass.glsl", "#define CORTAO_FAULT_EDGE 1\n" if OS.get_environment("CORTAO_FAULT_EDGE") != "" else "")
 	var hd := "#define CORTAO_HALF 1\n" if half_res_ao else ""
 	sh_main = _compile("res://look/cortao/cortao_main.glsl", "#define CORTAO_SAMPLES %d\n#define CORTAO_RAYS %d\n" % [samples, rays] + hd)
 	sh_filt = _compile("res://look/cortao/cortao_filter.glsl", "", fine_last)   # the last pass: fine taps
@@ -184,9 +193,20 @@ func _free_targets() -> void:
 	for r in packed_mips:
 		if r.is_valid(): rd.free_rid(r)
 	packed_mips.clear()
-	for r in [packed, raw, raw2, half_packed, shape_n, out]:
+	for r in [packed, raw, raw2, half_packed, shape_n]:
 		if r.is_valid(): rd.free_rid(r)
+	if out.is_valid():   # still bound in the materials: freed after the new one is published
+		if OS.get_environment("CORTAO_FAULT_FREE") != "": rd.free_rid(out)   # checks only: plants the old bug (run_cortao.sh C8)
+		else: retired.append([out, -1])
 	packed = RID(); raw = RID(); raw2 = RID(); half_packed = RID(); shape_n = RID(); out = RID()
+
+func _free_retired() -> void:
+	## render thread, each frame: an old `out` is freed 3 frames after `tex` points at its replacement
+	for e in retired.duplicate():
+		if e[1] < 0 and published == out: e[1] = 3
+		elif e[1] > 0: e[1] -= 1
+		if e[1] == 0:
+			rd.free_rid(e[0]); retired.erase(e)
 
 func _make_targets(sz: Vector2i) -> void:
 	_free_targets()
@@ -206,9 +226,9 @@ func _make_targets(sz: Vector2i) -> void:
 	half_packed = rd.texture_create(f, RDTextureView.new())
 	f.width = sz.x; f.height = sz.y
 	f.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+	f.usage_bits |= RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT   # cortao_check reads the shape normal back (C7)
 	shape_n = rd.texture_create(f, RDTextureView.new())
 	f.format = RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM
-	f.usage_bits |= RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	out = rd.texture_create(f, RDTextureView.new())
 	_publish.call_deferred(out)
 
@@ -219,6 +239,7 @@ func _work_size(sz: Vector2i) -> Vector2i:
 func _publish(r: RID) -> void:
 	tex.texture_rd_rid = r
 	RenderingServer.global_shader_parameter_set("cortao_ao", tex)
+	published = r
 
 func _read_time() -> void:
 	## timestamps come back a frame or more later: take the newest begin/end pair Godot reports
@@ -247,6 +268,7 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 	var sz := rsb.get_internal_size()
 	if sz.x == 0 or sz.y == 0: return
 	if sz != size: _make_targets(sz)
+	if not retired.is_empty(): _free_retired()
 	if rsb.get_view_count() != 1: return   # mono only (no XR)
 	if not rsb.has_texture(&"forward_clustered", &"normal_roughness"): return
 	var depth := rsb.get_depth_layer(0)
@@ -378,3 +400,4 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 		capture_next = false
 		var bytes := rd.texture_get_data(out, 0)
 		captured = Image.create_from_data(sz.x, sz.y, false, Image.FORMAT_RGBA8, bytes)
+		captured_shape_n = Image.create_from_data(sz.x, sz.y, false, Image.FORMAT_RGBAH, rd.texture_get_data(shape_n, 0))

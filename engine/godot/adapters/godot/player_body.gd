@@ -29,6 +29,7 @@ var _env_dict := {}
 var wq = null
 
 func _init() -> void:
+	SeaFloorMap.mark_mover(self)   # moves: never frozen into the sea floor map (the water drew stale copies, Gary 28 Nov)
 	stand_shape.radius = 0.25
 	stand_shape.height = 1.38 - step_height   # standing body starts step_height above the feet: ledges below
 	swim_shape.radius = 0.42                   # that height are the floor ray's job (stepped onto), not walls

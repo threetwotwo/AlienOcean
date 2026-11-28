@@ -21,6 +21,7 @@ var bound := false
 var idx := {}
 
 func _ready() -> void:
+	SeaFloorMap.mark_mover(self)   # moves: never frozen into the sea floor map (the water drew stale copies, Gary 28 Nov)
 	add_child(skel)
 	skel.add_child(mi)
 	for b in BONES:

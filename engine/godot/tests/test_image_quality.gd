@@ -2,7 +2,7 @@
 ## a dither stipple in the penumbrae, pixelated grass edges and far shimmer. The roots: Godot's low soft-shadow filter on a 4096
 ## shadow map (PCSS with few taps: banded, noisy penumbrae), and half resolution upscaled by FSR 1, which is spatial (no
 ## anti-aliasing). This holds the fix: the soft-shadow filter at high or better on an 8192 map, and anti-aliasing behind the Retina
-## half-resolution path (a temporal upscaler, or FSR 1 with Godot TAA: the Mac's best look per ms), with per-frame noise (god rays) moving only where frames are averaged.
+## half-resolution path (a temporal upscaler: FSR 1 + Godot TAA was cheaper but shimmers in motion), with per-frame noise (god rays) moving only where frames are averaged.
 ## Planted fault --fault: the old settings (filter low, FSR 1 without TAA); it must be caught.
 ## Run: godot --headless --path . --script res://tests/test_image_quality.gd [-- --fault]
 extends SceneTree
@@ -23,8 +23,10 @@ func _initialize() -> void:
 	var m := TestLevel.upscaler()
 	var temporal_up := m == Viewport.SCALING_3D_MODE_FSR2 or m == Viewport.SCALING_3D_MODE_METALFX_TEMPORAL
 	var taa := TestLevel.needs_taa(m) and not fault
-	var iq3 := temporal_up or taa
-	print("IQ3 half resolution is anti-aliased (mode %d, TAA with it %s): %s" % [m, taa, "PASS" if iq3 else "FAIL"]); ok = ok and iq3
+	# a temporal upscaler, not TAA + a spatial one: Godot's TAA at half resolution shimmers on smooth shading in motion
+	# (tools/ao_motion_check.gd: flicker RMS 4.4 levels vs 0.48 with FSR 2)
+	var iq3 := temporal_up
+	print("IQ3 half resolution is anti-aliased by a temporal upscaler (mode %d): %s" % [m, "PASS" if iq3 else "FAIL"]); ok = ok and iq3
 	var vp := SubViewport.new(); root.add_child(vp)
 	vp.scaling_3d_mode = m; vp.scaling_3d_scale = 0.5; vp.use_taa = taa
 	var t_half := WorldRoot.temporal(vp)

@@ -254,6 +254,33 @@ float4 Glitter(inout WsG Wg_, float3 P, float3 N, float3 V, float3 L, float4 dP,
   float wsun = 0.6 + 0.8*exp(-t2);
   float pc = dens*1e-6*(s*s/ad)*wsun/max(Pm, 1e-7);    // glints per pixel wanted x pixels per cell / chance the facet mirrors: dens = glints per Mpx
   return float4(disc*on*step(h.z, pc)*fd, H); }
+// ---------- WS_BAKED hooks (Godot side, tools/ws_to_godot.py): the sand's fixed world-xy noise fields, baked or procedural ----------
+float wsWarpC(inout WsG Wg_, float2 p){ return 1.2*(fbm2n(Wg_, float3(p/0.8, 3.)) - 0.5)*2. + 10.*fo3(Wg_, float3(p/2.0, 0.)); }
+#ifdef WS_BAKED
+float wsBkK(float2 p){ float2 e = min(p - sand_box.xy, sand_box.xy + sand_box.zw - p); return sand_on * clamp(min(e.x, e.y), 0., 1.); }
+float4 wsBkRead(inout WsG Wg_, sampler2D t, float2 p){ float2 s = (sand_px - 1.)/sand_box.zw, g = s/sand_px; WS_COUNT_READ
+  return textureGrad(t, ((p - sand_box.xy)*s + 0.5)/sand_px, Wg_.gDP.xy*g, Wg_.gDP.zw*g); }
+float wsBk1(inout WsG Wg_, float2 p, int c){ float k = wsBkK(p); float b = 0.;
+  if (k > 0.) { float4 v = c < 4 ? wsBkRead(Wg_, sandA, p) : wsBkRead(Wg_, sandB, p); b = c == 0 ? v.x : c == 1 ? v.y/7. : c == 2 ? v.z/7. : c == 3 ? v.w/7. : v.x - 8.; }
+  if (k >= 1.) return b;
+  float f = c == 0 ? fbm2n(Wg_, float3(p/1.4, 19.)) : c == 1 ? fo3(Wg_, float3(p/2.5, 71.)) : c == 2 ? fo3(Wg_, float3(p/2.2, 83.)) : c == 3 ? fo3(Wg_, float3(p/2.1, 29.)) : wsWarpC(Wg_, p);
+  return lerp(f, b, k); }
+float2 wsBkPr(inout WsG Wg_, float2 p){ float k = wsBkK(p); float2 b = f2(Wg_, 0.); if (k > 0.) b = wsBkRead(Wg_, sandB, p).yz;
+  if (k >= 1.) return b; return lerp(fbm2v(Wg_, float3(p/1.2, 41.)), b, k); }
+#define WS_F_RDG(p) wsBk1(Wg_, p, 0)
+#define WS_F_CW(p) wsBk1(Wg_, p, 1)
+#define WS_F_WL(p) wsBk1(Wg_, p, 2)
+#define WS_F_DL(p) wsBk1(Wg_, p, 3)
+#define WS_F_WARPC(p) wsBk1(Wg_, p, 4)
+#define WS_F_PR(p) wsBkPr(Wg_, p)
+#else
+#define WS_F_RDG(p) fbm2n(Wg_, float3((p)/1.4, 19.))
+#define WS_F_CW(p) fo3(Wg_, float3((p)/2.5, 71.))
+#define WS_F_WL(p) fo3(Wg_, float3((p)/2.2, 83.))
+#define WS_F_DL(p) fo3(Wg_, float3((p)/2.1, 29.))
+#define WS_F_WARPC(p) wsWarpC(Wg_, p)
+#define WS_F_PR(p) fbm2v(Wg_, float3((p)/1.2, 41.))
+#endif
 struct WsRipple { float hr; float fade; float2 slope; float trough; float lee; float3 tone; float sort; };
 WsRipple SandRipples(inout WsG Wg_, float2 p, float3 N, float fp, float2 flow, float trough0, float crest0, float4 mA, float4 mB, float4 mC, bool dust, float off, float haze){
   WsRipple R; float up = N.z;
@@ -264,7 +291,7 @@ WsRipple SandRipples(inout WsG Wg_, float2 p, float3 N, float fp, float2 flow, f
   // FAR PATH (exact): every ripple family is fully faded once a pixel covers more than a third of the longest spacing (0.23 m), so nothing that only feeds the ripples is computed there
   bool noRip = dust || fp > 0.08 || haze > 0.98;
   float nA = 0.5, nCw = 0.5, nGate = 0., nEx = 0.5, nWl = 0.5, nRdg = 0.5;
-  if (!noRip) { nRdg = fbS(Wg_, fbm2n(Wg_, float3(p/1.4, 19.))); nA = mC.b; nCw = fbS(Wg_, 0.1286 + 0.6*mA.r + fo3(Wg_, float3(p/2.5, 71.))); nGate = mC.a; nEx = mB.g; nWl = fbS(Wg_, 0.1286 + 0.6*mA.g + fo3(Wg_, float3(p/2.2, 83.))); }
+  if (!noRip) { nRdg = fbS(Wg_, WS_F_RDG(p)); nA = mC.b; nCw = fbS(Wg_, 0.1286 + 0.6*mA.r + WS_F_CW(p)); nGate = mC.a; nEx = mB.g; nWl = fbS(Wg_, 0.1286 + 0.6*mA.g + WS_F_WL(p)); }
   float wA = smoothstep(0.15, 0.85, nA);
   // dune flow (World Sketch round 98), per vertex: flow = (c cos 2t, c sin 2t): t = across-crest direction (axial), c = coherence 0..1.
   // Doubled angle so the direction interpolates across its 0/pi flip. A direction that varies in space must never multiply world position (p . d(x)
@@ -281,9 +308,9 @@ WsRipple SandRipples(inout WsG Wg_, float2 p, float3 N, float fp, float2 flow, f
   // lee faces: slope over about 17 to 27 deg and facing along the flow: no ripples, faint grain-flow streaks down the slope instead
   float2 dn = N.xy; float slp = length(dn), lee = cw * smoothstep(0.30, 0.50, slp) * smoothstep(0.1, 0.4, abs(dot(dn/max(slp, 1e-4), rdF)));
   float warp = 0.; float2 pr = p;
-  if (!noRip) { warp = 1.2*(fbm2n(Wg_, float3(p/0.8, 3.)) - 0.5)*2. + 1.0*(fbm2n(Wg_, float3(p/0.45, 7.)) - 0.5)*2.;
-    warp += 24.*mB.r - 12. + 10.*fo3(Wg_, float3(p/2.0, 0.));   // the map holds the warp's two large terms; short kicks pinch and fork the crests (without them a flow-turned field read as corduroy)
-    pr = p + 0.25*(fbm2v(Wg_, float3(p/1.2, 41.)) - 0.5); }      // crests turn locally
+  if (!noRip) { warp = WS_F_WARPC(p) + 1.0*(fbm2n(Wg_, float3(p/0.45, 7.)) - 0.5)*2.;
+    warp += 24.*mB.r - 12.;   // the map holds the warp's two large terms; short kicks pinch and fork the crests (without them a flow-turned field read as corduroy)
+    pr = p + 0.25*(WS_F_PR(p) - 0.5); }      // crests turn locally
   float rAmp = (1. - lee)*0.8*smoothstep(0.12, 0.42, nGate)*lerp(0.35, 1.3, smoothstep(0.34, 0.66, nRdg))*smoothstep(0.20, 0.36, nRdg) * smoothstep(0.85, 0.97, up) * (1. - off) * (1. - smoothstep(0.85, 0.98, haze));
   float hs = 0., fade = 0.; float2 slope = f2(Wg_, 0.); Wg_.gRex = lerp(1.05, 1.75, smoothstep(0.25, 0.75, nEx));
   float4 gpr = float4(ddx(pr), ddy(pr)); float2 gwp = float2(ddx(warp), ddy(warp));
@@ -389,7 +416,7 @@ WsSurf GroundBlend(inout WsG Wg_, float3 P, float3 N, float fp0, WsGround G,
     float3 ns = normalize(float3(-slope, 1.)); float aos = 1. - 0.08*sat(Wg_, 0.5 - 0.5*hr)*fade, rs = 0.9;
     // debris (0.2 m tile, stochastic): pieces show whole where the local density beats their rank; more in troughs and in clumps
     float dens = 0.;
-    if (!dust) { float dl = mD.r - 0.1 + 0.91*(fo3(Wg_, float3(p/2.1, 29.)) - 0.0714);
+    if (!dust) { float dl = mD.r - 0.1 + 0.91*(WS_F_DL(p) - 0.0714);
       dens = 0.3 * sat(Wg_, (dl + 0.2*fb(Wg_, float3(p/0.48, 31.)) - 0.42)*5.) * (0.1 + 1.9*pow(trough, 1.5)); }
     float dk = sat(Wg_, (0.012 - fp)/0.006) * step(0.01, sandM);     // debris fades out where a pixel covers more than about 1 cm; dusting on rock tops is a film: no debris pieces or grains there
     if (dk > 0. && dens > 0.005) { St ds = stGrid(Wg_, p/0.20 + 1.7); float3 w3 = ds.w*ds.w*ds.w; w3 /= (w3.x + w3.y + w3.z); float best = 0.; float4 D = f4(Wg_, 0.); float3 Dn = float3(0., 0., 1.);
