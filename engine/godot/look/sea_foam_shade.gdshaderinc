@@ -164,10 +164,15 @@ SeaFoam sea_foam_read(vec2 Xl, vec3 P, vec3 cam, float nq, float clock) {
 		float jxx = 1.0, jyy = 1.0, jxy = 0.0;
 		for (int c = 0; c < 2; c++) {
 			float L = c == 0 ? sea_patch.x : sea_patch.y;
+			// sea speed thread 28 Nov: only the taps that reach new texels of mip 0 (sea_taps; 4 wherever the view's stretch
+			// spans 2 texels or more, as before)
+			int nk = sea_taps(length(along), 0.0, L);
+			float fk = 1.0 / float(nk);
 			for (int k = 0; k < 4; k++) {
-				vec3 uk = vec3((Xl + along * ((float(k) + 0.5) * 0.25 - 0.5)) / L, float(c));
+				if (k >= nk) break;
+				vec3 uk = vec3((Xl + along * ((float(k) + 0.5) * fk - 0.5)) / L, float(c));
 				vec4 g = textureLod(sea_deriv, uk, 0.0);
-				jxx += 0.25 * g.z; jyy += 0.25 * g.w; jxy += 0.25 * textureLod(sea_disp, uk, 0.0).w;
+				jxx += fk * g.z; jyy += fk * g.w; jxy += fk * textureLod(sea_disp, uk, 0.0).w;
 			}
 		}
 		J0 = jxx * jyy - jxy * jxy;
