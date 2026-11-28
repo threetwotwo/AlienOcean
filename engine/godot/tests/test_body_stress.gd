@@ -87,6 +87,8 @@ var results: Array = []
 # --shard i/n runs every n-th case starting at i (to film in parallel).
 const Mannequin := preload("res://adapters/godot/mannequin.gd")
 var film := ""
+var film_close := false     # --close: a near side-on camera that frames the body (Gary: clearer, bigger shots of the body), 30 fps
+var cam_side := Vector3.ZERO
 var shard := Vector2i(0, 1)
 var mq
 var cam: Camera3D
@@ -105,6 +107,7 @@ func _initialize() -> void:
 			"--fault": fault = a[i + 1]
 			"--out": out_path = a[i + 1]
 			"--film": film = a[i + 1]
+			"--close": film_close = true
 			"--shard":
 				var sp: PackedStringArray = a[i + 1].split("/")
 				shard = Vector2i(int(sp[0]), int(sp[1]))
@@ -286,7 +289,7 @@ func _start_next() -> bool:
 	t = 0.0
 	warm = 2
 	prev = {}
-	rec = {"name": cur.name, "fail": [], "ticks": 0, "modes": [], "pen": {}, "stance": {}, "count": {},
+	rec = {"name": cur.name, "jerk": [], "jk_by": {}, "fail": [], "ticks": 0, "modes": [], "pen": {}, "stance": {}, "count": {},
 		"worst": {"bone_mm": 0.0, "span": 0.0, "elbow": 0.0, "knee": 0.0, "knee_back": 0.0, "neck": 0.0, "head_chest": 0.0,
 			"pop": 0.0, "pelvis_jump": 0.0, "pen_run": 0, "sole_under": 0.0, "stand_gap": 0.0, "skate": 0.0, "leg_overlap": 0.0,
 			"torso_sink": 0.0, "flips": 0}}
@@ -337,7 +340,7 @@ func _physics_process(dt: float) -> bool:
 		a.mid = a.root + (a.root - a.mid)             # planted: elbow mirrored through the shoulder for one tick
 	t += dt
 	_check(pose, rdt)
-	if film != "" and int(rec.ticks) % maxi(1, tick / 15) == 0:
+	if film != "" and int(rec.ticks) % maxi(1, tick / (30 if film_close else 15)) == 0:
 		_film_frame(pose)
 	if t >= cur.dur - 1e-6:
 		_end_case()
@@ -507,6 +510,31 @@ func _check(p: Dictionary, dt: float) -> void:
 			var v: float = ((J[k] - pj[k]) - dpel).length() / dt
 			_w("pop", v)
 			if v > POP_REL: _fail("J5", "%s moved %.1f m/s against the pelvis" % [k, v])
+	# J10 smoothness (report): world jerk of every joint, the third difference of its path. Buttery motion keeps it low;
+	# a pop, a snap or a step change in a speed shows as a spike. p95 over the case's ticks (the worst joint each tick)
+	if prev.has("J") and prev.has("Jv"):
+		var jmax := 0.0
+		var jv := {}
+		var ja := {}
+		for k in J:
+			var v3: Vector3 = (J[k] - prev.J[k]) / dt
+			jv[k] = v3
+			var a3: Vector3 = (v3 - prev.Jv[k]) / dt
+			ja[k] = a3
+			if prev.has("Ja"):
+				var jj: float = ((a3 - prev.Ja[k]) / dt).length()
+				jmax = maxf(jmax, jj)
+				if OS.has_environment("BS_JERK"): rec.jk_by[k] = rec.jk_by.get(k, 0.0) + jj * jj
+				if OS.has_environment("BS_JERKT") and k == "ankleL" and jj > float(OS.get_environment("BS_JERKT")):
+					var fpl = rig.world_foot_placer.feet["L"]
+					print("    jk t=%.3f ankleL %.0f step=%s ft=%.2f dur=%.3f v=%s a=%s" % [t, jj, fpl.stepping, fpl.t, fpl.dur, v3.snappedf(0.01), a3.snappedf(0.1)])
+		prev.Jv = jv
+		if prev.has("Ja"): rec.jerk.append(jmax)
+		prev.Ja = ja
+	elif prev.has("J"):
+		var jv0 := {}
+		for k in J: jv0[k] = (J[k] - prev.J[k]) / dt
+		prev.Jv = jv0
 	prev.J = J
 	prev.eye = body.motor.swimmer.pos
 	# J6 world: spheres along limbs (mannequin radii)
@@ -535,6 +563,10 @@ func _check(p: Dictionary, dt: float) -> void:
 	for side in ["L", "R"]:
 		var fin: Transform3D = p["leg" + side].finMat
 		var soles := _sole_points_full(fin)
+		if p["leg" + side].has("toeMat"):
+			# with a toe joint the toe end of the plate follows the toe bone (bent at the ball, toe frame origin = ball on the sole line)
+			var tm: Transform3D = p["leg" + side].toeMat
+			soles[2] = tm * Vector3(0, SOLE_TOE - 0.11, 0); soles[5] = tm * Vector3(SOLE_X, SOLE_TOE - 0.11, 0); soles[6] = tm * Vector3(-SOLE_X, SOLE_TOE - 0.11, 0)
 		var lowest_gap := INF
 		for sp_ in soles:
 			var h: Dictionary = wq.ray_down(sp_.x, sp_.z, sp_.y + 0.6, 2.0)
@@ -626,6 +658,26 @@ func _film_frame(pose: Dictionary) -> void:
 	var side := Vector3(-3.2, 0.9, 1.6) if cur.kind in ["wall", "ramp", "step", "stairs", "overhang", "shore"] else Vector3(3.6, 0.8, 1.2)
 	if cur.kind == "cave": side = Vector3(4.5, 1.2, 0.5)
 	var tgt := p + Vector3(0, 0.75, 0)
+	if film_close:
+		# side-on to her heading, 2.3 m out, framing her from feet to head; the side follows her slowly so turns stay readable
+		var pel: Vector3 = pose.pelvisPos
+		var br: Vector3 = pose.get("bodyRight", Vector3.RIGHT)
+		br.y = 0.0
+		if br.length() < 0.1: br = Vector3.RIGHT
+		br = br.normalized()
+		if cam_side == Vector3.ZERO or frame_i == 0: cam_side = br
+		if cam_side.dot(br) < 0.0: br = -br     # (keep the same side when she reverses)
+		cam_side = cam_side.slerp(br, 0.06).normalized()
+		tgt = pel + Vector3(0, 0.08, 0)
+		var cp := tgt + cam_side * 2.6 + Vector3(0, 0.10, 0)
+		cam.fov = 38.0
+		cam.global_position = cam.global_position.lerp(cp, 0.35) if frame_i > 0 else cp
+		cam.look_at(tgt)
+		var fails0: String = "  ".join(rec.fail.map(func(f): return f.substr(0, f.find(" at t="))))
+		label.text = "%s\nt = %.1f s   %s   %s" % [cur.name, t, pose.mode, "all checks holding" if fails0 == "" else "FAILING: " + fails0]
+		RenderingServer.frame_post_draw.connect(_film_save.bind("%s/f%05d.png" % [film_case_dir, frame_i]), CONNECT_ONE_SHOT)
+		frame_i += 1
+		return
 	cam.global_position = cam.global_position.lerp(p + side, 0.15) if frame_i > 0 else p + side
 	cam.look_at(tgt)
 	var fails: String = "  ".join(rec.fail.map(func(f): return f.substr(0, f.find(" at t="))))
@@ -642,6 +694,15 @@ func _end_case() -> void:
 	var summary := "bone %.2f mm, span %.0f%%, elbow %.0f, knee %.0f, knee back %.0f mm, neck +%.2f, head/chest %.0f, pop %.1f m/s, pelvis %.2f m, rock %d ticks, sole under %.0f mm, stand gap %.0f mm, slide %.0f mm, legs %.0f mm, torso %.0f mm" % [
 		w.bone_mm, w.span * 100.0, w.elbow, w.knee, w.knee_back * 1000.0, w.neck, w.head_chest, w.pop, w.pelvis_jump, w.pen_run,
 		w.sole_under * 1000.0, w.stand_gap * 1000.0, w.skate * 1000.0, w.leg_overlap * 1000.0, w.torso_sink * 1000.0]
+	var jk: Array = rec.jerk.duplicate()
+	jk.sort()
+	var jerk_p95: float = jk[int(jk.size() * 0.95)] if jk.size() > 0 else 0.0
+	var jerk_p50: float = jk[int(jk.size() * 0.50)] if jk.size() > 0 else 0.0
+	w["jerk_p95"] = jerk_p95
+	w["jerk_p50"] = jerk_p50
+	summary += ", jerk p50 %.0f p95 %.0f m/s3" % [jerk_p50, jerk_p95]
+	if OS.has_environment("BS_JERK"):
+		for k in rec.jk_by: summary += "\n        jerk %s rms %.0f" % [k, sqrt(rec.jk_by[k] / maxf(1.0, rec.jerk.size()))]
 	var fails: Array = rec.fail.map(func(f): return "%s  (%d ticks)" % [f, rec.count.get(f.substr(0, f.find(" ")), 1)])
 	var known := ""
 	for k in KNOWN:

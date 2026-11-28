@@ -27,18 +27,28 @@ const MAX_STEP := 1.0 / 55.0     # longest rig step; a longer frame is caught up
 const SWIM_ANKLE_RATE := 6.0
 var swim_ankle_rel := {}
 var swing_floor := {"L": NAN, "R": NAN}
+var swing_floor_v := {"L": 0.0, "R": 0.0}     # the speed the swing floor is rising at
 var pelv_yaw_off := 0.0     # pelvis held back by a planted foot's hip rotation range (fast turns)
 var support_dg := 0.0     # pelvis ground from the feet's support minus the floor under her centre (stairs)
 var pelvis_yield := 0.0     # how far the pelvis is lowered so a planted foot stays reachable
-var land_drop := {"L": 0.0, "R": 0.0}     # a foot that touched down above where it stands settles, not snaps
+var pivot_carry := {"L": Vector3.ZERO, "R": Vector3.ZERO}     # the planted foot's last pivot offset, faded through lift-off
+var land_drop := {"L": -INF, "R": -INF}     # a foot that touched down above where it stands settles, not snaps
 var last_ank := {"L": NAN, "R": NAN}
 var last_stepping := {"L": false, "R": false}
+var plant_off := {"L": Vector2.ZERO, "R": Vector2.ZERO}     # where the contact touched down, against where the plant puts it
+var plant_fresh := {"L": true, "R": true}
 var land_age := {"L": 0.0, "R": 0.0}     # seconds each foot has been planted
 const FOOT_R := 0.035       # foot half-width used for wall clearance
 ## The sole plate's heel, ball-centre and toe ends plus its four corners in the foot frame (the mannequin's sole box:
 ## centre (0, 0.058, -0.046), 0.056 x 0.168), 4 mm above its underside: what the toe lift keeps out of the ground.
 const SOLE_PTS := [Vector3(0, -0.026, -0.048), Vector3(0, 0.058, -0.048), Vector3(0, 0.142, -0.048),
 	Vector3(0.028, -0.026, -0.048), Vector3(-0.028, -0.026, -0.048), Vector3(0.028, 0.142, -0.048), Vector3(-0.028, 0.142, -0.048)]
+## the toe end of the plate with the toes bent up 1 rad at the ball: what even a full toe bend can't clear still lifts the ankle
+const SOLE_PTS_TOE_BENT := [Vector3(0, 0.11 + 0.032 * 0.5403, -0.048 + 0.032 * 0.8415), Vector3(0.028, 0.11 + 0.032 * 0.5403, -0.048 + 0.032 * 0.8415),
+	Vector3(-0.028, 0.11 + 0.032 * 0.5403, -0.048 + 0.032 * 0.8415)]
+## planted: the heel, mid and ball rows (the toes bend at the ball and lie on the ground, see _skeleton)
+const SOLE_PTS_PLANTED := [Vector3(0, -0.026, -0.048), Vector3(0, 0.058, -0.048), Vector3(0, 0.11, -0.048),
+	Vector3(0.028, -0.026, -0.048), Vector3(-0.028, -0.026, -0.048), Vector3(0.028, 0.11, -0.048), Vector3(-0.028, 0.11, -0.048)]
 const NECK_LEN := 0.118      # chest to skull base, Thalassa's standing value
 var stature_m := 1.38
 var upper_arm_len := 0.245
@@ -314,7 +324,297 @@ func update_swim(dt: float, s, _input, total_time: float, env: Dictionary, sense
 		for i in n - 1:
 			_update_swim_step(dt / n, s, _input, total_time - dt * float(n - 1 - i) / n, env, sense, on_stroke_pull, on_shore_footstep)
 		dt /= n
-	return _update_swim_step(dt, s, _input, total_time, env, sense, on_stroke_pull, on_shore_footstep)
+	var pose := _update_swim_step(dt, s, _input, total_time, env, sense, on_stroke_pull, on_shore_footstep)
+	if not thalassa_exact:
+		pose = _skeleton(pose, dt, s, env)
+	return pose
+
+## M04 skeleton 0.7: the full bone chain the rig's anchors imply (spine_01..03, clavicles, toes), on top of the solved
+## pose. Spine: a Hermite curve from the pelvis to the chest along their up axes, twist and bend shared along it.
+## Shoulder girdle: the clavicle lifts and comes forward with the upper arm (scapulohumeral rhythm, ~1 deg of girdle
+## per 2 deg of arm past 30 deg), the arm re-solved from the moved shoulder to the same hand. Toes: bend at the ball
+## so a planted foot rolling onto its ball keeps its toes on the ground.
+var girdle := {"L": Vector3.ZERO, "R": Vector3.ZERO}
+var girdle_v := {"L": Vector3.ZERO, "R": Vector3.ZERO}
+var ft_r := Vector3.ZERO          # follow-through: the upper body's lag rotation (rotation vector) and its rate
+var ft_w := Vector3.ZERO
+var ft_v := Vector3.ZERO          # smoothed pelvis velocity, its previous value and the pelvis position last tick
+var ft_a := Vector3.ZERO
+var ft_p := Vector3.INF
+var soft := {}                    # soft arms: per side, the elbow and hand offsets from the shoulder and their rates
+var toe_bend := {"L": 0.0, "R": 0.0}
+const TOE_LEN := 0.032       # ball to the toe end of the sole plate
+const BALL_Y := 0.11          # foot local: the ball of the foot (toe joint), along the foot
+const SOLE_Z := -0.046        # foot local: the sole plane
+
+static func _ortho(b: Basis) -> Basis:
+	return b.orthonormalized()
+
+## a bone from a to b: +y along it, +z toward ref (the joint's bend side), as the skin binds it
+## the ground under a toe tip rises out of the foot's ground plane (a tread or riser ahead, not just the slope it stands on)
+static func _rises(gq: float, g_ball: float, q: Vector3, plane_g: float, fn: Vector3, fx: float, fz: float) -> bool:
+	if not is_finite(gq) or not is_finite(g_ball): return false
+	if not is_finite(plane_g): return gq > g_ball + 0.01
+	var plane_y := plane_g - (fn.x * (q.x - fx) + fn.z * (q.z - fz)) / maxf(0.3, fn.y)
+	return gq > plane_y + 0.01
+
+## Follow-through (skeleton only, the motor's pose and the tests' joints are untouched): the upper body is a damped
+## spring on the pelvis. When the hips speed up, the chest trails them a little; when they stop, it carries on, then
+## settles back with one small overshoot. The head counters most of that tilt so the gaze stays level.
+const FT_GAIN := 0.016        # rad of lean per m/s2 of pelvis acceleration
+const FT_MAX := 0.07          # rad
+const FT_W := 9.0             # spring rate (rad/s): ~0.7 s to settle
+const FT_Z := 0.55            # damping ratio: one soft overshoot
+func _follow_through(skel: Dictionary, dt: float, s) -> void:
+	var pp: Vector3 = skel["pelvis"].origin
+	if not ft_p.is_finite() or pp.distance_to(ft_p) > 0.5 or dt <= 0.0:
+		ft_p = pp; ft_v = Vector3.ZERO; ft_a = Vector3.ZERO; ft_r = Vector3.ZERO; ft_w = Vector3.ZERO
+		return
+	var v := (pp - ft_p) / dt
+	ft_p = pp
+	var kv := 1.0 - exp(-dt / 0.06)
+	var nv := ft_v.lerp(v, kv)
+	var a := (nv - ft_v) / dt
+	ft_v = nv
+	ft_a = ft_a.lerp(a, 1.0 - exp(-dt / 0.06))
+	var up := Vector3.UP
+	var a_h := Vector3(ft_a.x, 0.0, ft_a.z)
+	if s.ground_walk_blend < 0.5: a_h = ft_a - up * ft_a.dot(up) * 0.5     # swimming: vertical surges count half
+	var drive := -up.cross(a_h) * FT_GAIN                                   # the top trails the acceleration
+	if drive.length() > FT_MAX: drive = drive.normalized() * FT_MAX
+	# semi-implicit spring, sub-stepped so 30 Hz behaves like 120 Hz
+	var n := maxi(1, ceili(dt / (1.0 / 120.0)))
+	var h := dt / n
+	for _i in n:
+		ft_w += (-(FT_W * FT_W) * (ft_r - drive) - 2.0 * FT_Z * FT_W * ft_w) * h
+		ft_r += ft_w * h
+	if ft_r.length() > FT_MAX * 1.3: ft_r = ft_r.normalized() * FT_MAX * 1.3
+	var ang := ft_r.length()
+	if ang < 1e-5: return
+	var axis := ft_r / ang
+	var piv: Vector3 = skel["spine_01"].origin
+	var parts := {"spine_02": 0.5, "spine_03": 1.0, "neck": 1.0, "head": 1.0,
+		"clavicle_l": 1.0, "clavicle_r": 1.0, "upperarm_l": 1.0, "upperarm_r": 1.0,
+		"lowerarm_l": 1.0, "lowerarm_r": 1.0, "hand_l": 1.0, "hand_r": 1.0}
+	for b in parts:
+		if not skel.has(b): continue
+		var rb := Basis(axis, ang * parts[b])
+		var x: Transform3D = skel[b]
+		skel[b] = Transform3D(rb * x.basis, piv + rb * (x.origin - piv))
+	# the head keeps most of its own orientation (gaze stays level)
+	var hx: Transform3D = skel["head"]
+	skel["head"] = Transform3D(Basis(axis, -ang * 0.7) * hx.basis, hx.origin)
+
+## Soft arms (Gary: "too stiff, needs to be softer"; after "Improving ragdolls forever": soft joint limits and a
+## pull towards the relaxed neutral body posture). Skeleton only, like the follow-through. Each arm is a light
+## active ragdoll: the elbow and the hand are masses on damped springs that chase the animated pose, carried by the
+## shoulder (so they lag when the body speeds up, turns or lands, and settle after), with bone lengths kept rigid.
+## The elbow's bend has soft limits: it slows into its stops (straight, and fully bent) instead of hitting them.
+## A small share of every target is the relaxed pose (upper arm hanging a little forward, elbow bent ~40 deg), so
+## nothing is ever held rigidly.
+const SOFT_W_ELBOW := 10.0        # spring rate, rad/s
+const SOFT_W_HAND := 6.5         # (Gary: elbows looser) the forearm is a loose pendulum on the elbow
+const SOFT_Z := 0.45              # damping ratio: loose, a visible overshoot that settles
+const SOFT_NEUTRAL := 0.15        # share of the relaxed pose in every target
+const SOFT_LIMIT_LO := 0.10       # elbow flexion stops (rad) and the soft zone before them
+const SOFT_LIMIT_HI := 2.45
+const SOFT_ZONE := 0.35
+func _soft_arms(skel: Dictionary, dt: float, s) -> void:
+	if dt <= 0.0: return
+	var chest: Transform3D = skel["spine_03"]
+	var c_up := chest.basis.y.normalized()
+	var c_fwd := -chest.basis.x.normalized().cross(c_up)
+	for sd in ["l", "r"]:
+		var ua: Transform3D = skel["upperarm_" + sd]
+		var la: Transform3D = skel["lowerarm_" + sd]
+		var hx: Transform3D = skel["hand_" + sd]
+		var sh := ua.origin
+		var l1 := sh.distance_to(la.origin)
+		var l2 := la.origin.distance_to(hx.origin)
+		# the relaxed pose, in the chest's frame
+		var side := -1.0 if sd == "l" else 1.0
+		var n_up := (-c_up * 0.94 + c_fwd * 0.30 + chest.basis.x.normalized() * side * 0.10).normalized()
+		var n_el := sh + n_up * l1
+		var n_fa := (n_up * cos(0.70) + c_fwd * sin(0.70)).normalized()
+		var n_h := n_el + n_fa * l2
+		var te := (la.origin - sh).lerp(n_el - sh, SOFT_NEUTRAL)
+		var th := (hx.origin - sh).lerp(n_h - sh, SOFT_NEUTRAL)
+		var st: Dictionary = soft.get(sd, {})
+		if st.is_empty() or sh.distance_to(st.sh) > 0.5:
+			st = {"sh": sh, "shv": Vector3.ZERO, "e": te, "ev": Vector3.ZERO, "h": th, "hv": Vector3.ZERO}
+			soft[sd] = st
+			continue
+		var shv: Vector3 = (sh - (st.sh as Vector3)) / dt
+		var sha: Vector3 = (shv - (st.shv as Vector3)) / dt
+		st.sh = sh; st.shv = shv
+		sha = sha.limit_length(60.0)     # (a teleport-sized jolt is not a force)
+		var n := maxi(1, ceili(dt / (1.0 / 120.0)))
+		var h := dt / n
+		var e: Vector3 = st.e; var ev: Vector3 = st.ev
+		var hp: Vector3 = st.h; var hv: Vector3 = st.hv
+		for _i in n:
+			ev += (-(SOFT_W_ELBOW * SOFT_W_ELBOW) * (e - te) - 2.0 * SOFT_Z * SOFT_W_ELBOW * ev - sha) * h
+			hv += (-(SOFT_W_HAND * SOFT_W_HAND) * (hp - th) - 2.0 * SOFT_Z * SOFT_W_HAND * hv - sha) * h
+			e += ev * h
+			hp += hv * h
+			# rigid bones: the elbow on its sphere round the shoulder, the hand on its sphere round the elbow
+			var ed := e.normalized() * l1
+			ev -= e.normalized() * ev.dot(e.normalized()); e = ed
+			var fd := hp - e
+			if fd.length() < 1e-5: fd = th - te
+			hp = e + fd.normalized() * l2
+		# soft limits on the elbow's bend: past the start of the zone the bend is eased towards the stop
+		var u_dir := e.normalized()
+		var f_dir := (hp - e).normalized()
+		var flex := acos(clampf(u_dir.dot(f_dir), -1.0, 1.0))
+		var lim := flex
+		if flex > SOFT_LIMIT_HI - SOFT_ZONE:
+			var x := flex - (SOFT_LIMIT_HI - SOFT_ZONE)
+			lim = SOFT_LIMIT_HI - SOFT_ZONE + SOFT_ZONE * (1.0 - exp(-x / SOFT_ZONE))
+		elif flex < SOFT_LIMIT_LO + SOFT_ZONE:
+			var x2 := (SOFT_LIMIT_LO + SOFT_ZONE) - flex
+			lim = SOFT_LIMIT_LO + SOFT_ZONE - SOFT_ZONE * (1.0 - exp(-x2 / SOFT_ZONE))
+		if absf(lim - flex) > 1e-4:
+			var ax := u_dir.cross(f_dir)
+			if ax.length() < 1e-5: ax = (te.normalized()).cross((th - te).normalized())
+			if ax.length() > 1e-5:
+				f_dir = (Basis(ax.normalized(), lim - flex) * f_dir).normalized()
+				var hp2 := e + f_dir * l2
+				hv += (hp2 - hp) / dt * 0.0     # (position eased, the speed is left to the spring)
+				hp = hp2
+		st.e = e; st.ev = ev; st.h = hp; st.hv = hv
+		# rebuild the bones: each turned by the rotation that takes its animated direction to the soft one
+		var E := sh + e
+		var H := sh + hp
+		var q1 := Quaternion((la.origin - sh).normalized(), e.normalized()) if (la.origin - sh).normalized().dot(e.normalized()) > -0.999 else Quaternion()
+		var nu := Transform3D(Basis(q1) * ua.basis, sh)
+		var fa0 := (hx.origin - la.origin).normalized()
+		var fa_rot := Basis(q1) * fa0
+		var q2 := Quaternion(fa_rot.normalized(), (H - E).normalized()) if fa_rot.normalized().dot((H - E).normalized()) > -0.999 else Quaternion()
+		var nl := Transform3D(Basis(q2) * Basis(q1) * la.basis, E)
+		var nh := Transform3D(Basis(q2) * Basis(q1) * hx.basis, H)
+		skel["upperarm_" + sd] = nu
+		skel["lowerarm_" + sd] = nl
+		skel["hand_" + sd] = nh
+
+static func seg_xf(a: Vector3, b: Vector3, ref: Vector3) -> Transform3D:
+	var y := (b - a).normalized()
+	var z := ref - y * ref.dot(y)
+	if z.length() < 1e-4: z = y.cross(Vector3.RIGHT if absf(y.x) < 0.9 else Vector3.FORWARD)
+	z = z.normalized()
+	return Transform3D(Basis(y.cross(z), y, z), a)
+
+func _skeleton(pose: Dictionary, dt: float, s, env: Dictionary) -> Dictionary:
+	var skel := {}
+	var pm: Transform3D = pose.pelvisMat
+	var cm: Transform3D = pose.chestMat
+	var pb := _ortho(pm.basis)
+	var cb := _ortho(cm.basis)
+	var p0: Vector3 = pose.pelvisPos
+	var p3: Vector3 = pose.chestPos
+	var L := p0.distance_to(p3)
+	var t0 := pb.y * L
+	var t1 := cb.y * L
+	var qp := pb.get_rotation_quaternion()
+	var qc := cb.get_rotation_quaternion()
+	skel["pelvis"] = Transform3D(pb, p0)
+	var names := ["spine_01", "spine_02"]
+	var us := [0.36, 0.68]
+	for i in 2:
+		var u: float = us[i]
+		var h00 := 2.0 * u * u * u - 3.0 * u * u + 1.0
+		var h10 := u * u * u - 2.0 * u * u + u
+		var h01 := -2.0 * u * u * u + 3.0 * u * u
+		var h11 := u * u * u - u * u
+		var pos := p0 * h00 + t0 * h10 + p3 * h01 + t1 * h11
+		var tan := (p0 * (6.0 * u * u - 6.0 * u) + t0 * (3.0 * u * u - 4.0 * u + 1.0) + p3 * (-6.0 * u * u + 6.0 * u) + t1 * (3.0 * u * u - 2.0 * u)).normalized()
+		var b := Basis(qp.slerp(qc, u))
+		var tw := Quaternion(b.y, tan) if b.y.dot(tan) > -0.99 else Quaternion()
+		skel[names[i]] = Transform3D(Basis(tw) * b, pos)
+	skel["spine_03"] = Transform3D(cb, p3)
+	skel["neck"] = Transform3D(_ortho(pose.headMat.basis), pose.neckPos)
+	skel["head"] = Transform3D(_ortho(pose.headMat.basis), pose.headMat.origin)
+	# shoulder girdle
+	var c_up := cb.y
+	var c_right := cb.x
+	var c_fwd := -cb.x.cross(cb.y)
+	var surf = null
+	if env.get("nearest_surface") != null and s.ground_walk_blend < 0.15:
+		surf = {"floor_height": env.get("floor_height"), "nearest_surface": env.get("nearest_surface")}
+	for side in ["L", "R"]:
+		var sd := -1.0 if side == "L" else 1.0
+		var arm: Dictionary = pose["arm" + side]
+		var sh0: Vector3 = pose["shoulder" + side]
+		var sc := p3 + c_up * 0.035 + c_right * (sd * 0.018)          # sternoclavicular joint
+		var ua: Vector3 = (arm.mid - arm.root).normalized()
+		var elev := asin(clampf(ua.dot(c_up), -1.0, 1.0)) + PI * 0.5   # 0 hanging, PI overhead
+		var lift := clampf((elev - 0.52) * 0.5, 0.0, 0.62) * 0.55          # the clavicle's share of the girdle's rise
+		var reach := clampf(ua.dot(c_fwd), 0.0, 1.0) * 0.30 - clampf(-ua.dot(c_fwd), 0.0, 1.0) * 0.12
+		var want := Vector3(lift, reach, 0.0)
+		# critically damped (half-life ~60 ms): the girdle follows the arm, a beat behind, never snapping
+		var w := 11.5
+		var g: Vector3 = girdle[side]
+		var gv: Vector3 = girdle_v[side]
+		var acc := (want - g) * (w * w) - gv * (2.0 * w)
+		gv += acc * dt
+		g += gv * dt
+		girdle[side] = g; girdle_v[side] = gv
+		var cv := sh0 - sc
+		var rot := Basis(c_fwd, -sd * g.x) * Basis(c_up, sd * g.y)
+		var sh := sc + rot * cv
+		var dsh := sh - sh0
+		skel["clavicle_" + side.to_lower()] = seg_xf(sc, sh, c_fwd)
+		if dsh.length() > 1e-4:
+			var pole: Vector3 = arm.mid + (arm.mid - (arm.root + arm.eff) * 0.5).normalized() * 0.3
+			var na: Dictionary = solve_noclip_arm(sh, arm.eff, pole, surf, {"softReach": 0.985, "softMargin": 0.04})
+			var hm: Transform3D = pose["hand" + side + "Mat"]
+			hm.origin += na.eff - arm.eff
+			pose["hand" + side + "Mat"] = hm
+			pose["arm" + side] = na
+			pose["shoulder" + side] = sh
+			pose["clavicle" + side] = sc.lerp(sh, 0.45)
+		var a2: Dictionary = pose["arm" + side]
+		skel["upperarm_" + side.to_lower()] = seg_xf(a2.root, a2.mid, a2.bendAxis)
+		skel["lowerarm_" + side.to_lower()] = seg_xf(a2.mid, a2.eff, a2.bendAxis)
+		skel["hand_" + side.to_lower()] = Transform3D(_ortho(pose["hand" + side + "Mat"].basis), pose["hand" + side + "Mat"].origin)
+	# toes
+	var get_floor = env.get("floor_height")
+	for side in ["L", "R"]:
+		var lg: Dictionary = pose["leg" + side]
+		var fm: Transform3D = lg.finMat
+		var ball: Vector3 = fm * Vector3(0, BALL_Y, SOLE_Z)
+		var want_b := 0.0
+		if get_floor != null and s.ground_walk_blend > 0.5:
+			# the least bend that keeps the toe end (centre and both corners) out of the ground; the planted sole lift
+			# rolls the foot over the ball and leaves the toes to this (it only lifts for toes that a full bend can't clear)
+			var g_b: float = get_floor.call(ball.x, ball.z)
+			if is_finite(g_b) and ball.y - g_b < 0.03:
+				var tips := []
+				for x in [0.0, 0.028, -0.028]: tips.append(Vector3(x, TOE_LEN, 0.0))
+				for i in 21:
+					var th := float(i) * 0.05
+					var tbs := fm.basis * Basis(Vector3.RIGHT, th)
+					var clear := true
+					for tl in tips:
+						var q: Vector3 = ball + tbs * tl
+						var gq: float = get_floor.call(q.x, q.z)
+						if is_finite(gq) and absf(gq - g_b) < 0.06 and q.y < gq - 0.001: clear = false; break
+					want_b = th
+					if clear: break
+		# bends at once as far as the ground needs (the toes never go into it), relaxes smoothly
+		var k := 1.0 - exp(-dt / 0.06)
+		toe_bend[side] = maxf(want_b, lerpf(toe_bend[side], want_b, k))
+		var tb := fm.basis * Basis(Vector3.RIGHT, toe_bend[side])
+		var toe := Transform3D(tb, ball)
+		lg["toeMat"] = toe
+		skel["thigh_" + side.to_lower()] = seg_xf(lg.ik.root, lg.ik.mid, lg.ik.bendAxis)
+		skel["calf_" + side.to_lower()] = seg_xf(lg.ik.mid, lg.ik.eff, lg.ik.bendAxis)
+		skel["foot_" + side.to_lower()] = Transform3D(_ortho(fm.basis), fm.origin)
+		skel["ball_" + side.to_lower()] = Transform3D(_ortho(toe.basis), toe.origin)
+	_follow_through(skel, dt, s)
+	_soft_arms(skel, dt, s)
+	pose["skel"] = skel
+	return pose
 
 func _update_swim_step(dt: float, s, _input, total_time: float, env: Dictionary, sense = null, on_stroke_pull = null, on_shore_footstep = null) -> Dictionary:
 	_step_dt = clampf(dt, 0.0001, 0.05)
@@ -1012,7 +1312,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		"getFloorHeight": get_floor, "crouchBlend": s.shore_crouch_blend,
 		"colliders": sense.get("colliders") if sense != null else null, "pois": sense.get("pois") if sense != null else null})
 	var pelv_yaw: float = yaw + loco.pelvisYaw
-	if not thalassa_exact and not OS.has_environment("NO_YAWLAG"):
+	if not thalassa_exact:
 		# ROOT (stress monkey slips): a planted foot can't turn, and the hip rotates only int 0.20 / ext 0.48 rad over
 		# it (plus a little ankle). Turning faster than the steps come, the leg solver twisted the planted foot on the
 		# ground (ball moving 5-12 cm, ankle still). A body keeps the pelvis with the stance foot and lets the spine take
@@ -1166,17 +1466,34 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 						var pp := Vector3(fx, 0, fz) + tdir * minf(left, k * 0.05)
 						for off in [-0.03, 0.07, 0.17]:
 							var g_h: float = get_floor.call(pp.x + ffw.x * off, pp.z + ffw.z * off)
-							if is_finite(g_h) and g_h - f0 < 0.36 and g_h <= maxf(f0, f1) + 0.02: tgt_floor = maxf(tgt_floor, g_h)     # stepping down, the tread being left counts too (toe over its edge)
+							if is_finite(g_h) and g_h - f0 < 0.36:
+								# ROOT (smoothness, ramps): the foot lies along its own ground (groundUp = fn). What it must clear is
+								# ground ahead that rises above that plane (a riser, a tread), not the slope it is pitched along:
+								# counted level, 37 cm ahead of a foot on a 30 deg ramp is the whole step up, asked for at lift-off
+								var qx: float = pp.x + ffw.x * off
+								var qz: float = pp.z + ffw.z * off
+								g_h = plane_g + maxf(0.0, g_h - (plane_g - (fn.x * (qx - fx) + fn.z * (qz - fz)) / maxf(0.3, fn.y)))
+							if is_finite(g_h) and g_h - f0 < 0.36: tgt_floor = maxf(tgt_floor, minf(g_h, maxf(f0, f1) + 0.02 * (1.0 - smoothstep(0.5, 1.0, fst.t))))     # stepping down, the tread being left counts too (toe over its edge); capped, not dropped, at the landing height (dropping a sample as it crossed the cap made the swing floor chatter on a ramp)
 			var prev_f: float = swing_floor[key]
 			if not fst.stepping or is_nan(prev_f) or not is_finite(tgt_floor):
 				swing_floor[key] = tgt_floor
+				swing_floor_v[key] = 0.0
 			elif tgt_floor >= prev_f:
-				swing_floor[key] = minf(tgt_floor, prev_f + 3.0 * dt)     # rises at most 3 m/s (the hull looks ahead for it)
+				# rises at most 3 m/s (the hull looks ahead for it)
+				# ROOT (smoothness, 43 000 m/s3 at every lift-off towards higher ground): the rise has a speed of its own,
+				# which builds up at 80 m/s2 and eases into the height it is going to; it went 0 -> 3 m/s in one tick
+				var v_h: float = minf(minf(3.0, swing_floor_v[key] + 80.0 * dt), sqrt(2.0 * 80.0 * (tgt_floor - prev_f)) + 0.2)
+				swing_floor[key] = minf(tgt_floor, prev_f + v_h * dt)
+				swing_floor_v[key] = (swing_floor[key] - prev_f) / dt
 			else:
 				# falls at 1.8 m/s, or faster if that is what reaches the landing ground by touch-down (a swing cut short
 				# by the stance leg's reach landed with the floor still a riser up: 13 cm in one tick, stress B37 at 120 Hz)
 				var rem_s: float = maxf(dt, (1.0 - fst.t) * fst.get("dur", 0.36))
-				swing_floor[key] = maxf(tgt_floor, prev_f - maxf(1.8, (prev_f - tgt_floor) / rem_s) * dt)
+				# (smoothness) the gap closes as the square of the time left: it reaches the landing ground at touch-down
+				# with no speed left, where a fixed rate met the ground at up to 3 m/s
+				var kq := clampf((rem_s - dt) / rem_s, 0.0, 1.0)
+				swing_floor[key] = maxf(tgt_floor, minf(prev_f - 0.3 * dt, tgt_floor + (prev_f - tgt_floor) * kq * kq))
+				swing_floor_v[key] = 0.0
 			fgy = swing_floor[key]
 		var swing_lift := maxf(0.0, fst.pos.y - floor_here)
 		var wade_extra: float = sin(PI * fst.t) * wade_b * 0.036 if fst.stepping else 0.0
@@ -1194,7 +1511,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		# ROOT (stress J7 slide): a planted foot is a world constant until it lifts; out of the hip's reach box it asks
 		# for a step (below, ahead of time) instead of being dragged into the box
 		if thalassa_exact or fst.stepping or s.shore_is_airborne: ft = clamped
-		if not thalassa_exact and not OS.has_environment("NO_CLIFT") and fst.stepping and not s.shore_is_airborne and get_floor != null \
+		if not thalassa_exact and fst.stepping and not s.shore_is_airborne and get_floor != null \
 				and Vector2(clamped.x - ft_raw.x, clamped.z - ft_raw.z).length() > 0.001:
 			# ROOT (stress B12 step down at 30/120 Hz): a long swing held back inside the reach box sat over the tread
 			# it was leaving while its height came down to the landing below: the sole went 11 cm into the step. Held
@@ -1252,10 +1569,12 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			# ROOT (stress B35 knee pop at 120 Hz): a swing cut short by the stance budget touched down with its ankle still
 			# 10 cm up (the swing floor over the slope's uphill side); planted, the ankle dropped in one tick. The landed
 			# foot settles onto its ground at 4 m/s instead (two to three ticks)
+			# (land_drop holds the height the ankle may not go below while it settles; applied after the sole lift, as a
+			# floor, so it does not add to the lift that already holds the foot up)
 			if last_stepping[foot_k] and not fst.stepping and not s.shore_is_airborne and is_finite(last_ank[foot_k]):
-				land_drop[foot_k] = clampf(last_ank[foot_k] - ft.y, 0.0, 0.15)
-			land_drop[foot_k] = maxf(0.0, land_drop[foot_k] - 4.0 * dt) if not fst.stepping else 0.0
-			ft.y += land_drop[foot_k]
+				land_drop[foot_k] = last_ank[foot_k]
+			elif fst.stepping or s.shore_is_airborne:
+				land_drop[foot_k] = -INF
 		var solved := BM.leg(hip, ft, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
 		if not thalassa_exact:
 			var fk5 := "L" if side < 0 else "R"
@@ -1276,7 +1595,7 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 					var bf := clampf(rq.dot(pelv_fwd), lerpf(-0.34, -0.45, mra), lerpf(0.36, 0.45, mra))
 					var bc := hp + pelv_right_base * bl + pelv_fwd * bf
 					var box_ex := Vector2(bc.x - ft.x, bc.z - ft.z).length()
-					return maxf(pr2.ik.eff.distance_to(ft), box_ex - 0.013 if not OS.has_environment("NO_BOX") else 0.0)
+					return maxf(pr2.ik.eff.distance_to(ft), box_ex - 0.013)
 				var TOL := 0.012
 				if miss_at.call(0.0) > TOL: tl = 0.0
 				elif miss_at.call(0.48) > TOL:
@@ -1377,15 +1696,44 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 			# swung the ball 5 cm backwards at every push-off; the ball (heel up) or the heel (toe up) is held where it
 			# would be with the foot flat, and the ankle moves instead.
 			var adj := Vector3.ZERO
+			# ROOT (smoothness, jerk 77 000 m/s3 at every lift-off): planted, the ankle is offset so the foot pivots on its
+			# ball (heel up); the offset ended the tick the swing began and the ankle jumped 2 cm and back. It is carried
+			# into the swing and faded out over its first third
+			if fst.stepping and not s.shore_is_airborne and pivot_carry[foot_k].length() > 1e-4:
+				adj = pivot_carry[foot_k] * (1.0 - smoothstep(0.0, 0.35, fst.t))
+				if adj.length() > 1e-4:
+					solved = BM.leg(hip, ft + adj, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
+			# (same at take-off into the air: the offset decays over ~0.1 s instead of ending the tick she leaves the ground)
+			elif s.shore_is_airborne and pivot_carry[foot_k].length() > 1e-4:
+				pivot_carry[foot_k] *= exp(-dt / 0.05)
+				adj = pivot_carry[foot_k]
+				solved = BM.leg(hip, ft + adj, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
+			if fst.stepping or s.shore_is_airborne: plant_fresh[foot_k] = true
 			var heel_l := Vector3(0, -0.026, -0.048)
 			var ball_l := Vector3(0, 0.11, -0.048)
 			var flat_ball := Vector2(fx + sfw.x * ball_l.y, fz + sfw.z * ball_l.y)
 			var flat_heel := Vector2(fx + sfw.x * heel_l.y, fz + sfw.z * heel_l.y)
-			for _pass in 4:
+			# ROOT (skeleton: toes roll): a planted foot has a toe joint at the ball. Its toes bend back and lie on the
+			# ground (_skeleton toe bend), so the rigid toe tip no longer props the ankle up: the ball is the lowest
+			# point it rolls over and the heel lifts higher. A swinging foot keeps the whole sole (the toes clear steps).
+			# ROOT (smoothness): the whole swing too. Rigid again from 30 % of the swing, the toe end propped the ankle up
+			# over any rising ground until touch-down, where it bent again: the ankle dropped 2-4 cm in the landing tick
+			var rolls: bool = not thalassa_exact     # (early swing too: the toes leave the ground last, bent; made rigid at lift-off they pushed the ankle up in one tick)
+			# (airborne too: at take-off the toes stay bent as she leaves the ground; rigid again they would push the ankle up 5 cm in a tick)
+			var pts: Array = SOLE_PTS_PLANTED + SOLE_PTS_TOE_BENT if rolls else SOLE_PTS
+			# (in early swing the rigid toe end still counts where the ground under it rises above the ball's: a
+			# tread or riser ahead, which bent toes can't lie on; stress B37)
+			var rise_pts: Array = [SOLE_PTS[2], SOLE_PTS[5], SOLE_PTS[6]] if (rolls and fst.stepping) else []
+			for _pass in 8:
 				var lift := 0.0
-				for sp_ in SOLE_PTS:
+				var g_ball := INF
+				if not rise_pts.is_empty():
+					var bq: Vector3 = solved.finMat * Vector3(0, 0.11, -0.048)
+					g_ball = get_floor.call(bq.x, bq.z)
+				for sp_ in pts + rise_pts:
 					var q: Vector3 = solved.finMat * sp_
 					var gq: float = get_floor.call(q.x, q.z)
+					if sp_ in rise_pts and sp_.y > 0.13 and not _rises(gq, g_ball, q, plane_g, fn, fx, fz): continue
 					# lifted if its ground continues the ankle's ground plane (the toe pitched into the same floor), or if it
 					# is at most 6 cm under the ground there (in the air, or with the foothold rejected, the plane is the
 					# body's ground, not the foot's). Anything else is a toe in a riser or wall face: the wall push moves it
@@ -1399,15 +1747,27 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 					if fst.stepping and is_finite(gq):
 						var qa: Vector3 = q + sfw * 0.025
 						var ga: float = get_floor.call(qa.x, qa.z)
-						if is_finite(ga) and ga > gq and ga - (fgy if is_finite(fgy) else floor_here) < 0.36: lift = maxf(lift, ga + 0.01 - q.y)
+						# ROOT (smoothness, ramps): only ground that rises above the plane the foot lies along (a riser, a tread).
+						# Up a slope the ground 2.5 cm ahead is always higher: every sole point was lifted 2.4 cm + the margin the
+						# tick the swing began, and came down again the tick it ended
+						if is_finite(ga) and ga > gq and _rises(ga, ga, qa, plane_g, fn, fx, fz) and ga - (fgy if is_finite(fgy) else floor_here) < 0.36: lift = maxf(lift, ga + 0.01 - q.y)
 				lift = minf(lift, 0.14 - adj.y)
 				var hv := Vector2.ZERO
 				if not fst.stepping and not s.shore_is_airborne:
 					var hb_: Vector3 = solved.finMat * heel_l
 					var bb_: Vector3 = solved.finMat * ball_l
-					var anchor := flat_ball if bb_.y <= hb_.y else flat_heel
-					var cur_c := Vector2(bb_.x, bb_.z) if bb_.y <= hb_.y else Vector2(hb_.x, hb_.z)
-					hv = (anchor - cur_c).limit_length(0.08 - Vector2(adj.x, adj.z).length())
+					# ROOT (smoothness, ramps): which of the two is down is judged against the foot's ground, not in world height.
+					# Heel up on a 30 deg ramp the foot is about level in the world: the pivot flipped between ball and heel
+					# three times a stance, and the ankle jumped 16 mm each time
+					var ball_low: bool = (bb_ - hb_).dot(fn) <= 0.0
+					var anchor := flat_ball if ball_low else flat_heel
+					var cur_c := Vector2(bb_.x, bb_.z) if ball_low else Vector2(hb_.x, hb_.z)
+					# ROOT (smoothness): the contact stays where it touched down. The pivot was held where it would be with the
+					# foot flat on its plant; landing pitched, the ankle was pulled there in the landing tick (3-20 mm)
+					if _pass == 0 and plant_fresh[foot_k]:
+						plant_off[foot_k] = (cur_c - anchor).limit_length(0.04) if fn.y < 0.985 else Vector2.ZERO     # (on a slope only: on level ground the flat-foot anchor is already where she touched down, and the held offset made an out-of-reach drag in the random run 5 mm worse)
+						plant_fresh[foot_k] = false
+					hv = (anchor + plant_off[foot_k] - cur_c).limit_length(0.08 - Vector2(adj.x, adj.z).length())
 				if lift <= 0.001 and hv.length() < 0.001: break
 				adj += Vector3(hv.x, maxf(0.0, lift), hv.y)
 				solved = BM.leg(hip, ft + adj, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
@@ -1419,11 +1779,18 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 				# A swing foot that can't be lifted clear goes on ahead, along its way to its landing spot, as far as
 				# clears it (the knee comes forward and up); only if that does clear it
 				var ref_g: float = fgy if is_finite(fgy) else floor_here
+				# (judged on the points the lift above judged: rolling, the toes are bent and the rigid toe end only
+				# counts over rising ground; judged rigid it pushed the foot ahead 1 cm steps every early swing tick)
 				var sunk := func(fm: Transform3D) -> float:
 					var worst := 0.0
-					for sp_ in SOLE_PTS:
+					var gb := INF
+					if not rise_pts.is_empty():
+						var bq: Vector3 = fm * Vector3(0, 0.11, -0.048)
+						gb = get_floor.call(bq.x, bq.z)
+					for sp_ in pts + rise_pts:
 						var q: Vector3 = fm * sp_
 						var gq: float = get_floor.call(q.x, q.z)
+						if sp_ in rise_pts and sp_.y > 0.13 and not _rises(gq, gb, q, plane_g, fn, fx, fz): continue
 						if is_finite(gq) and gq - ref_g < 0.36: worst = maxf(worst, gq - q.y)
 					return worst
 				if sunk.call(solved.finMat) > 0.005:
@@ -1438,7 +1805,16 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 								break
 			# FIX (stress J6/J7): a planted foot the leg can no longer reach (the body climbed away from it) was
 			# dragged; step it like a clamped one
+			if not fst.stepping and is_finite(land_drop[foot_k]):
+				# eased: the gap to where the foot rests closes by e^(-40 t), not at a fixed rate
+				var rest_y: float = solved.ik.eff.y
+				var hold: float = minf(rest_y + (land_drop[foot_k] - rest_y) * exp(-40.0 * dt), land_drop[foot_k] - 1.2 * dt)     # (at least 1.2 m/s: planted, it may hover only briefly)
+				land_drop[foot_k] = hold if hold > rest_y + 0.0005 else -INF
+				if hold > rest_y + 0.0005:
+					adj.y += minf(hold - rest_y, 0.15)
+					solved = BM.leg(hip, ft + adj, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
 			var miss: float = solved.ik.eff.distance_to(ft + adj)
+			if not fst.stepping and not s.shore_is_airborne: pivot_carry[foot_k] = adj
 			var fk2 := "L" if side < 0 else "R"
 			if not fst.stepping and miss > 0.03:
 				world_foot_placer.forced[fk2] = maxf(world_foot_placer.forced[fk2], miss * (0.33 if (land_age[fk2] < 0.12 and miss <= HARD_MISS) else 1.0))
@@ -1460,6 +1836,40 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 		var target := chest_pos + (chest_right * lerpf(walk_l, run_l, rb) + (up * lerpf(walk_u, run_u, rb) + chest_fwd * lerpf(walk_f, run_f, rb)))
 		var jf: float = jmp.elbowFlare
 		var pole := sh + (chest_back * lerpf(lerpf(0.45, 0.72, rb), 0.56, jf) + (chest_right * (side * (lerpf(0.16, 0.26, wade_b) + jf * 0.34)) + up * lerpf(lerpf(-0.46, -0.34, wade_b), -0.30, jf)))
+		if not thalassa_exact:
+			# ROOT (Gary: arms "look like a dance" running): the hand was placed by an offset from the chest that grew
+			# with the swing, so at the front of each swing the arm reached out nearly straight at shoulder height and
+			# at the back the elbow stuck out sideways. Arms swing from the shoulder with the elbow held bent: the upper
+			# arm pendulums fore and aft, the elbow bends more at the front of the swing than at the back, and the
+			# forearm points forward and a little across the body. The hand target comes from those angles (forward
+			# kinematics), so the two-bone solve returns exactly that arm. Wading keeps its pose.
+			var ph := clampf(sw.z / 0.25, -1.0, 1.0)                                          # swing: +1 front, -1 back
+			# (critique round 2: the arm must swing through neutral and clearly behind the trunk, in the sagittal
+			# plane, mirrored; it swings about the trunk's own axis, not world vertical, or the run's lean puts every
+			# position in front)
+			var fl := ph * (lerpf(0.32, 0.65, rb) if ph > 0.0 else lerpf(0.40, 0.85, rb))       # shoulder flexion (rad)
+			var abd := lerpf(0.06, 0.10, rb)                                                      # out from the side
+			var elb := lerpf(lerpf(0.30, 0.50, ph * 0.5 + 0.5), lerpf(0.75, 1.50, ph * 0.5 + 0.5), rb)  # elbow flexion (rad): closes in front, opens well behind (Gary: looser)
+			# in the air the jump's lift becomes the arms driving up and forward (still bent), reach and flare open them
+			var lift_a := clampf(sw.y, -0.1, 0.45)
+			fl = lerpf(fl, clampf(ph * 0.4 + lift_a * 1.6, -0.7, 1.0), air_b)
+			elb = lerpf(elb, clampf(1.45 - lift_a * 0.4, 1.2, 1.5), air_b)
+			abd = lerpf(abd, 0.12 + jf * 0.6 + absf(sw.x) * 0.8, air_b)
+			var trunk_up := (raw_neck - waist_pos).normalized()
+			var dn := -trunk_up
+			var ua := (Basis(chest_right.normalized(), fl) * dn).normalized()                 # flexion swings it forward (right x down = fwd)
+			ua = (Basis(chest_fwd.normalized(), -side * abd) * ua).normalized()                # abduction: out to her side (fwd x down = -right)
+			var fwd_perp := (chest_fwd - ua * chest_fwd.dot(ua)).normalized()
+			var across := -chest_right * side
+			var bend_dir := (fwd_perp + across * lerpf(0.06, 0.14, rb) * maxf(0.0, ph)).normalized()
+			bend_dir = (bend_dir - ua * bend_dir.dot(ua)).normalized()
+			var fa := (ua * cos(elb) + bend_dir * sin(elb)).normalized()
+			var elbow := sh + ua * upper_arm_len
+			var fk_target := elbow + fa * forearm_len
+			var fk_pole := elbow - bend_dir * 0.3 + chest_right * side * 0.05
+			var w_fk := clampf(1.0 - wade_b, 0.0, 1.0)
+			target = target.lerp(fk_target, w_fk)
+			pole = pole.lerp(fk_pole, w_fk)
 		return BM.two_bone(sh, target, pole, upper_arm_len, forearm_len, 0.96, 0.08, 138.0)
 	var arm_l: Dictionary = shore_arm.call(-1.0)
 	var arm_r: Dictionary = shore_arm.call(1.0)

@@ -17,6 +17,11 @@ var parts := {}
 var joints: Array[MeshInstance3D] = []
 var joint_mesh: ArrayMesh
 var alpha := 1.0
+## one skinned body on the rig's full skeleton (adapters/godot/body_skin.gd) when the pose carries it; the rigid
+## pieces stay for poses without a skeleton (thalassa_exact) and for the first-person view (show_head false)
+var use_skin := true
+var skin_body = null
+const BodySkin := preload("res://adapters/godot/body_skin.gd")
 
 class MB:
 	var st := SurfaceTool.new()
@@ -174,7 +179,37 @@ func _joint(i: int, p: Vector3, r: float) -> void:
 	joints[i].global_transform = Transform3D(Basis().scaled(Vector3.ONE * r), p)
 
 ## drawDiverBody: place every part from the pose. show_head false hides neck and head (lens inside the skull).
+## In the game world the body takes the water-lit material (look/body_surface.gdshader): WorldRoot registers the water_*
+## globals, possibly after this node is ready, so the swap is made on the first apply that finds them. The tests' plain
+## worlds have no water globals and keep the standard material.
+var water_mat_done := false
+func _water_material() -> void:
+	water_mat_done = true
+	if not RenderingServer.global_shader_parameter_get_list().has(&"water_y"):
+		water_mat_done = false
+		return
+	var sm := ShaderMaterial.new(); sm.shader = load("res://look/body_surface.gdshader")
+	var stack: Array = [self]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is MeshInstance3D: (n as MeshInstance3D).material_override = sm
+		stack.append_array(n.get_children())
+
 func apply(pose: Dictionary, show_head := true) -> void:
+	if not water_mat_done and (Engine.get_process_frames() % 30 == 0 or skin_body != null and skin_body.bound): _water_material()
+	var skinned: bool = use_skin and show_head and pose.has("skel")
+	if skinned:
+		if skin_body == null:
+			skin_body = BodySkin.new()
+			add_child(skin_body)
+			water_mat_done = false     # (the skin's mesh takes the water material too)
+		skin_body.visible = true
+		skin_body.apply(pose.skel)
+	elif skin_body != null:
+		skin_body.visible = false
+	for k in parts: parts[k].visible = not skinned
+	for j in joints: j.visible = not skinned
+	if skinned: return
 	parts.chest.global_transform = pose.chestMat
 	parts.pelvis.global_transform = pose.pelvisMat
 	_seg("waist", pose.pelvisPos, pose.chestPos, pose.bodyBack)

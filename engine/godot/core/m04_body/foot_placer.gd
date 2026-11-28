@@ -27,6 +27,7 @@ class Foot:
 	var dur := 0.32
 	var height := 0.036
 	var toe_pitch := 0.0
+	var toe0 := 0.0     # toe pitch at take-off (the swing's own pitch blends in from it)
 	var heel_kick := 0.0
 
 var initialized := false
@@ -282,6 +283,10 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		else:
 			swing_ankle = lerpf(0.0, land_dorsi, smoothstep(0.44, 0.88, u)) * (1.0 - smoothstep(0.88, 1.0, u) * 0.50)
 		f.toe_pitch = swing_ankle * (0.28 + 0.72 * clampf(speed / 1.3, 0.0, 1.0))
+		if target_filter != null:
+			# ROOT (smoothness: a 1.5 cm hop at every take-off from standing): the swing's push-off pitch (-0.22 rad) was
+			# set in one tick from the planted pitch; it blends in over the first quarter of the swing
+			f.toe_pitch = lerpf(f.toe0, f.toe_pitch, smoothstep(0.0, 0.25, u))
 		if f.t >= 1.0:
 			f.stepping = false
 			f.planted = Vector3(f.to.x, lp.y, f.to.z)
@@ -490,6 +495,7 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		f.from_yaw = f.yaw
 		f.to_yaw = yaw
 		f.stepping = true
+		f.toe0 = f.toe_pitch
 		f.t = 0.0
 		var sd := Vector2(f.to.x - f.from.x, f.to.z - f.from.z).length()
 		var bh := lerpf(config.walkStepHeight, config.runStepHeight, rb)
@@ -614,6 +620,9 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		air_twist = -j.leadSide * (0.11 if j.style in ["standing_skip", "hurdle_vault"] else 0.06) * air_apex + j.varTwist * 0.055 * air_apex
 	var tgt_pyaw := clampf(stride_diff * lerpf(0.20, 0.25, rb) + (-air_twist * 0.65 if is_air else 0.0), -0.22, 0.22)
 	var tgt_twist := clampf(-stride_diff * lerpf(0.24, 0.33, rb) + air_twist + yaw_rate * 0.038, -0.28, 0.28)
+	# (critique: the run's shoulder counter-rotation didn't read) the chest turns further against the hips when running
+	if target_filter != null:     # (the non-Thalassa rig sets it)
+		tgt_twist = clampf(-stride_diff * lerpf(0.26, 0.46, rb) + air_twist + yaw_rate * 0.038, -0.30, 0.30)
 	var pelvis_yaw: float = pelvis_yaw_spring.step(tgt_pyaw, 0.14 if is_air else 0.19, sdt)
 	var spine_lean_fwd: float = spine_lean_fwd_spring.step(tgt_lean_fwd, 0.13 if is_air else 0.20, sdt)
 	var spine_lean_lat: float = spine_lean_lat_spring.step(tgt_lean_lat, 0.15 if is_air else 0.20, sdt)

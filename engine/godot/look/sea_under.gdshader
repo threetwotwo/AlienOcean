@@ -1,4 +1,4 @@
-// Sea seen from below 0.3.1 (water surface thread; 0.2.0 engine thread's stand-in): the ported lagoon underside,
+// Sea seen from below 0.3.2 (water surface thread; 0.2.0 engine thread's stand-in): the ported lagoon underside,
 // lagoonwater v98 WINDOW_HLSL with its saved settings (UnderPhys 1, SunPhys 1, SkyFree 1, Fringe 0, SunTrue 0,
 // Mirror 1, FloorNet 8 = the net as its mean in the mirror), on the FFT sea (look/sea_waves.gdshaderinc).
 //  Snell's window: the share of the pixel's wave facets inside the critical angle (their slope spread + the pixel),
@@ -17,6 +17,7 @@ render_mode unshaded, cull_front, world_vertex_coords, fog_disabled, shadows_dis
 #include "res://look/caustics.gdshaderinc"
 #include "res://look/sky_dome.gdshaderinc"
 #include "res://look/sea_waves.gdshaderinc"
+#include "res://look/sea_bathy.gdshaderinc"
 global uniform vec3 water_sun_air;      // toward the key body in air (Godot y-up)
 global uniform float water_sun_lux;     // its beam, lux on a surface facing it
 #include "res://look/sea_foam_shade.gdshaderinc"   // the whitecaps' look (after the lines above: it uses them)
@@ -35,9 +36,10 @@ vec2 floor_uv(vec2 xy) {             // island xy -> the floor map (screen right
 }
 float floor_top(vec2 xy) {            // island z of the floor's top (the still floor outside the map)
 	vec2 uv = floor_uv(xy);
-	if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return water_floor_y;
+	float far_y = water_y - sea_bathy_depth(vec2(xy.x, -xy.y));   // past the map: the floor beyond (sea_bathy)
+	if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return far_y;
 	vec4 h = textureLod(water_floor_height, uv, 0.0);
-	return h.a > 0.5 ? h.r / max(h.g, 1e-4) : water_floor_y;
+	return h.a > 0.5 ? h.r / max(h.g, 1e-4) : far_y;
 }
 vec3 floor_light(vec2 xy) {          // the floor's radiance seen from above (nits), or -1 where the map has nothing
 	vec2 uv = floor_uv(xy);
@@ -113,15 +115,14 @@ void fragment() {
 	// ray really lands, marched over the floor map (6 steps, then the crossing interpolated), within 30 m and where the
 	// mirror counts (R > 0.06); its colour from the map. Outside the map: the still floor (v67's site depth).
 	vec3 Rr = reflect(I, Nm);
-	float H = max(wi.z - water_floor_y, 0.05);
+	float H = max(sea_bathy_depth(vec2(wi.x, -wi.y)) + wi.z - water_y, 0.05);   // the floor beyond under this point
 	float down = max(-Rr.z, 0.02);
 	float uL = min(H / down, 400.0);
-	vec3 Ef0 = water_es0 * exp(-water_kd * H) + water_ek0 * exp(-water_ku * H);   // FloorNet 8: the net as its mean
-	vec3 f_lit = Ef0 * water_sand.rgb / PI;               // the still sand's radiance (v67)
+	vec3 f_lit = sea_bathy_sand(H);                       // the still sand's radiance (v67; FloorNet 8: the net as its mean)
 	float R = 1.0 - tr;
 	if (water_floor_org.w > 0.5 && uL < 30.0 && R > 0.06) {
 		float f_fd = clamp((30.0 - uL) / 12.0, 0.0, 1.0) * clamp((R - 0.06) / 0.06, 0.0, 1.0);
-		float f_tm = min((wi.z - (water_floor_y - 1.0)) / down, 30.0);
+		float f_tm = min((H + 1.0) / down, 30.0);
 		float f_tp = 0.0;
 		float f_gp = wi.z - floor_top(wi.xy);
 		float f_th = f_tm;
