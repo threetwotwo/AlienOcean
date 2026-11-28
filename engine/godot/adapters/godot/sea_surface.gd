@@ -52,6 +52,11 @@ static func globals() -> void:
 	RenderingServer.global_shader_parameter_add(&"sea_god", RenderingServer.GLOBAL_VAR_TYPE_VEC4, Vector4(1.0, 0.0, 0.0, 0.0))
 
 func _process(_dt: float) -> void:
+	# the per-pixel waterline at the lens (WaterlineEffect) reads this sea's waves
+	WaterlineEffect.sea_on = visible and is_visible_in_tree()
+	if fft.disp_tex: WaterlineEffect.disp_rid = fft.disp_tex.texture_rd_rid
+	WaterlineEffect.patch = fft.patch
+	WaterlineEffect.hs = float(fft.moments.get("mom_r", Vector4.ZERO).w) if fft.moments is Dictionary else 0.0
 	var cam := get_viewport().get_camera_3d()
 	if cam: floor_map.follow(cam.global_position)
 

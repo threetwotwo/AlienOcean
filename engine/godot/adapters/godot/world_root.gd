@@ -116,6 +116,7 @@ var last := {}
 var _gi_reset := 0   # frames left with SDFGI off to drop its cache after a jump in the light (apply)
 var _dome_sun := Vector3.INF
 var agx_fx: AgxEffect
+var waterline_fx: WaterlineEffect     # the per-pixel waterline at the lens (look/waterline_post.glsl), before AgX
 var cortao_fx: CortaoEffect      # CORTAO screen AO (adapters/godot/cortao_effect.gd); set_ao picks it or Godot's SSAO
 var ao_mode := "cortao"   # Gary picked CORTAO (Style choices, 28 Nov 08:42Z); "ssao" = Godot's, the look before
 var _surface: SeaSurface          # make_surface's: its floor map is captured again when the light changes (apply)
@@ -189,7 +190,8 @@ func _init() -> void:
 	env.glow_enabled = true; env.glow_intensity = 0.3
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
 	agx_fx = AgxEffect.new(); cortao_fx = CortaoEffect.new(); cortao_fx.enabled = true
-	var comp := Compositor.new(); comp.compositor_effects = [cortao_fx, agx_fx]; we.compositor = comp
+	var comp := Compositor.new(); waterline_fx = WaterlineEffect.new()
+	comp.compositor_effects = [cortao_fx, waterline_fx, agx_fx]; we.compositor = comp
 	set_ao(ao_mode)
 	set_agx(true)
 	cam_attr = CameraAttributesPhysical.new(); cam_attr.auto_exposure_enabled = false
@@ -228,6 +230,7 @@ func attach_camera(cam: Camera3D) -> void:
 	if motes and get_node_or_null("Motes") == null: add_child(Motes.new())   # marine snow around the eye (adapters/godot/motes.gd)
 
 func _process(_dt: float) -> void:
+	if waterline_fx: waterline_fx.water_y = water.level
 	## the god rays' start point moves on each frame only where TAA averages it (Unreal: StateFrameIndexMod8 under TSR);
 	## without TAA it holds still, or the shafts would boil. A temporal upscaler (FSR 2, MetalFX temporal) averages frames as TAA does.
 	if under_mat == null: return
