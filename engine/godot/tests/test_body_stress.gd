@@ -128,6 +128,9 @@ var results: Array = []
 # --shard i/n runs every n-th case starting at i (to film in parallel).
 const Mannequin := preload("res://adapters/godot/mannequin.gd")
 var film := ""
+var film_head := false      # --head: a near three-quarter front camera on her head and chest, gaze ray and things she senses drawn (brain films)
+var film_marks: MeshInstance3D
+var film_snd := []          # [pos, t] of each sound as it rings, drawn 1 s
 var film_close := false     # --close: a near side-on camera that frames the body (Gary: clearer, bigger shots of the body), 30 fps
 var cam_side := Vector3.ZERO
 var shard := Vector2i(0, 1)
@@ -149,6 +152,7 @@ func _initialize() -> void:
 			"--out": out_path = a[i + 1]
 			"--film": film = a[i + 1]
 			"--close": film_close = true
+			"--head": film_head = true; film_close = true
 			"--shard":
 				var sp: PackedStringArray = a[i + 1].split("/")
 				shard = Vector2i(int(sp[0]), int(sp[1]))
@@ -789,7 +793,7 @@ func _brain_sense(s) -> Dictionary:
 		for q in BlockoutKit.pois(world):
 			if q.kind == "sound":
 				if q.alive and not b.get("snd_" + q.name, false):     # each knock as it starts
-					rig.brain.register_sound_event(q.name, q.pos, 0.9, 1.8)
+					rig.brain.register_sound_event(q.name, q.pos, 0.9, 1.8); film_snd.append([q.pos, t])
 				b["snd_" + q.name] = q.alive
 			else:
 				var cr: bool = q.kind == "creature"
@@ -802,7 +806,7 @@ func _brain_sense(s) -> Dictionary:
 	reg.commit(int(rec.ticks))
 	for snd in rec.brain_sounds:     # sounds placed around where she is when they ring
 		if t >= snd[0] and t - 1.0 / tick < snd[0]:
-			rig.brain.register_sound_event(snd[1], eye + snd[2], snd[3], 1.8)
+			rig.brain.register_sound_event(snd[1], eye + snd[2], snd[3], 1.8); film_snd.append([eye + snd[2], t])
 	return b.sc.build(s.pos, BM.fwd(s.yaw, s.pitch), [])
 
 func _check_brain(p: Dictionary, dt: float) -> void:
@@ -928,6 +932,7 @@ func _film_setup() -> void:
 	film_case_dir = "%s/%s" % [film, cur.name.split(" ")[0] + ("_" + cur.name.split(" ")[2] if cur.name.begins_with("B12") or cur.name.begins_with("B14") else "")]
 	DirAccess.make_dir_recursive_absolute(film_case_dir)
 	frame_i = 0
+	film_snd = []
 
 func _film_frame(pose: Dictionary) -> void:
 	mq.apply(pose, true)
@@ -936,6 +941,9 @@ func _film_frame(pose: Dictionary) -> void:
 	var side := Vector3(-3.2, 0.9, 1.6) if cur.kind in ["wall", "ramp", "step", "stairs", "overhang", "shore"] else Vector3(3.6, 0.8, 1.2)
 	if cur.kind == "cave": side = Vector3(4.5, 1.2, 0.5)
 	var tgt := p + Vector3(0, 0.75, 0)
+	if film_head:
+		_film_head(pose)
+		return
 	if film_close:
 		# side-on to her heading, 2.3 m out, framing her from feet to head; the side follows her slowly so turns stay readable
 		var pel: Vector3 = pose.pelvisPos
@@ -960,6 +968,69 @@ func _film_frame(pose: Dictionary) -> void:
 	cam.look_at(tgt)
 	var fails: String = "  ".join(rec.fail.map(func(f): return f.substr(0, f.find(" at t="))))
 	label.text = "%s\nt = %.1f s   %s   %s" % [cur.name, t, pose.mode, "all checks holding" if fails == "" else "FAILING: " + fails]
+	RenderingServer.frame_post_draw.connect(_film_save.bind("%s/f%05d.png" % [film_case_dir, frame_i]), CONNECT_ONE_SHOT)
+	frame_i += 1
+
+func _film_head(pose: Dictionary) -> void:
+	# three-quarter front of her face, 1.6 m out, framing head and chest; follows her heading slowly
+	var head: Vector3 = pose.headMat.origin
+	var fw: Vector3 = -pose.chestBasis.z if pose.has("chestBasis") else Vector3.FORWARD
+	if pose.has("bodyRight"):
+		var br: Vector3 = pose.bodyRight
+		fw = Vector3.UP.cross(br)
+	fw.y = 0.0
+	if fw.length() < 0.1: fw = Vector3.FORWARD
+	fw = fw.normalized()
+	if cam_side == Vector3.ZERO or frame_i == 0: cam_side = fw
+	cam_side = cam_side.slerp(fw, 0.04).normalized()
+	var sv := cam_side.cross(Vector3.UP).normalized()
+	var tgt := head + Vector3(0, -0.12, 0)
+	var cp := tgt + (cam_side * 1.25 + sv * 0.9).normalized() * 2.3 + Vector3(0, 0.3, 0)
+	cam.fov = 34.0
+	cam.global_position = cam.global_position.lerp(cp, 0.3) if frame_i > 0 else cp
+	cam.look_at(tgt)
+	# marks: gaze ray (yellow), the circling fish (orange), sounds (red, 1 s)
+	if film_marks == null or not is_instance_valid(film_marks):
+		film_marks = MeshInstance3D.new()
+		film_marks.mesh = ImmediateMesh.new()
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.vertex_color_use_as_albedo = true
+		m.no_depth_test = true
+		film_marks.material_override = m
+		world.add_child(film_marks)
+	var im: ImmediateMesh = film_marks.mesh
+	im.clear_surfaces()
+	im.surface_begin(Mesh.PRIMITIVE_LINES)
+	var o: Dictionary = rig.brain_out
+	if o.has("gazeDirWorld"):
+		im.surface_set_color(Color(1, 0.9, 0.2))
+		var eye: Vector3 = head + (pose.headMat.basis.y as Vector3).normalized() * 0.1
+		var gd: Vector3 = (o.gazeDirWorld as Vector3).normalized()
+		for q in [Vector3.ZERO, Vector3(0.004, 0, 0), Vector3(0, 0.004, 0), Vector3(0, 0, 0.004)]:
+			im.surface_add_vertex(eye + q)
+			im.surface_add_vertex(eye + q + gd * 1.6)
+	var marks := []
+	if rec.has("brain") and rec.brain.swim:
+		marks.append([head + Vector3(3.0 * cos(t * 0.6), 0.6 * sin(t * 0.9), 3.0 * sin(t * 0.6)) - Vector3(0, 0, 0), Color(1, 0.55, 0.1), 0.18])
+	for sd in film_snd:
+		if t - sd[1] < 1.0: marks.append([sd[0], Color(1, 0.15, 0.15), 0.12 + 0.25 * (t - sd[1])])
+	for mk in marks:
+		var c: Vector3 = mk[0]
+		var r: float = mk[2]
+		im.surface_set_color(mk[1])
+		for k in 24:
+			var a0 := TAU * k / 24.0
+			var a1 := TAU * (k + 1) / 24.0
+			for ax in [[Vector3.RIGHT, Vector3.UP], [Vector3.RIGHT, Vector3.BACK], [Vector3.UP, Vector3.BACK]]:
+				im.surface_add_vertex(c + (ax[0] * cos(a0) + ax[1] * sin(a0)) * r)
+				im.surface_add_vertex(c + (ax[0] * cos(a1) + ax[1] * sin(a1)) * r)
+	im.surface_end()
+	var fid = o.get("focusId")
+	var bs: float = o.get("breathSignal", 0.0)
+	var bar := "#".repeat(int(round((bs * 0.5 + 0.5) * 12.0)))
+	var fails0: String = "  ".join(rec.fail.map(func(f): return f.substr(0, f.find(" at t="))))
+	label.text = "%s\nt = %.1f s   looking at: %s   breath %s\n%s" % [cur.name, t, fid if fid != null else "-", bar, "all checks holding" if fails0 == "" else "FAILING: " + fails0]
 	RenderingServer.frame_post_draw.connect(_film_save.bind("%s/f%05d.png" % [film_case_dir, frame_i]), CONNECT_ONE_SHOT)
 	frame_i += 1
 
