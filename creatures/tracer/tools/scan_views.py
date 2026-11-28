@@ -3,6 +3,8 @@
 
 Universal: no species in the code. Output dicts are the ones creatures/tracer/species_tracer/views.apply() accepts:
   top_r   = {hw: [[s, half-width / SL]] for s = u / SL in 0..1 (body only, fins removed), top: symmetric polygon, side_used, roots: []}
+  front_proj = {front: [[z, y]] head-on projection of the fin-free body (union over all stations), y_top, y_bot, half_width_max,
+                front_kind 'projection'}  (what a head-on photo sees; the single-station section stays in front_r for outline.sections)
   front_r = {front: [[z, y]] (SL units), w: [[s, w]] 21 values (s -1 belly edge .. +1 back edge, w = half-width / greatest half-width),
              half_width_max (SL units)}  at the station of greatest body depth; sections_extra holds the same at 0.25 and 0.75 SL.
 
@@ -269,7 +271,22 @@ def measure(W, step=0.01, log=None):
     top_r = dict(hw=[[round(float(s), 3), round(float(w), 4)] for s, w in zip(xs, hw)], top=[[round(a, 4), round(b, 4)] for a, b in poly],
                  left=nn(Ls), right=nn(Rs), side_used='half_total', roots=[])
     i_w = int(np.argmax(hw))
-    res = dict(top_r=top_r, front_r=front_r, sections_extra=extra,
+    # head-on PROJECTION of the fin-free body: per height row, the outermost left and right edge over all stations (the body seen
+    # from in front, as a head-on photo sees it); same clipping as sec() (fin roots cut along the body, back/belly humps cut)
+    yb = np.arange(np.nanmin(ybot), np.nanmax(ytop) + CELL, CELL); PL = np.full(len(yb), np.nan); PR = np.full(len(yb), np.nan)
+    for i, s_ in enumerate(st):
+        if s_ is None or s_['K'] is None or np.isnan(L[i]) or not (0.02 <= xs[i] <= 0.98): continue
+        k = (s_['ys'] <= ytop[i] + 1e-9) & (s_['ys'] >= ybot[i] - 1e-9)
+        if k.sum() < 3: continue
+        j = np.clip(np.round((s_['ys'][k] - yb[0]) / CELL).astype(int), 0, len(yb) - 1)
+        zr_ = np.minimum(s_['zr'][k], z0[i] + L[i]) - z0[i]; zl_ = np.maximum(s_['zl'][k], z0[i] - R[i]) - z0[i]
+        PR[j] = np.fmax(PR[j], zr_); PL[j] = np.fmin(PL[j], zl_)
+    ok = ~np.isnan(PR); yb, PL, PR = yb[ok], PL[ok], PR[ok]
+    proj = [[float(a), float(b)] for a, b in zip(PR, yb)] + [[float(a), float(b)] for a, b in zip(PL[::-1], yb[::-1])]
+    proj = proj[::max(1, len(proj) // 200)]
+    front_proj = dict(front=[[round(a, 4), round(b, 4)] for a, b in proj], y_top=round(float(yb[-1]), 4), y_bot=round(float(yb[0]), 4),
+                      half_width_max=round(float(max(PR.max(), -PL.min())), 4), front_kind='projection')
+    res = dict(top_r=top_r, front_r=front_r, front_proj=front_proj, sections_extra=extra,
                summary=dict(max_hw_over_SL=round(float(hw.max()), 4), max_hw_at_s=float(xs[i_w]), deepest_at_s=float(xs[i_deep]),
                             depth_max_over_SL=front_r['depth'], width_over_depth_at_deepest=front_r['width_over_depth'],
                             asymmetry_LR=round(asym, 3), deformed=bool(deformed), wider_side=wide,

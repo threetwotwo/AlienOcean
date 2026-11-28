@@ -24,7 +24,7 @@ const SHADER := preload("res://fish/school_fish.gdshader")
 @export var tethered := true            # keep the record's home radius (false = roams, e.g. an open-water school)
 @export var threaded := true
 @export var body_m := -1.0              # metres; <= 0: the record's stand-in until the maker's glb gives it
-@export var lod_dist := Vector2(12.0, 30.0)   # metres to the camera: LOD0 within x, LOD1 within y, LOD2 beyond
+@export var lod_dist := Vector2(12.0, 25.0)   # metres to the camera: LOD0 within x, LOD1 within y, LOD2 beyond (no shadow past 25 m, schoollab v47)
 @export var look := {}                  # shader overrides (back_colour, stripe, ...)
 @export var collision_mask := 1
 @export var bank_gain := 1.0            # art multiplier on Thalassa's roll law (wildlife-ecosystem.js: 0.22 x yaw rate, cap 0.40 rad)
@@ -64,6 +64,20 @@ var main_ms := 0.0                      # this frame's main-thread cost (queries
 var use_asset := true                   # draw the creature maker's export when the species record names one and it is present
 var asset := {}                          # {meshes, swim, bl_m} of that export ({} = the stand-in)
 var _swim_ph := PackedFloat64Array()     # drawing-side swim phase (the export's beat law), rad
+var vary_look := true                   # each fish its own size, beat rate, amplitude and slowly wandering pose
+var _p_size := PackedFloat64Array()      # drawn size factor (on top of the sim's L), ~N(1, 0.10): ~11 % with L
+var _p_rate := PackedFloat64Array()      # beat-rate factor, ~N(1, 0.06)
+var _p_amp := PackedFloat64Array()       # swim amplitude factor, ~N(1, 0.10)
+var _p_bc := PackedFloat64Array()        # where in its burst a phrase starts (0..1)
+var _p_w := PackedFloat64Array()         # pose wander rates (curl, lean), rad/s
+var _p_ph := PackedFloat64Array()        # pose wander phases
+var _look_t := 0.0
+var look_pitch_off := PackedFloat64Array()  # drawn pitch offset (rad), each fish's own
+var look_yaw_off := PackedFloat64Array()  # drawn heading offset about up (rad), each fish's own
+var _k_bank_fast := 0.0; var _k_head := 0.0; var _k_yaw := 0.0; var _k_v := 0.0; var _k_bank := 0.0; var _k_bc_up := 0.0; var _k_bc_down := 0.0
+var _cap := 2.5
+var _u_min := 0.0; var _f_umin := 1.0; var _amp_flat := true
+var _beat_tab_u := PackedFloat64Array(); var _beat_tab_f := PackedFloat64Array()
 var smooth_look := true                 # zero-twitch drawing (Thalassa); false = the raw sim heading, speed and turn rate
 var look_fwd := PackedVector3Array()     # drawn heading
 var look_yaw := PackedFloat64Array()     # drawn turn rate about up (rad/s, + = left)
@@ -100,6 +114,7 @@ func _ready() -> void:
 		mi.multimesh = mm
 		if asset.is_empty(): mi.material_override = _mat     # an export carries its own materials per surface
 		mi.top_level = true
+		if lod == 2: mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF   # far fish cast no shadow (schoollab v47, Gary 2 Nov)
 		mi.custom_aabb = AABB(Vector3(-1e4, -1e4, -1e4), Vector3(2e4, 2e4, 2e4))   # fish roam; culled per fish below
 		add_child(mi)
 		_mm.append(mi)
@@ -112,6 +127,9 @@ func _ready() -> void:
 	look_fwd.resize(n); look_yaw.resize(n); look_v.resize(n); look_bend.resize(n); look_u.resize(n); look_amp.resize(n)
 	look_coast.resize(n)
 	for i in n: look_fwd[i] = sim.e[i]; look_v[i] = sim.v[i]
+	_vary_setup(n)
+	_cap = params.get("bend_cap", 2.5)
+	_swim_setup()
 	var rb := RandomNumberGenerator.new(); rb.seed = seed_ * 31 + 5
 	for i in n: _bc_t[i] = rb.randf() * 3.0; _bc_k[i] = 1.0      # staggered phrases, so the school doesn't pulse together
 
@@ -264,29 +282,62 @@ func _draw(alpha: float) -> void:
 	var n: int = sim.N
 	var counts := [0, 0, 0]
 	var bl: float = sim.bl
-	var cap: float = params.get("bend_cap", 2.5)
+	var dt := _draw_dt
+	_frame_consts(dt)
+	var has_asset := not asset.is_empty()
+	var lx: float = lod_dist.x * lod_dist.x; var ly: float = lod_dist.y * lod_dist.y
+	var mms: Array = [_mm[0].multimesh, _mm[1].multimesh, _mm[2].multimesh]
 	for i in n:
 		var pos := _prev[i].lerp(_cur[i], alpha)
 		_look(i, alpha)
-		var r: float = bl * sim.L[i]
+		var r: float = bl * sim.L[i] * _p_size[i]
 		# skip fish outside the view (plus a body length)
 		var inside := true
 		for pl in frustum:
 			if (pl as Plane).distance_to(pos) > r: inside = false; break
 		if not inside: continue
-		var dcam := pos.distance_to(cp)
-		var lod := 0 if dcam < lod_dist.x else (1 if dcam < lod_dist.y else 2)
-		var basis := fish_basis(look_fwd[i], _bank[i]).scaled(Vector3(r, r, r))
-		var mm := _mm[lod].multimesh
+		var d2 := pos.distance_squared_to(cp)
+		var lod := 0 if d2 < lx else (1 if d2 < ly else 2)
+		var mm: MultiMesh = mms[lod]
 		var k: int = counts[lod]
-		mm.set_instance_transform(k, Transform3D(basis, pos))
-		if not asset.is_empty():
+		mm.set_instance_transform(k, Transform3D(fish_basis(drawn_heading(i), _bank[i]).scaled(Vector3(r, r, r)), pos))
+		if has_asset:
 			mm.set_instance_custom_data(k, Color(_swim_ph[i], look_u[i], look_bend[i], look_amp[i]))
 		else:
 			mm.set_instance_custom_data(k, Color(_swim_ph[i], look_amp[i], look_bend[i], _d_s[i]))
 		counts[lod] = k + 1
-	for lod in 3: _mm[lod].multimesh.visible_instance_count = counts[lod]
+	for lod in 3: (mms[lod] as MultiMesh).visible_instance_count = counts[lod]
 	main_ms += (Time.get_ticks_usec() - t0) / 1000.0
+
+## Caches the export's swim numbers (U_min, beat table) for the per-frame drawing.
+func _swim_setup() -> void:
+	_beat_tab_u = PackedFloat64Array(); _beat_tab_f = PackedFloat64Array()
+	if asset.is_empty(): return
+	_u_min = CreatureMesh.u_min(asset.swim)
+	_amp_flat = CreatureMesh.has_speed_envelopes(asset.swim)
+	for e in asset.swim.get("wave", {}).get("envelopes_by_speed", []):
+		_beat_tab_u.append(float(e.U_BLps)); _beat_tab_f.append(float(e.beat_Hz))
+	_f_umin = _beat_u(_u_min) if _u_min > 0.0 else 1.0
+
+## Per-frame easing constants (frame-rate independent), computed once a frame rather than once a fish.
+func _frame_consts(dt: float) -> void:
+	_look_t += dt
+	_k_head = 1.0 - exp(-5.2 * dt); _k_yaw = 1.0 - exp(-6.5 * dt); _k_v = 1.0 - exp(-3.0 * dt); _k_bank = 1.0 - exp(-5.5 * dt); _k_bank_fast = 1.0 - exp(-14.0 * dt)
+	_k_bc_up = 1.0 - exp(-dt / 0.1); _k_bc_down = 1.0 - exp(-dt / 0.15)
+
+func _vary_setup(n: int) -> void:
+	look_yaw_off.resize(n); look_pitch_off.resize(n)
+	_p_size.resize(n); _p_rate.resize(n); _p_amp.resize(n); _p_bc.resize(n); _p_w.resize(4 * n); _p_ph.resize(4 * n)
+	var r := RandomNumberGenerator.new(); r.seed = seed_ * 7741 + 3
+	for i in n:
+		var on := vary_look
+		_p_size[i] = clampf(1.0 + 0.10 * r.randfn(), 0.8, 1.2) if on else 1.0
+		_p_rate[i] = clampf(1.0 + 0.06 * r.randfn(), 0.88, 1.12) if on else 1.0
+		_p_amp[i] = clampf(1.0 + 0.10 * r.randfn(), 0.8, 1.2) if on else 1.0
+		_p_bc[i] = r.randf() * 0.9 if on else 0.0
+		for j in 4:
+			_p_w[4 * i + j] = r.randf_range(TAU / 10.0, TAU / 7.0) if j == 1 else r.randf_range(0.35, 1.0)   # sway period 7-10 s (v32)
+			_p_ph[4 * i + j] = r.randf() * TAU
 
 ## What the viewer sees of fish i this frame (every fish, drawn or not, so filters never jump when a fish comes into view).
 ## Zero-twitch drawing, ported from Thalassa v20.19 wildlife-ecosystem.js ("speed deadband + slew-rate capped yaw +
@@ -297,53 +348,79 @@ func _draw(alpha: float) -> void:
 func _look(i: int, alpha: float) -> void:
 	var dt := _draw_dt
 	var raw := _eprev[i].lerp(_ecur[i], alpha)
-	if raw.length() < 1e-6: raw = look_fwd[i] if look_fwd[i].length() > 0.5 else Vector3.RIGHT
+	if raw.length_squared() < 1e-12: raw = look_fwd[i] if look_fwd[i].length_squared() > 0.25 else Vector3.RIGHT
 	raw = raw.normalized()
 	var v: float = _d_v[i]
 	var st: float = _d_s[i]
 	var prev: Vector3 = look_fwd[i]
 	var f := raw
-	if smooth_look and prev.length() > 0.5:
+	if smooth_look and prev.length_squared() > 0.25:
 		var ang := prev.angle_to(raw)
 		if ang > 1e-5:
-			var stp := minf(ang * (1.0 - exp(-5.2 * dt)), (2.15 + 3.0 * st) * dt)
-			f = prev.slerp(raw, stp / ang).normalized()
+			var stp := minf(ang * _k_head, (2.15 + 3.0 * st) * dt)
+			f = prev.slerp(raw, stp / ang)
 		else:
 			f = prev
-		var hp := Vector2(prev.x, prev.z); var hf := Vector2(f.x, f.z)
 		var yaw_inst := 0.0
-		if hp.length() > 1e-4 and hf.length() > 1e-4: yaw_inst = clampf(-hp.angle_to(hf) / dt, -3.5, 3.5)
-		look_yaw[i] = lerpf(look_yaw[i], yaw_inst, 1.0 - exp(-6.5 * dt))
-		look_v[i] = lerpf(look_v[i], v, 1.0 - exp(-3.0 * dt))
+		var hp2 := prev.x * prev.x + prev.z * prev.z
+		var hf2 := f.x * f.x + f.z * f.z
+		if hp2 > 1e-8 and hf2 > 1e-8:
+			# signed angle about up from prev to f in the horizontal plane (+ = left)
+			yaw_inst = clampf(atan2(prev.z * f.x - prev.x * f.z, prev.x * f.x + prev.z * f.z) / dt, -3.5, 3.5)
+		look_yaw[i] += (yaw_inst - look_yaw[i]) * _k_yaw
+		look_v[i] += (v - look_v[i]) * _k_v
 	else:
 		look_yaw[i] = _d_yaw[i]
 		look_v[i] = v
 	look_fwd[i] = f
 	var yaw: float = look_yaw[i]
 	var vv: float = look_v[i]
-	var cap: float = params.get("bend_cap", 2.5)
+	# each fish's own pose: a slow personal curl and roll that wander (Fable critique 28 Nov: "clones, same pose")
+	var curl := 0.0; var lean := 0.0
+	if vary_look:
+		curl = 0.35 * sin(_look_t * _p_w[4 * i] + _p_ph[4 * i])
+		lean = 0.12 * sin(_look_t * _p_w[4 * i + 1] + _p_ph[4 * i + 1])     # ~7 deg sway (schoollab v32), so the far wall glints
+		# heading spread (key frame v7c critique 28 Nov: "it still shares one heading"): each fish points up to 15 deg
+		# (SD ~10 deg) off the school's heading and up to 6 deg in pitch, wandering slowly; drawn only, the path is the sim's
+		look_yaw_off[i] = 0.26 * sin(_look_t * _p_w[4 * i + 2] + _p_ph[4 * i + 2])
+		look_pitch_off[i] = 0.10 * sin(_look_t * _p_w[4 * i + 3] + _p_ph[4 * i + 3])
 	# bank into the turn: Thalassa roll = 0.22 x yaw rate, cap 0.40 rad, eased at 5.5/s
-	_bank[i] = lerpf(_bank[i], clampf(yaw * 0.22 * bank_gain, -0.40, 0.40), 1.0 - exp(-5.5 * dt))
-	look_bend[i] = clampf(-yaw / maxf(vv, 0.3), -cap, cap)
+	# silver flash (schoollab v32, Gary 1 Nov "ripples of light that run across the school when it's alarmed"): a
+	# startled or agitated fish rolls up to 60 deg toward its turn and back as the startle fades, so the alarm wave runs
+	# across the school as flashes of flank (real silver schools flash because the fish roll, PLOS ONE 2023)
+	var flash := (1.05 if yaw >= 0.0 else -1.05) * st
+	var kb: float = _k_bank_fast if st > 0.2 else _k_bank
+	_bank[i] += (clampf(yaw * 0.22 * bank_gain, -0.40, 0.40) + lean + flash - _bank[i]) * kb
+	look_bend[i] = clampf(-yaw / maxf(vv, 0.3) + curl, -_cap, _cap)
 	if not asset.is_empty():
 		look_u[i] = _swim_drive(i, vv)
-		look_amp[i] = _bc_k[i] * CreatureMesh.amp_scale(asset.swim, look_u[i]) * (1.0 + 0.5 * st)
+		look_amp[i] = _bc_k[i] * _amp_scale_u(look_u[i]) * _p_amp[i] * (1.0 + 0.5 * st)
 	else:
 		var fb: float = (4.0 * vv / sim.L[i] + 4.0) / 3.0
-		look_amp[i] = clampf(0.5 * 0.3 * vv / maxf(fb, 0.1), 0.02, 0.12) * (1.0 + 0.8 * st)   # Strouhal 0.3
+		look_amp[i] = clampf(0.5 * 0.3 * vv / maxf(fb, 0.1), 0.02, 0.12) * _p_amp[i] * (1.0 + 0.8 * st)   # Strouhal 0.3
 		if smooth_look:
-			_swim_ph[i] = fmod(_swim_ph[i] + TAU * fb * dt, TAU)       # phase advanced at the drawn rate (no 30 Hz steps)
+			_swim_ph[i] = fmod(_swim_ph[i] + TAU * fb * _p_rate[i] * dt, TAU)   # phase advanced at the drawn rate
 		else:
 			_swim_ph[i] = _ph_prev[i] + wrapf(_ph_cur[i] - _ph_prev[i], -PI, PI) * alpha
 		look_u[i] = vv
+
+## Beat (Hz) at U from the export, cached at _ready (CreatureMesh.beat_hz walks dictionaries; this is per fish per frame).
+func _beat_u(U: float) -> float:
+	var n := _beat_tab_u.size()
+	if n < 2: return CreatureMesh.beat_hz(asset.swim, U)
+	var j := 1
+	while j < n - 1 and U > _beat_tab_u[j]: j += 1
+	return maxf(0.3, _beat_tab_f[j - 1] + (_beat_tab_f[j] - _beat_tab_f[j - 1]) * (U - _beat_tab_u[j - 1]) / maxf(_beat_tab_u[j] - _beat_tab_u[j - 1], 1e-5))
+
+func _amp_scale_u(U: float) -> float:
+	return 1.0 if _amp_flat else CreatureMesh.amp_scale(asset.swim, U)
 
 ## The export's playback rule (r2) for fish i at speed v (BL/s): at or above steady.U_min, a steady wave at v (tables
 ## blended at v, beat at f(v)); below it, burst-and-coast phrases: BC_BEATS beats at f(U_min) on the U_min table, then
 ## a glide (amplitude eases out, phase held, the body straightens), the glide lengthening as the fish slows (duty =
 ## v / U_min, at least 0.25). A startled fish always beats. Returns the drawn speed U (which table the shader uses).
 func _swim_drive(i: int, v: float) -> float:
-	var sw: Dictionary = asset.swim
-	var um: float = CreatureMesh.u_min(sw)
+	var um: float = _u_min
 	var dt := _draw_dt
 	# steady or phrases: with smooth_look the switch has hysteresis (into phrases below 0.9 U_min, back at U_min), so a
 	# fish cruising at the threshold (trevally v0 1.4 BL/s vs U_min 1.45) no longer flips mode frame to frame
@@ -352,23 +429,32 @@ func _swim_drive(i: int, v: float) -> float:
 	elif look_coast[i] == 1: coast = v < um
 	else: coast = um > 0.0 and v < 0.9 * um
 	if _d_s[i] > 0.05: coast = false
-	if smooth_look and coast and look_coast[i] == 0: _bc_t[i] = 0.0       # a phrase starts with its beats (no jump into a glide)
+	var rate: float = _p_rate[i]
+	var f: float = _f_umin * rate
+	var tb: float = BC_BEATS / f                          # burst length (s)
+	# a phrase starts inside its beats (no jump into a glide), at the fish's own offset so neighbours don't sync
+	if smooth_look and coast and look_coast[i] == 0: _bc_t[i] = _p_bc[i] * tb
 	look_coast[i] = 1 if coast else 0
 	if not coast:
-		_bc_k[i] = lerpf(_bc_k[i], 1.0, 1.0 - exp(-dt / 0.1))
-		_swim_ph[i] = fmod(_swim_ph[i] + TAU * CreatureMesh.beat_hz(sw, v) * dt, TAU)
+		_bc_k[i] += (1.0 - _bc_k[i]) * _k_bc_up
+		_swim_ph[i] = fmod(_swim_ph[i] + TAU * _beat_u(v) * rate * dt, TAU)
 		return maxf(v, um)
-	var f: float = CreatureMesh.beat_hz(sw, um)
-	var tb: float = BC_BEATS / f                          # burst length (s)
 	var period: float = tb / clampf(v / um, 0.25, 1.0)     # burst + glide
 	_bc_t[i] = fmod(_bc_t[i] + dt, period)
 	if _bc_t[i] < tb:
-		_bc_k[i] = lerpf(_bc_k[i], 1.0, 1.0 - exp(-dt / 0.1))
+		_bc_k[i] += (1.0 - _bc_k[i]) * _k_bc_up
 		_swim_ph[i] = fmod(_swim_ph[i] + TAU * f * dt, TAU)
 	else:
-		_bc_k[i] = lerpf(_bc_k[i], 0.0, 1.0 - exp(-dt / 0.15))
+		_bc_k[i] -= _bc_k[i] * _k_bc_down
 		if _bc_k[i] > 0.3: _swim_ph[i] = fmod(_swim_ph[i] + TAU * f * dt, TAU)   # finish the stroke, then hold
 	return um
+
+## The heading fish i is drawn with: the smoothed heading plus its own yaw and pitch offsets.
+func drawn_heading(i: int) -> Vector3:
+	var f: Vector3 = look_fwd[i].rotated(Vector3.UP, look_yaw_off[i])
+	var side := Vector3.UP.cross(f)
+	if side.length_squared() > 1e-8: f = f.rotated(side.normalized(), look_pitch_off[i])
+	return f
 
 ## A fish's drawn frame: x = heading (head toward +x in the mesh), y = its back, rolled by bank (positive rolls the back
 ## toward its left, into a left turn), z = x cross y. Upright for a level heading (check S15; it was upside down to 28 Nov).

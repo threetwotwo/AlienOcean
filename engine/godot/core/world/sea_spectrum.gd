@@ -1,4 +1,4 @@
-## Sea spectrum 0.2.0 (core/world; water surface thread, 27-28 Nov 2026): the Unreal lagoon's wave spectrum, ported.
+## Sea spectrum 0.3.0 (core/world; water surface thread, 27-28 Nov 2026): the Unreal lagoon's wave spectrum, ported.
 ## 0.2.0: the open sea too: the Unreal open-water tank's (openocean_tank v374) cascades (1500, 179, 21.4, 2.56 m), its
 ## default sea (wind 8 m/s over 500 km, swell 1 m 12 s), its Sea knob (beaufort(): the Beaufort table, wind at each
 ## band's middle and the fetch fitted to the WMO's probable wave height, tools/oo_seastate.py) and its whitecap
@@ -23,8 +23,12 @@ const CHOP := 1.0            # the tank's Chop (sideways squeeze at the crests)
 const SEED := 1.0            # SpecD.w (v98)
 ## The lagoon's sea (v98 LAB_WIND 2 m/s, the lagoon actor's fetch 3 km, LAB_SWELL_HS 0.03 m over the reef,
 ## LAB_SWELL_SPREAD 40, swell period 12 s heading 40 deg), its depth (mean_depth 4 m) and slick (CALM_K 16).
-const LAGOON := {"U10": 2.0, "fetch_km": 3.0, "wind_deg": 0.0, "swell_hs": 0.03, "swell_tp": 12.0, "swell_deg": 40.0,
-	"swell_s": 40.0, "depth": 4.0, "calm_k": 16.0}
+## 0.3.0 (28 Nov): to key frame v7c's sea (Gary approved v7c 04:35Z; its waves reach 0.15 m at RMS slope 0.09 from
+## 2.5 m/s at 30 deg; v98's slick at k 16 cut everything under 0.4 m, so the caustic net and Snell's window had no
+## fine detail): wind 2.5 m/s from 30 deg, the lagoon's own fetch (1 km, inside the reef), slick at k 40 (0.16 m).
+## RMS slope 0.091, wind-sea peak 1.1 m, Hs 0.05 m (was 0.074, 0.056 m).
+const LAGOON := {"U10": 2.5, "fetch_km": 1.0, "wind_deg": 30.0, "swell_hs": 0.03, "swell_tp": 12.0, "swell_deg": 40.0,
+	"swell_s": 40.0, "depth": 4.0, "calm_k": 40.0}
 ## The open sea (openocean_tank v374 KNOBS: Wind 8 m/s 500 km, Swell 1 m 12 s 40 deg spread 40; CASCADES, RING_HI),
 ## deep (tanh(k h) = 1) and with no slick.
 const OCEAN_CASCADES := [1500.0, 179.0, 21.4, 2.56]

@@ -7,7 +7,7 @@
 ##     spectrum summed over the cascade's own FFT grid (sum psi dk^2: the 250 m cascade holds the narrow swell on a
 ##     handful of grid points, so the continuous band integral is not its expectation), where it carries > 1e-6 m^2;
 ##     Hs within 25 % of 4 sqrt(continuous band sum).
-##  S4 planted fault: a sea drawn with the wrong slick (calm_k 4 instead of 16) must FAIL S3 for the 2.56 m cascade.
+##  S4 planted fault: a sea drawn with the wrong slick (calm_k 4 instead of 40) must FAIL S3 for the 2.56 m cascade.
 ##  S5 height read back (FftSea.height_at, what LagoonWaterField.water_y adds): at 300 drawn points (a still point X
 ##     moved by its push, X + D(X), as the vertex shader places it) the height must be D(X).z of cascades 0 + 1 from a
 ##     direct GPU read, within 2 mm; planted fault: the island y axis not flipped (Godot z = -y) must miss.
@@ -19,12 +19,17 @@ var frame := 0
 var bad := 0
 var stage := 0
 
+## v98's lagoon sea, as the Python reference (tests/data/sea_spectrum_ref.json) was made; SeaSpectrum.LAGOON moved on to
+## key frame v7c's sea (28 Nov), so S1 checks the ported maths on these fixed inputs
+const V98_LAGOON := {"U10": 2.0, "fetch_km": 3.0, "wind_deg": 0.0, "swell_hs": 0.03, "swell_tp": 12.0, "swell_deg": 40.0,
+	"swell_s": 40.0, "depth": 4.0, "calm_k": 16.0}
+
 func _rel(a: float, b: float, tol: float) -> bool:
 	return absf(a - b) <= tol * maxf(absf(b), 1e-30)
 
 func _init():
 	var ref = JSON.parse_string(FileAccess.get_file_as_string("res://tests/data/sea_spectrum_ref.json"))
-	var p := SeaSpectrum.LAGOON.duplicate()
+	var p := V98_LAGOON.duplicate()        # the Python reference was made from v98's lagoon (the port check)
 	var d := SeaSpectrum.derive(p)
 	for k in ref.derive:
 		if not _rel(d[k], ref.derive[k], 1e-4): bad += 1; print("S1 MISMATCH derive ", k, " ", d[k], " want ", ref.derive[k])

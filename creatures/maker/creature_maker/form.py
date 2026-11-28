@@ -233,7 +233,15 @@ class Form:
         c = float(self.sec(np.clip(p[0], 0, self.XEND))[0]); v = np.array([0.0, p[1] - c, p[2]]); n = np.linalg.norm(v)
         return v / n if n > 1e-9 else np.array([0.0, 1.0, 0.0])
 
-    def sd_body(self, P):
+    SD_CHUNK = 100_000   # points per pass: a traced section blends (points x SECT_PHI) tables, 2 M texels x 361 = 5.5 GB per array
+
+    def sd_body(self, P, *a, **k):
+        """pointwise body distance, taken in chunks so memory stays bounded at any map resolution (same values as one pass)."""
+        P = np.asarray(P, float); sh = P.shape[:-1]; Q = P.reshape(-1, 3)
+        if len(Q) <= self.SD_CHUNK: return self._sd_body(P, *a, **k)
+        return np.concatenate([self._sd_body(Q[i:i + self.SD_CHUNK], *a, **k) for i in range(0, len(Q), self.SD_CHUNK)]).reshape(sh)
+
+    def _sd_body(self, P):
         XEND = self.XEND
         x, y, z = P[..., 0], P[..., 1], P[..., 2]
         xc = np.clip(x, 0, XEND); c, a, b = self.sec(xc)

@@ -17,6 +17,11 @@ var parts := {}
 var joints: Array[MeshInstance3D] = []
 var joint_mesh: ArrayMesh
 var alpha := 1.0
+## one skinned body on the rig's full skeleton (adapters/godot/body_skin.gd) when the pose carries it; the rigid
+## pieces stay for poses without a skeleton (thalassa_exact) and for the first-person view (show_head false)
+var use_skin := true
+var skin_body = null
+const BodySkin := preload("res://adapters/godot/body_skin.gd")
 
 class MB:
 	var st := SurfaceTool.new()
@@ -175,6 +180,18 @@ func _joint(i: int, p: Vector3, r: float) -> void:
 
 ## drawDiverBody: place every part from the pose. show_head false hides neck and head (lens inside the skull).
 func apply(pose: Dictionary, show_head := true) -> void:
+	var skinned: bool = use_skin and show_head and pose.has("skel")
+	if skinned:
+		if skin_body == null:
+			skin_body = BodySkin.new()
+			add_child(skin_body)
+		skin_body.visible = true
+		skin_body.apply(pose.skel)
+	elif skin_body != null:
+		skin_body.visible = false
+	for k in parts: parts[k].visible = not skinned
+	for j in joints: j.visible = not skinned
+	if skinned: return
 	parts.chest.global_transform = pose.chestMat
 	parts.pelvis.global_transform = pose.pelvisMat
 	_seg("waist", pose.pelvisPos, pose.chestPos, pose.bodyBack)

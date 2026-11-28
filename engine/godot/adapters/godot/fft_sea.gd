@@ -76,6 +76,9 @@ static func declare_globals() -> void:
 	rs.global_shader_parameter_add("sea_mom_y", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
 	rs.global_shader_parameter_add("sea_mom_r", rs.GLOBAL_VAR_TYPE_VEC4, Vector4.ZERO)
 	rs.global_shader_parameter_add("sea_on", rs.GLOBAL_VAR_TYPE_FLOAT, 0.0)
+	rs.global_shader_parameter_add("sea_crest_sd", rs.GLOBAL_VAR_TYPE_FLOAT, 0.35)
+	rs.global_shader_parameter_add("sea_sparkle", rs.GLOBAL_VAR_TYPE_FLOAT, float(OS.get_environment("AO_SPARKLE")) if OS.get_environment("AO_SPARKLE") != "" else 1.0)   # look/sea_top 0.5.0
+	rs.global_shader_parameter_add("sea_crest_glow", rs.GLOBAL_VAR_TYPE_FLOAT, float(OS.get_environment("AO_CREST_GLOW")) if OS.get_environment("AO_CREST_GLOW") != "" else 1.0)   # art lever, 1 = the tank
 	rs.global_shader_parameter_add("sea_foam", rs.GLOBAL_VAR_TYPE_SAMPLER2D, null)
 	rs.global_shader_parameter_add("sea_foam_org", rs.GLOBAL_VAR_TYPE_VEC4, Vector4(0, 0, FOAM_SIZE, 0))
 	rs.global_shader_parameter_add("sea_foam_k", rs.GLOBAL_VAR_TYPE_VEC4, Vector4(-10.0, 0.04, 0.0, 1.0))
@@ -91,6 +94,7 @@ func set_params(p: Dictionary) -> void:
 	rs.global_shader_parameter_set("sea_mom_x", moments.mom_x)
 	rs.global_shader_parameter_set("sea_mom_y", moments.mom_y)
 	rs.global_shader_parameter_set("sea_mom_r", moments.mom_r)
+	rs.global_shader_parameter_set("sea_crest_sd", sqrt(moments.per[1].x + moments.per[2].x))   # tank SeaK.x: the crests' height spread, cascades 1-2
 	var c: Array = d.cascades; var r: Array = d.ring_hi
 	patch = Vector4(c[0], c[1], c[2], c[3]); ring_hi = Vector4(r[0], r[1], r[2], r[3])
 	rs.global_shader_parameter_set("sea_patch", patch)

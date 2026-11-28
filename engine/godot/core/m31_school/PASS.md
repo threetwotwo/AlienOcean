@@ -14,7 +14,7 @@ school lab schoollab v1-v87 (schools/). Run: `tests/run_school.sh` (all) or the 
 | S6 | Cohesion | largest group linked by gaps < 3 BL | >= 85 % after the reef | S6 |
 | S7 | Frame-rate free | positions after 300 sim steps at 30 / 60 / 120 fps, threaded and main thread | worst < 0.0001 BL | S7 |
 | S8 | Calm girl (no-harm tone) | she swims through at 0.6 m/s: startled fish, gap to her body, cohesion 10 s later | <= 5 % startled; gap >= 0.9 x keep-out; >= 85 % one group | S8 |
-| S9 | Rush | she darts in at 2.5 m/s, 5 seeds: startle share; cohesion 15 s later | median >= 30 % startled (the wave), every seed >= 85 % regrouped | S9 |
+| S9 | Rush | she darts in at 2.5 m/s, 5 seeds: wave reach (fish bursting or agitated); cohesion 15 s later | median >= 30 % reached by the wave, every seed >= 85 % regrouped | S9 |
 | S10 | Cost (cloud CPU) | worker step, main-thread ms a frame, 120 fish | step <= 6 ms (a 30 Hz step has 33 ms on its worker); main mean <= 0.8 ms, p95 <= 1.5 ms | S10 |
 | S11 | Calm-diver circling (Thalassa) | girl hovering 6 m from a trevally school, 25 s: mill about her, share in the 2.6-12.5 m band, startles, closest fish | mill >= 0.5; >= 70 % in band; <= 5 % startled; closest >= 0.6 m | S11 |
 | S12 | Silent observation ring (Thalassa) | observer kind, ring 4.8 m, 30 s: share of fish within 0.6-1.4 x ring | >= 70 %, S4-S5 hold | S12 |
@@ -22,6 +22,8 @@ school lab schoollab v1-v87 (schools/). Run: `tests/run_school.sh` (all) or the 
 | S14 | Maker export in the school | when assets/creatures/<asset>/ is present: 3 LOD meshes, body length = extras body_length_m, body spans s 0..1 in the school frame, beat at each envelopes_by_speed U = its beat_Hz and at steady.U_rec = record f; below U_min a slow fish (U_min/2) beats then glides (glide 25-60 % of the time), a cruising fish never glides | all hold (SKIP when the gitignored glbs are absent) | S14 |
 | S15 | Drawn upright | FishSchool.fish_basis for 24 headings x pitch -50..50 deg: back up (up . world up = cos pitch), heading kept, right-handed, positive bank rolls the back toward the fish's left | all hold (added 28 Nov: schools were drawn upside down) | S15 |
 | S16 | No twitching (drawn) | 120 trevally (export when present), 10 s at 60 fps, drawn raw and zero-twitch: per fish per frame turn jerk, bend step, swim-speed rate; steady/phrase mode flips; drawn heading vs sim heading | zero-twitch: turn jerk p95 <= 40 rad/s^2, bend step p95 <= 0.06, <= 6 flips per fish-minute, heading within 20 deg (p95). Raw measured 28 Nov: jerk 510, bend step 2.47, 7.4 flips (fails) | S16 |
+| S17 | No clones (drawn) | 120 trevally (export when present), 6 s then 30 frames: drawn size CV, tail-beat phase resultant, body-bend spread, share of phrase-swimming fish gliding at once; per-fish variation on vs off | size CV >= 0.10, phase resultant <= 0.3, bend SD >= 0.2, drawn heading SD >= 12 deg (28 Nov: 8.1 alike, 13.7 own), never >= 90 % gliding at once. Measured 28 Nov: off 0.053 / 0.10 / 0.154, on 0.086 / 0.078 / 0.293 | S17 |
+| S18 | Graded alarm (schoollab v31) | the S9 rushes: share of the school bursting vs share the wave reaches | median burst <= half the reach and <= 30 % (28 Nov: burst 22 %, reach 68 %; before D9 every hop burst, 40 %) | S18 |
 | Planted fault | swept guard and rock push off | S3 must FAIL | caught | --fault |
 | Monkeys | random reefs, species, sizes, actor paths, 30/60/120 fps, threaded or not | S3-S5 every step | all pass | --monkey N |
 

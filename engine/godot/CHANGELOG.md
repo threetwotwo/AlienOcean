@@ -1,5 +1,25 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, look thread): the GI forgets the old light after a jump in the hour
+- Surface thread report: after the hour slider jumped noon -> 23:00 the lagoon stayed noon-lit (sand, fish blown-out cyan at
+  night exposure). Reproduced (shot 09, AO_HOUR 12 then 23 six frames before the shot): frame mean 135/205/210; GI off 6/15/21.
+  Cause: SDFGI keeps its probes' light over ~30 frames (light updates every 8). WorldRoot.apply now drops the cache when EV100
+  jumps more than 3 stops: SDFGI off until two frames are drawn without it, then rebuilt from the new light (a toggle inside one
+  frame is never drawn: tried, no effect). After: 6/15/21.
+
+## 0.6.0-dev (28 Nov 2026, look thread): the sun under water is as wide as the waves make it
+- Blind critique item 6 ("shadows razor-hard regardless of height"): the sun light had no angular size. Under water it is now
+  the refracted disc (0.53 / 1.333 deg) widened by the waves' slope, each facet bending the beam by (1 - 1/1.333) x slope:
+  WorldRoot.sea_rms_slope 0.06 (calm lagoon, the key frame rig's) -> 2.1 deg, so a shadow 3 m above the sand gets a ~11 cm
+  penumbra while contact shadows stay crisp (table coral, 0.4 m: ~1.5 cm, no visible change). Above water: 0.53 deg.
+
+## 0.6.0-dev (28 Nov 2026, look thread): clearer water, distance fades to blue
+- Blind critique (Gemini + Fable, item 8): "fog is one teal colour". Checked with grey cards (tools/lagoon_shots.gd AO_FOG_CARDS=1,
+  flat and standing at 3-15 m): the view path already loses each band at its own rate (scene x exp(-c L) + glow), but at
+  Cdom 0.05 c = 0.37 / 0.090 / 0.087 per m: blue went as fast as green, so after red the distance settled on teal. Gary
+  picked clearer water (card 28 Nov 03:03Z): cdom 0.015, clear-lagoon CDOM, far water and rock fade to blue, near sand unchanged.
+  Standing faces read darker than sunlit sand by physics (no noon sun on them, sky + sand bounce only), so rock fades sooner.
+
 ## 0.6.0-dev (28 Nov 2026, look thread): the sky's share of the light matched to the key frame
 - Measured: the Blender key frame rig rendered as sun-only and sky-only passes (keyframe/src/scene.py sky=0 / sun=0), Godot the
   same (AO_SDFGI_SKY=0 / AO_SUN=0), key frame camera. Sun pass (incl. bounce): shadow L* Blender 39.3, Godot 38.2 (match).

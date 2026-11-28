@@ -1,4 +1,4 @@
-## Sea floor map 0.1.0 (adapters/godot; water surface thread, 27 Nov 2026): what lies under the sea round the eye, seen
+## Sea floor map 0.1.2 (adapters/godot; water surface thread, 27 Nov 2026): what lies under the sea round the eye, seen
 ## straight down: its light (radiance, nits, as the world's own shaders light it at its depth: sun, net, sky, sand
 ## bounce) and its top height, for the mirror in the underside of the surface (where a reflected ray really lands:
 ## sand, grass, rock; lagoonwater v73/v87 read a baked floor map of the slice the same way, with stand-in colours).
@@ -24,11 +24,13 @@ var _vp_alb: SubViewport
 var _vp_h: SubViewport
 var _cams := []
 var _pending := 0
+var _env: Environment
+var _dirty := false            # the light changed (WorldRoot.apply): capture again where we are
 
 func _init() -> void:
 	name = "SeaFloorMap"
 	declare_globals()
-	var env := Environment.new()
+	var env := Environment.new(); _env = env
 	env.background_mode = Environment.BG_COLOR; env.background_color = Color(0, 0, 0, 0)
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	# exposure x 1 (Godot scales lit and debug-drawn materials by 1 / (1.2 x 2^EV100)): EV100 = log2(N^2 x shutter) =
@@ -70,11 +72,26 @@ func _ready() -> void:
 	RenderingServer.global_shader_parameter_set("water_floor_albedo", _vp_alb.get_texture())
 	RenderingServer.global_shader_parameter_set("water_floor_height", _vp_h.get_texture())
 
+func set_ambient(nits: Vector3) -> void:
+	## the ambient the floor's shaders expect (WorldRoot.apply: the water's fill reference, nits): the captures run at
+	## exposure x 1, so nits go in as they are. Without it the floor here was lit by the sun alone (no fill), and the
+	## mirror under the surface read navy where it should show the bright sand (0.1.2, 28 Nov)
+	var mx := maxf(nits.x, maxf(nits.y, nits.z))
+	_env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	_env.ambient_light_color = Color(nits.x / mx, nits.y / mx, nits.z / mx) if mx > 0.0 else Color.BLACK
+	_env.ambient_light_energy = mx
+
+func refresh() -> void:
+	## the light changed (the hour, the eye going under or out): the radiance captured under the old light is stale,
+	## so capture again on the next follow (28 Nov: at night the mirror still showed the day's floor, bright cyan)
+	_dirty = true
+
 func follow(eye: Vector3) -> void:
 	## call each frame (or when the eye moves) with the eye
 	var c := Vector2(eye.x, eye.z)
-	if c.distance_to(centre) < recentre_m and _pending == 0: return
+	if c.distance_to(centre) < recentre_m and _pending == 0 and not _dirty: return
 	if _pending == 0:
+		_dirty = false
 		centre = (c / snap_m).round() * snap_m
 		for cam in _cams:
 			cam.global_transform = Transform3D(Basis.looking_at(Vector3.DOWN, Vector3.FORWARD), Vector3(centre.x, ALTITUDE, centre.y))

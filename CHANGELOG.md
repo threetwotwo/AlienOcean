@@ -21,6 +21,11 @@ day the milestone was reached.
   Fix (28 Nov): trevally school twitched: the body bend followed the sim's raw 30 Hz turn noise (flipping side most
   frames) and fish at the beat/glide threshold flipped mode. Thalassa's zero-twitch drawing ported (smoothed, slew-capped
   heading; eased turn rate, bank, bend and swim speed), beat/glide hysteresis; check S16 measures drawn jitter.
+  No clones (Fable critique 28 Nov): each fish its own drawn size, beat rate, swing and a slowly wandering curl and
+  roll; phrases start at each fish's own point in the beat; per-frame constants and cached swim numbers; check S17.
+  From the parked Unreal school lab (proven, Gary-approved there, missing here): graded alarm (v31, D9: only the
+  first wave hop bursts, further out agitation; check S18), silver flash roll and slow sway (v32), far fish cast no
+  shadow past 25 m (v47).
 - Creature maker moves into the repo as stage modules (creatures/maker/, tool version 0.3.0-dev): record, form, chart,
   cage features (template, eye, mouth, gill, finish), UV, maps, fins, Blender export, checks, board. Output is
   byte-identical to the last fish-restart proof script. Real openings: mouth, throat and both gill passages are topology

@@ -17,6 +17,7 @@ def get(d, path, default=None, need=True, where=''):
             if default is not None: DEFAULTS.append(dict(input=(where + '.' if where else '') + path, source='DEFAULT', value=default if not isinstance(default, np.ndarray) else default.tolist()))
             return default
     return cur
+LL_FRAC = 0.27       # DEFAULT: lateral line height as a share of depth when the record has none
 SPINE_NOTCH = 0.22   # DEFAULT: membrane dip between spine tips, share of the spine length (seabream/snapper-like; deep-notched fins say so in the record)
 
 def eye_iris(R, E):
@@ -158,13 +159,15 @@ def adapt(path, style=None):
     P('caudal fin', 'record.skeleton.median.caudal ' + ('(proc.uUp, edge traced: ray tips upper lobe to lower lobe)' if C.get('edge') else '(proc.uUp, len, spread deg, outline; else outline from caudal.round)'))
     PE = R['skeleton']['pectoral']
     fins['pectoral'] = dict(x=PE['base']['u'] * f, y=PE['base']['y'] * f, len=PE['length'], span=[s * f for s in dget(PE, 'span', [3, -3], 'skeleton.pectoral')],
-                            sweep=dget(PE, 'sweep', [20, -30], 'skeleton.pectoral'), out=dget(PE, 'out', 30, 'skeleton.pectoral'), prof=dget(PE, 'prof', [[0, 1], [1, 0.4]], 'skeleton.pectoral'), rays=dget(PE, 'rays', 14, 'skeleton.pectoral'))
-    P('pectoral fin', 'record.skeleton.pectoral (base, length (SL), span, sweep, out, prof)')
+                            sweep=dget(PE, 'sweep', [20, -30], 'skeleton.pectoral'), out=dget(PE, 'out', 30, 'skeleton.pectoral'), prof=dget(PE, 'prof', [[0, 1], [1, 0.4]], 'skeleton.pectoral'), rays=dget(PE, 'rays', 14, 'skeleton.pectoral'),
+                            edge=fin_edge(PE), base_line=sc(PE['base_line']) if PE.get('edge') and PE.get('base_line') else None)
+    P('pectoral fin', 'record.skeleton.pectoral ' + ('(edge + base_line traced: side-view outline root to root; out)' if fins['pectoral']['edge'] else '(base, length (SL), span, sweep, out, prof)'))
     if 'pelvic' in R['skeleton']:            # puffers, porcupinefish, filefish have no pelvic fins (anatomy, not a gap)
         PV = R['skeleton']['pelvic']
         fins['pelvic'] = dict(x=PV['base']['u'] * f, y=PV['base']['y'] * f, len=PV['length'], sweep=dget(PV, 'sweep', [40, -10], 'skeleton.pelvic'), out=dget(PV, 'out', 30, 'skeleton.pelvic'),
-                              prof=dget(PV, 'prof', [[0, 1], [1, 0.6]], 'skeleton.pelvic'), rays=dget(PV, 'rays', 6, 'skeleton.pelvic') + dget(PV, 'spines', 0, 'skeleton.pelvic'))
-        P('pelvic fin', 'record.skeleton.pelvic (base, length (SL), sweep, out, prof)')
+                              prof=dget(PV, 'prof', [[0, 1], [1, 0.6]], 'skeleton.pelvic'), rays=dget(PV, 'rays', 6, 'skeleton.pelvic') + dget(PV, 'spines', 0, 'skeleton.pelvic'),
+                              edge=fin_edge(PV), base_line=sc(PV['base_line']) if PV.get('edge') and PV.get('base_line') else None)
+        P('pelvic fin', 'record.skeleton.pelvic ' + ('(edge + base_line traced: side-view outline root to root; out)' if fins['pelvic']['edge'] else '(base, length (SL), sweep, out, prof)'))
     else: P('pelvic fin', 'absent in record.skeleton (no pelvic fins)')
     out['fins'] = fins
     S = R.get('scales', {})
@@ -177,7 +180,9 @@ def adapt(path, style=None):
     if naked: rows = 0.0                     # naked skin (blennies): no scale relief
     elif rows <= 0:                          # record: 0 = "none or too small to count" on a scaled body -> minute scales
         rows = 150.0; DEFAULTS.append(dict(input='scales.rows', source='DEFAULT', value=150, note='scaled body with rows 0: minute scales'))
-    out['scales'] = dict(lateral_line=rows, ll_frac=float(get(S, 'll_frac', None, need=False) or get(S, 'grow.lateral_line.ll_frac', 0.27, need=False, where='scales')),
+    if not (get(S, 'll_frac', None, need=False) or get(S, 'grow.lateral_line.ll_frac', None, need=False)):
+        DEFAULTS.append(dict(input='scales.grow.lateral_line.ll_frac', source='DEFAULT', value=LL_FRAC))
+    out['scales'] = dict(lateral_line=rows, ll_frac=float(get(S, 'll_frac', None, need=False) or get(S, 'grow.lateral_line.ll_frac', None, need=False) or LL_FRAC),
                          type=get(S, 'grow.type_body.value', get(S, 'type', 'ctenoid', need=False), need=False))
     P('scale height (UV)', 'record.scales lateral_line pored_scales (else scales.rows)')
     G0 = R['paint']['ground']; sh = dget(G0, 'shade', {}, 'paint.ground')
