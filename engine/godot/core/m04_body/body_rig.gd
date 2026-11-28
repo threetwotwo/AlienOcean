@@ -1411,6 +1411,31 @@ func solve_walk_wade(dt: float, s, total_time: float, get_floor, get_normal, _qu
 				if lift <= 0.001 and hv.length() < 0.001: break
 				adj += Vector3(hv.x, maxf(0.0, lift), hv.y)
 				solved = BM.leg(hip, ft + adj, side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
+			if fst.stepping and not s.shore_is_airborne:
+				# ROOT (stress B12 step down at 120 Hz): the lift above only clears what the leg can deliver. Stepping
+				# off a ledge the pelvis comes down (her centre crossed the edge) while the trailing foot is still over
+				# the tread: the knee folds to its limit (132), the ankle can't rise any more (hip - 25 cm), the shin
+				# lies level and the toe hangs 15 cm under it, through the tread's edge as the hip drags the foot off.
+				# A swing foot that can't be lifted clear goes on ahead, along its way to its landing spot, as far as
+				# clears it (the knee comes forward and up); only if that does clear it
+				var ref_g: float = fgy if is_finite(fgy) else floor_here
+				var sunk := func(fm: Transform3D) -> float:
+					var worst := 0.0
+					for sp_ in SOLE_PTS:
+						var q: Vector3 = fm * sp_
+						var gq: float = get_floor.call(q.x, q.z)
+						if is_finite(gq) and gq - ref_g < 0.36: worst = maxf(worst, gq - q.y)
+					return worst
+				if sunk.call(solved.finMat) > 0.005:
+					var e0: Vector3 = solved.ik.eff
+					var go := Vector3(fst.to.x - e0.x, 0, fst.to.z - e0.z)
+					if go.length() > 0.01:
+						go = go.normalized()
+						for k in range(1, 9):
+							var tr := BM.leg(hip, e0 + go * (k * 0.01), side, Vector3.DOWN, pelv_fwd, thigh_len, shin_len, leg_opts)
+							if sunk.call(tr.finMat) <= 0.001:
+								solved = tr
+								break
 			# FIX (stress J6/J7): a planted foot the leg can no longer reach (the body climbed away from it) was
 			# dragged; step it like a clamped one
 			var miss: float = solved.ik.eff.distance_to(ft + adj)
