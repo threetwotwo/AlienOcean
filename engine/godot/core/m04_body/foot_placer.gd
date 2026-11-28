@@ -620,6 +620,9 @@ func update(dt: float, s: Dictionary) -> Dictionary:
 		air_twist = -j.leadSide * (0.11 if j.style in ["standing_skip", "hurdle_vault"] else 0.06) * air_apex + j.varTwist * 0.055 * air_apex
 	var tgt_pyaw := clampf(stride_diff * lerpf(0.20, 0.25, rb) + (-air_twist * 0.65 if is_air else 0.0), -0.22, 0.22)
 	var tgt_twist := clampf(-stride_diff * lerpf(0.24, 0.33, rb) + air_twist + yaw_rate * 0.038, -0.28, 0.28)
+	# (critique: the run's shoulder counter-rotation didn't read) the chest turns further against the hips when running
+	if target_filter != null:     # (the non-Thalassa rig sets it)
+		tgt_twist = clampf(-stride_diff * lerpf(0.26, 0.46, rb) + air_twist + yaw_rate * 0.038, -0.30, 0.30)
 	var pelvis_yaw: float = pelvis_yaw_spring.step(tgt_pyaw, 0.14 if is_air else 0.19, sdt)
 	var spine_lean_fwd: float = spine_lean_fwd_spring.step(tgt_lean_fwd, 0.13 if is_air else 0.20, sdt)
 	var spine_lean_lat: float = spine_lean_lat_spring.step(tgt_lean_lat, 0.15 if is_air else 0.20, sdt)
