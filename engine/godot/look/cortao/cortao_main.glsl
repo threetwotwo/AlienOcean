@@ -20,9 +20,17 @@ layout(r32ui, set = 0, binding = 3) uniform restrict writeonly uimage2D outputBu
 // Light weighting (Godot wrapper addition): up_on.xyz = world up in view space, up_on.w 1 = on; light.x/y = luminance of the water's
 // light from above / below (the same two halves the GI reads, look/sky.gdshader under_down / under_up).
 layout(set = 0, binding = 4, std140) uniform LightParams { vec4 up_on; vec4 light; } LW;
+#ifdef CORTAO_HALF   // the filter's depth / normal at half res: the full-res texel this pixel was computed at (CORTAO's own mips
+                     // alternate their picks, which streaks the depth-aware filter)
+layout(r32ui, set = 0, binding = 5) uniform restrict writeonly uimage2D halfPacked;
+#endif
 
 uint cortao_samplePackedData(vec2 texCoords, float mipmap) { return textureLod(packedDataBuffer, texCoords, mipmap).r; }
+#ifdef CORTAO_HALF   // half resolution: half pixel p was computed at full pixel 2p + 1 (cortao_effect.gd half_res_ao)
+vec3 cortao_loadNormal(ivec2 p) { return normalize(texelFetch(normalBuffer, p * 2 + 1, 0).xyz * 2.0 - 1.0); }
+#else
 vec3 cortao_loadNormal(ivec2 p) { return normalize(texelFetch(normalBuffer, p, 0).xyz * 2.0 - 1.0); }
+#endif
 uint cortao_sampleOccluderLookupTable(vec3 texCoords) { return textureLod(occluderLookupTable, texCoords, 0.0).r; }
 // Under water the fill is far from uniform: most comes from above, little from the sand below. CORTAO's rays are cosine
 // distributed, so the fill a pixel still receives is sum(open rays x L(dir)) / sum(all rays x L(dir)), with L the field's
@@ -53,5 +61,8 @@ uvec2 deinterleave(uint index) {
 layout(local_size_x = 16, local_size_y = 16) in;
 void main() {
 	uvec2 pixelCoords = gl_WorkGroupID.xy * gl_WorkGroupSize.xy + deinterleave(gl_LocalInvocationIndex);
+#ifdef CORTAO_HALF   // every pixel, sky included (0 = sky for the filter); before the pass, which returns early on sky
+	if (all(lessThan(pixelCoords, uvec2(imageSize(halfPacked))))) imageStore(halfPacked, ivec2(pixelCoords), uvec4(texelFetch(packedDataBuffer, ivec2(pixelCoords) * 2 + 1, 0).r, 0u, 0u, 0u));
+#endif
 	cortao_mainPass(pixelCoords, parameters);
 }
