@@ -273,11 +273,12 @@ class Form:
             # underside into the flank such a wall leans over the skin (a ledge) and the bake sees it from behind
             t = t * np.clip(np.minimum(-poly_sd2(x, az, poly), under(x) - y) / PLATE_CHAMFER, 0, 1)
             plate = np.maximum(d0 - t, -d0 - 0.004)
-            # where the chamfer has run t out to 0 the plate IS the body surface: a smooth union there lowered the whole skin
-            # by the blend's bias (0.15 mm everywhere) and labelled the whole flank as this plate (maps: no scale relief, metal
-            # dimmed; export r5). The blend radius goes to 0 with t, so off the plate the union is exactly the body.
-            nd = smin(d, plate, 0.0006 * np.clip(t / 1e-3, 0, 1) + 1e-9)
-            ids = np.where(nd < d - 1e-5, len(self.PLATES) + k + 1, ids); d = nd
+            nd = smin(d, plate, 0.0006)
+            # where the chamfer has run t out to 0 the plate IS the body surface, and the smooth union still lowers d there by
+            # its bias: that labelled the whole flank as this plate (maps: no scale relief, metal dimmed; export r5). A point
+            # belongs to the plate only where the plate has thickness. (The 0.15 mm bias itself stays for now: removing it
+            # raised rest crossings 208 -> 333 on the traced board, moorish idol 47 -> 144; round 3 owns that.)
+            ids = np.where((nd < d - 1e-5) & (t > 1e-5), len(self.PLATES) + k + 1, ids); d = nd
         # orbit: circumorbital ring (bone) around the eye opening, a low torus in the side plane
         ex, eyy, er = self.ex, self.eyy, self.er
         ring = np.abs(np.sqrt((x - ex) ** 2 + (y - eyy) ** 2) - max(EY['orbit'], er * 1.08)) - 0.25 * (EY['orbit'] - er * 0.8 + 0.01)
