@@ -110,6 +110,10 @@ func _ready() -> void:
 	services.world_root = world_root; services.streamer = streamer
 	services.world = WorldQuery.new(get_world_3d(), 1)
 	for s in schools: add_school(s)
+	# her senses: registry actors, the schools, the authored place's landmarks, the camera (adapters/godot/brain_senses.gd)
+	var bs := ActorRig.BrainSenses.new()
+	bs.actors = actors; bs.schools = school_nodes; bs.camera = cam; bs.dress = _dress
+	girl.senses = bs
 	world_root.apply(spawn_feet.y + 1.0)
 	_applied_hours = clock.hours
 	ready_done = true

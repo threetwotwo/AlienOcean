@@ -13,6 +13,7 @@ const Body := preload("res://adapters/godot/player_body.gd")
 const BodyRig := preload("res://core/m04_body/body_rig.gd")
 const Mannequin := preload("res://adapters/godot/mannequin.gd")
 const WorldQuery := preload("res://adapters/godot/world_query.gd")
+const BrainSenses := preload("res://adapters/godot/brain_senses.gd")
 
 @export var with_mannequin := true      # false: motor only (headless stress runs that don't need the pose)
 var body: CharacterBody3D
@@ -22,6 +23,7 @@ var wq = null
 var benv := {}
 var pose := {}
 var head_visible := true
+var senses = null              # BrainSenses (adapters/godot/brain_senses.gd): what her brain sees and hears; null = nothing
 var capsule := {"centre": Vector3.ZERO, "axis": Vector3.UP, "half_len": 0.44, "radius": 0.25}
 
 func _init() -> void:
@@ -51,9 +53,10 @@ func tick(dt: float, inp, water, t: float) -> void:
 	s.config.surface_y = water.water_y(p.x, p.z, t) if water.level > -999.0 else -1000.0
 	if wq == null:
 		wq = WorldQuery.new(get_world_3d(), 1); wq.exclude.append(body.get_rid()); benv = wq.as_env()
+	if senses != null and senses.wq == null: senses.wq = wq
 	wq.top = s.pos.y + 0.05      # floor rays start at the eye (from higher up a cave roof reads as floor)
 	brig.update_timers(dt)
-	pose = brig.update_swim(dt, s, null, t, benv)
+	pose = brig.update_swim(dt, s, null, t, benv, senses.sense(s.pos) if senses != null else null)
 	_capsule_from_pose()
 
 ## Draw the pose (after the camera decided whether the head shows). alpha: the camera's body_alpha.
@@ -71,6 +74,20 @@ func _capsule_from_pose() -> void:
 	capsule.centre = (head + feet) * 0.5
 	capsule.axis = v / L if L > 1e-4 else Vector3.UP
 	capsule.half_len = maxf(L * 0.5 - capsule.radius + 0.12, 0.0)   # + head radius above the head joint
+
+## A sound she may turn to (the brain's hearing organ): kind, where, how loud (0.1..1; >= 0.78 interrupts what she
+## watches), how long it rings (s).
+func hear(kind: String, pos: Vector3, intensity := 0.65, max_age := 1.8) -> void:
+	brig.brain.register_sound_event(kind, pos, intensity, max_age)
+
+## Hold her gaze on a target the game names (Thalassa engageObjectiveFocus): call every tick while it stands; the hold
+## ends hold_sec after the last call. Same as brig.brain.engage_objective_focus.
+func engage_objective_focus(label: String, target_pos = null, target_dir = null, hold_sec := 0.55) -> void:
+	brig.brain.engage_objective_focus(label, target_pos, target_dir, hold_sec)
+
+## The brain's last output: breath (phase, signal, centred, rate, amp, exertion), gaze, focus, mood.
+func brain_state() -> Dictionary:
+	return brig.brain_out
 
 func eye_point() -> Vector3:
 	return body.eye_point()

@@ -36,7 +36,7 @@ any module uses it.
 | m01_input | input map, stick shaping, look filter | core/input.js |
 | m02_motor | swim / wade / walk locomotion, layered moves | core/swimmer-physics.js, core/mover.js |
 | m03_camera | no-cut camera | core/cinematic-camera.js |
-| m04_body | body rig: springs, IK, foot placement, swim and walk poses | core/ik-rig.js, ik-solvers.js, procedural-locomotion.js, ik-poses-world.js, physics-control.js (in progress) |
+| m04_body | body rig: springs, IK, foot placement, swim and walk poses; character brain (gaze, glances, sound turns, hand touch, breath) and its sense context (POIs, line of sight; adapter: adapters/godot/brain_senses.gd) | core/ik-rig.js, ik-solvers.js, procedural-locomotion.js, ik-poses-world.js, physics-control.js, character-brain.js, style/runtime-senses.js (in progress) |
 | m12_streaming | open-world cell streamer (engine thread) | |
 | m29_water_physics | buoyancy | |
 | m31_school | fish schools: the Nov 1 schooling paper's rules (numpy school.py port, golden-checked) + M08 perceived actors (school thread) | research/schooling/school.py (not Thalassa) |
