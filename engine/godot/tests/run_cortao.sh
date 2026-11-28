@@ -11,5 +11,10 @@ $X "$G" --path . --rendering-driver vulkan --script res://tools/cortao_check.gd 
 $X "$G" --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- "$OUT" >/dev/null 2>&1 || rc=1
 if $X "$G" --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- "$OUT" --fault flip >/dev/null 2>&1; then echo "CORTAO PLANTED FAULT flip NOT CAUGHT"; rc=1; else echo "CORTAO planted fault flip caught"; fi
 if CORTAO_FAULT_COARSE=1 $X "$G" --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- "$OUT" --fault coarse >/dev/null 2>&1; then echo "CORTAO PLANTED FAULT coarse NOT CAUGHT"; rc=1; else echo "CORTAO planted fault coarse caught"; fi
+for A in gtao vbao; do   # the head to head's other methods (CORTAO_ALGO): same planted scene, same checks
+	echo "-- $A"
+	CORTAO_ALGO=$A $X "$G" --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- "$OUT" 2>&1 | grep -E "^(PASS|FAIL)|CORTAO_CHECK" || true
+	CORTAO_ALGO=$A $X "$G" --path . --rendering-driver vulkan --script res://tools/cortao_check.gd -- "$OUT" >/dev/null 2>&1 || rc=1
+done
 echo "== CORTAO result: $([ $rc = 0 ] && echo ALL GREEN || echo FAILURES)"
 exit $rc
