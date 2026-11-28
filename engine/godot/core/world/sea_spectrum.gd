@@ -28,7 +28,7 @@ const SEED := 1.0            # SpecD.w (v98)
 ## fine detail): wind 2.5 m/s from 30 deg, the lagoon's own fetch (1 km, inside the reef), slick at k 40 (0.16 m).
 ## RMS slope 0.091, wind-sea peak 1.1 m, Hs 0.05 m (was 0.074, 0.056 m).
 const LAGOON := {"U10": 2.5, "fetch_km": 1.0, "wind_deg": 30.0, "swell_hs": 0.03, "swell_tp": 12.0, "swell_deg": 40.0,
-	"swell_s": 40.0, "depth": 4.0, "calm_k": 40.0}
+	"swell_s": 40.0, "depth": 2.4, "calm_k": 40.0}   # 2.4 m: the lagoon depth Gary picked (28 Nov)
 ## The open sea (openocean_tank v374 KNOBS: Wind 8 m/s 500 km, Swell 1 m 12 s 40 deg spread 40; CASCADES, RING_HI),
 ## deep (tanh(k h) = 1) and with no slick.
 const OCEAN_CASCADES := [1500.0, 179.0, 21.4, 2.56]

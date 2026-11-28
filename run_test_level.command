@@ -1,5 +1,6 @@
 #!/bin/bash
 # Alien Ocean: open the Godot test level (plans/test_level/PLAN.md, milestone T1). Double-click in Finder.
+# Opens full screen (half resolution + FSR upscale on Retina). AO_WINDOWED=1 ./run_test_level.command keeps a 960x540 window.
 # F1 debug panel, F8 issue report (saved to playtest_reports/ here), click to look with the mouse, Esc frees it.
 cd "$(dirname "$0")"
 GODOT="../Godot_4.7/Godot.app/Contents/MacOS/Godot"

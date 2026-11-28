@@ -96,6 +96,10 @@ def hinge_pose(rig, specs, deg):
     return Ps
 
 
-def hinge_frames(rig, specs, peak_deg, seconds=1.0, n=24):
-    """head bones opened and closed again: 0 -> peak -> 0 with a smooth ease (sin^2), peak at half time."""
+def hinge_frames(rig, specs, peak_deg, seconds=1.0, n=None):
+    """head bones opened and closed again: 0 -> peak -> 0 with a smooth ease (sin^2), peak at half time. Keyed at swim_clip.KEY_HZ
+    (was 24 keys a second: straight lines between them kink the ease at every key, a shudder at 120 Hz; no jitter, Gary 28 Nov)."""
+    if n is None:
+        from creature_maker.swim_clip import KEY_HZ
+        n = int(math.ceil(KEY_HZ * seconds))
     return [(k / n * seconds, hinge_pose(rig, specs, peak_deg * math.sin(math.pi * k / n) ** 2)) for k in range(n + 1)]

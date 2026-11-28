@@ -8,6 +8,7 @@
 // No fog here: the underwater view quad (WorldRoot.attach_camera) fogs every pixel along the view ray.
 shader_type spatial;
 render_mode cull_disabled, depth_draw_opaque;
+#include "res://look/screen_ao.gdshaderinc"
 
 uniform vec3 back_colour : source_color = vec3(0.10, 0.22, 0.32);
 uniform vec3 flank_colour : source_color = vec3(0.78, 0.82, 0.86);
@@ -65,4 +66,5 @@ void fragment() {
 	METALLIC = flank_metal * flank;
 	ROUGHNESS = mix(0.55, 0.22, flank) - 0.15 * zone_eye;
 	SPECULAR = 0.5;
+	AO = min(AO, screen_ao(SCREEN_UV));   // CORTAO when on (look/screen_ao.gdshaderinc)
 }

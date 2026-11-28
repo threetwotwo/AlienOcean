@@ -1,7 +1,7 @@
 #!/bin/bash
-# Perf runner 0.1.0: plays the test level by itself and measures every station, at the window size and full screen.
+# Perf runner 0.1.0: plays the test level by itself and measures every station, full screen at native resolution by default (Gary 28 Nov: every run full screen).
 # Usage: tools/perf_runner/run_perf.sh [extra perf_runner args, e.g. --only floor_look_down --no-toggles]
-#   PROFILES="window fullscreen" (default) | "window"     GODOT=/path/to/Godot (default: ../Godot_4.7 beside the repo, then /Applications)
+#   PROFILES="fullscreen" (default) | "window" | "WxH"     GODOT=/path/to/Godot (default: ../Godot_4.7 beside the repo, then /Applications)
 # Output: <repo>/playtest_reports/perf/<UTC stamp>/ (results.json per profile, PNGs, summary.md, report.html). Prints the folder.
 set -u
 cd "$(dirname "$0")/../.."                       # engine/godot
@@ -14,7 +14,7 @@ STAMP=$(date -u +%Y-%m-%dT%H-%M-%SZ)
 OUT=${OUT:-$REPO/playtest_reports/perf/$STAMP}
 mkdir -p "$OUT"
 dirs=()
-for p in ${PROFILES:-window fullscreen}; do
+for p in ${PROFILES:-fullscreen}; do
   case $p in
     window) flags=() ;;
     fullscreen) flags=(--fullscreen) ;;

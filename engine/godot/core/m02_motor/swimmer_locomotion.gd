@@ -86,6 +86,8 @@ var shore_yaw_rate := 0.0
 var shore_prev_speed := 0.0
 var shore_bob_phase := 0.0
 var last_bump := 0.0
+var breach_armed := true    # a breach launch needs a dive below BREACH_ARM_DEPTH since the last one (see _update_swim)
+const BREACH_ARM_DEPTH := 0.9
 
 func _init(cfg: Dictionary = {}) -> void:
 	for k in cfg:
@@ -459,8 +461,9 @@ func _update_swim(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, i
 		vel.x += a.x * (4.5 if enclosed else 10.0) * sdt
 		vel.z += a.z * (4.5 if enclosed else 10.0) * sdt
 		vel.y -= 15.5 * sdt
-		if not enclosed and pos.y < surf_y + 0.35 and jump_held:
+		if not enclosed and pos.y < surf_y + 0.35 and jump_held and (c.thalassa_exact or breach_armed):
 			vel.y = maxf(vel.y, 5.8)
+			if not c.thalassa_exact and vel.y >= 5.8 - 1e-4: breach_armed = false
 		var air_drag := exp(-0.8 * sdt)
 		vel.x *= air_drag; vel.z *= air_drag
 		# airtime is brief in Thalassa's open sea; held under a ledge at the surface it is not, and 10 m/s2 with 0.8
@@ -472,6 +475,11 @@ func _update_swim(sdt: float, c: Dictionary, env: Dictionary, inp: Dictionary, i
 			vel.x = hz.x; vel.z = hz.y
 
 	pos += vel * sdt
+	if not c.thalassa_exact and (not c.has_surface or pos.y < surf_y - BREACH_ARM_DEPTH):
+		# FIX (Mac breach test at the 2.4 m lagoon): every fall back to 35 cm over the water relaunched her at 5.8 m/s
+		# while ascend was held, so she skimmed 20 m through the air without ever going under. A breach now needs her
+		# to have come up from 0.9 m down since the last one: one arc, a plunge, then the next breach or a tread.
+		breach_armed = true
 	if enclosed and pos.y > surf_y + 0.08:
 		pos.y = lerpf(pos.y, surf_y + 0.04, exp_k(18.0, sdt))
 		if vel.y > 0.0: vel.y = 0.0

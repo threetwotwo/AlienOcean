@@ -70,6 +70,7 @@ func _near(a: float, b: float, tol: float) -> bool:
 func _run() -> void:
 	await _kit_cases()
 	await _rider_case()
+	await _species_cases()
 	await _senses_case()
 	await _grey_case()
 	await _gym_motion()
@@ -226,6 +227,55 @@ func _rider_case() -> void:
 	_res("R5 rider has saddle, hands, feet", mk_ok and rd.MARKERS.size() == 5, "%s" % [rd.MARKERS.keys()], end)
 	results[-1]["samples"] = samples.map(func(s): return [s[0], s[1].x, s[1].y, s[1].z])
 	_drop(w)
+
+## Species stand-ins (Thalassa's ridable creatures + a humpback): each swims its own way at its own size and speed, the
+## beat matches its frequency, and every grab slot puts both hands and the body within a 1.38 m girl's reach.
+func _species_cases() -> void:
+	const Sp := preload("res://blockout/blockout_species.gd")
+	var runs := []
+	for sp in Sp.names(): runs.append([sp, 1.0])
+	runs.append(["dolphin", 0.7]); runs.append(["dolphin", 1.2]); runs.append(["whale_shark", 0.6]); runs.append(["manta", 1.3])
+	for run in runs:
+		var w := _world()
+		var r := Kit.build(w, "ride", {"species": run[0], "scale": run[1]})
+		var rd = r.rider
+		var pr: Dictionary = Sp.PROFILES[run[0]]
+		await physics_frame
+		var secs := 12.0
+		var mx := Vector3.ZERO; var wing := 0.0; var flip := 0.0; var worst_hs := 0.0; var crossings := 0
+		var last_sign := 0.0; var reach_bad := []; var finite := true
+		for i in int(secs * tick):
+			await physics_frame
+			var pb: Dictionary = rd.swim_probe(rd.t)
+			mx = Vector3(maxf(mx.x, absf(pb.tail.x)), maxf(mx.y, absf(pb.tail.y)), 0)
+			wing = maxf(wing, absf(pb.wing)); flip = maxf(flip, absf(pb.flipper))
+			var sig: float = pb.tail.x + pb.tail.y + pb.wing + pb.flipper
+			if last_sign != 0.0 and signf(sig) != last_sign and sig != 0.0: crossings += 1
+			if sig != 0.0: last_sign = signf(sig)
+			worst_hs = maxf(worst_hs, absf(Vector2(rd.velocity.x, rd.velocity.z).length() - rd.speed))
+			if i % 15 == 0:
+				for slot in rd.slots():
+					var hl: Vector3 = rd.marker(slot + "_hand_l").origin; var hr: Vector3 = rd.marker(slot + "_hand_r").origin
+					var bd: Vector3 = rd.marker(slot + "_body").origin
+					finite = finite and hl.is_finite() and hr.is_finite() and bd.is_finite()
+					var span := hl.distance_to(hr); var torso := bd.distance_to((hl + hr) * 0.5)
+					if span < 0.03 or span > 0.8 or torso > 0.9:   # two palms (1.3 cm each) round a fin .. shoulder width x 2
+						if not reach_bad.has(slot): reach_bad.append("%s span %.2f torso %.2f" % [slot, span, torso])
+		var len: float = rd.LENGTH
+		var mode := String(pr.mode)
+		var mode_ok := false
+		match mode:
+			"vertical": mode_ok = mx.y > 0.04 * len and mx.x == 0.0
+			"lateral": mode_ok = mx.x > 0.03 * len and mx.y == 0.0
+			"flap": mode_ok = wing > 0.12 * float(pr.span) * 0.5 * run[1]
+			"stroke": mode_ok = flip > 0.5
+		var beats := crossings / 2.0 / secs
+		var want: float = rd.omega / TAU
+		var name := "Y1 %s x%.1f (%.1f m, %s, %.2f m/s)" % [run[0], run[1], len, mode, rd.speed]
+		_res(name, mode_ok and worst_hs < 0.03 and absf(beats - want) < 0.2 + want * 0.1 and reach_bad.is_empty() and finite and rd.slots().size() > 0,
+			"tail x %.2f y %.2f wing %.2f flipper %.2f m/rad, beat %.2f Hz (want %.2f), speed off %.3f, slots %s%s" % [mx.x, mx.y, wing, flip, beats, want, worst_hs, rd.slots(),
+			"" if reach_bad.is_empty() else ", OUT OF REACH " + str(reach_bad)], rd.marker("saddle").origin)
+		_drop(w)
 
 func _senses_case() -> void:
 	var w := _world()

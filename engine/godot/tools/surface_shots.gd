@@ -71,7 +71,9 @@ func _setup():
 		# sector 0 (the vertical wall) faces away from the sun; the others follow round the ring (Bathymetry.SECTOR_NAMES)
 		wr.reef_sector_deg = rad_to_deg(atan2(away.z, away.x))
 		var bt: Bathymetry = wr.bathymetry()
-		var reef := ReefTerrain.new(); reef.name = "Reef"; root.add_child(reef); reef.build(bt, y)
+		var reef := ReefTerrain.new(); reef.name = "Reef"; root.add_child(reef)
+		if OS.get_environment("AO_REEF_GROOVES") != "": reef.groove_sand = float(OS.get_environment("AO_REEF_GROOVES"))   # 1 keep, 0.5 dim, 0 remove
+		reef.build(bt, y)
 		if sea and sea_env.begins_with("B"):         # a stronger sea over the reef (the floor stays)
 			sea.set_params(SeaSpectrum.beaufort(int(sea_env.substr(1))))
 			sea.hold = false; sea.preroll(20.0); sea.hold = true; sea.step_now()
@@ -139,6 +141,20 @@ func _setup():
 			["f2_refr_down35", base + Vector3(0, 2.2, 6.5), base + Vector3(0, -0.3, 0), 60.0],
 			["f3_refr_low", base + Vector3(0.5, 0.9, 7.0), base + Vector3(0, -0.2, 0), 60.0],
 			["f4_refr_top", base + Vector3(0.1, 5.0, 0.6), base + Vector3(0, -0.3, 0), 60.0],
+		]
+	if OS.get_environment("AO_WL") != "":           # the waterline (Gary 28 Nov: "a cardboard effect of the horizon fog" as
+		# the eye cuts the water line): level views at the dressed lagoon's arch, the eye 2 cm and 15 cm above, 3 cm under,
+		# and 1.6 m up; the same past the rock to the open lagoon's horizon
+		var e := Vector3(24.0, y, 23.0)
+		var at := Vector3(21.1, y, 9.4)
+		var off := Vector3(-30.0, 0.0, -2.0)
+		shots = [
+			["w1_wl_above2cm", e + Vector3(0, 0.02, 0), at + Vector3(0, 0.02, 0), 70.0],
+			["w2_wl_above15cm", e + Vector3(0, 0.15, 0), at + Vector3(0, 0.15, 0), 70.0],
+			["w3_wl_below3cm", e + Vector3(0, -0.03, 0), at + Vector3(0, -0.03, 0), 70.0],
+			["w4_wl_above1m6", e + Vector3(0, 1.6, 0), at + Vector3(0, 1.0, 0), 70.0],
+			["w5_wl_open2cm", e + Vector3(0, 0.02, 0), e + off + Vector3(0, 0.02, 0), 70.0],
+			["w6_wl_open15cm", e + Vector3(0, 0.15, 0), e + off + Vector3(0, 0.15, 0), 70.0],
 		]
 	if OS.get_environment("AO_FAR") != "": wr.cam_attr.frustum_far = float(OS.get_environment("AO_FAR"))   # check: the far plane (m)
 	if OS.get_environment("AO_SURF_SHOTS") != "":

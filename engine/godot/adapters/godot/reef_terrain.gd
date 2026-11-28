@@ -26,6 +26,9 @@ var keep_under := Rect2(-51.0, -51.0, 102.0, 102.0)   # the drawn floor tiles (x
 var r_in := 44.0
 var r_out := 1600.0
 var mesh_instance: MeshInstance3D
+## style lever (Gary's pick pending): the sand settled in the grooves between the spurs on the fore-reef slope, which reads
+## as light blue fingers past the wall from the air. 1 keep, 0.5 dim, 0 remove (the slope reads as rock and rubble).
+var groove_sand := 1.0
 
 func build(b: Bathymetry, water_y: float) -> void:
 	bathy = b; surface_y = water_y
@@ -105,6 +108,8 @@ func _paint(p: Vector3, n: Vector3) -> Color:
 	c = c.lerp(ROCK.lerp(ROCK_CREV, _hash(floorf(p.x), floorf(p.z))), steep * on_reef)   # the wall: reef rock
 	var deep := smoothstep(40.0, 120.0, d)                                    # the deep slope: sediment settles again
 	c = c.lerp(sand * 0.8, deep * (1.0 - steep * 0.5))
+	var band := smoothstep(Bathymetry.REEF_FLAT_D + 1.0, Bathymetry.REEF_FLAT_D + 3.0, d) * (1.0 - smoothstep(70.0, 110.0, d)) * on_reef   # the fore-reef slope, where the grooves are
+	c = c.lerp(ROCK.lerp(CRUST, 0.3).lerp(ROCK_CREV, 0.5 * _hash(floorf(p.x * 0.5), floorf(p.z * 0.5))), (1.0 - groove_sand) * band)
 	return Color(c.x, c.y, c.z)
 
 func _collision(pos: PackedVector3Array, radii: PackedFloat32Array) -> void:

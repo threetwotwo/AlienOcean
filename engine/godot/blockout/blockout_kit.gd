@@ -19,7 +19,8 @@
 ##  walls    wall . wall_corner . overhang {h=1.75} . mantle {h=1.0} . ceiling {size=200} . cave / tube {s, size=200}
 ##  water    pool {depth=20, size=200, waves, current} . lagoon_pool (pool, depth 2.4)
 ##  rest     stool {h=0.45} . bench {h=0.45} . bunk {top=0.5, clear=0.9}
-##  actors   ride {depth=20, speed=2.5} . senses
+##  actors   ride {species="" | dolphin | humpback | whale_shark | manta | turtle, scale=1, depth=20, speed=2.5 (generic)}
+##           . senses
 ## The water surface thread owns the reef drop-off / terrain LOOK stress world (core/world/bathymetry.gd); the ledge and
 ## drop kinds here are body-motion cases only.
 class_name BlockoutKit
@@ -28,6 +29,7 @@ extends RefCounted
 const Env := preload("res://tests/harness/test_env.gd")
 const Rider := preload("res://blockout/blockout_rider.gd")
 const Poi := preload("res://blockout/blockout_poi.gd")
+const Species := preload("res://blockout/blockout_species.gd")
 const GREY_SHADER := preload("res://blockout/blockout_grey.gdshader")
 
 const KINDS := ["ramp", "ramp_side", "step", "stairs", "ledge", "drop", "gap", "beam", "rough", "shore", "wall",
@@ -254,8 +256,14 @@ static func build(world: Node3D, kind: String, p: Dictionary = {}) -> Dictionary
 			box(world, Vector3(0, -depth - 0.25, -size * 0.1), Vector3(size, 0.5, size), 0)
 			var rd = Rider.new()
 			rd.name = "Rider"
+			rd.species = String(p.get("species", ""))
+			rd.scale_k = float(p.get("scale", 1.0))
 			rd.speed = float(p.get("speed", 2.5))
-			rd.origin = p.get("origin", Vector3(0, -4, -6))
+			var down := 4.0
+			if rd.species != "":   # keep the whole loop under water: climb height + body + 2 m
+				var pr: Dictionary = Species.PROFILES[rd.species]
+				down = float(pr.path.H) + float(pr.r) * float(pr.length) * rd.scale_k + 2.0
+			rd.origin = p.get("origin", Vector3(0, -down, -6))
 			world.add_child(rd)
 			r.rider = rd
 			mark(r, world, "start", Vector3(0, -2, 2))

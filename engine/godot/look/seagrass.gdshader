@@ -14,10 +14,10 @@ render_mode blend_mix, cull_disabled, diffuse_lambert, specular_schlick_ggx, wor
 #include "res://look/water_physics.gdshaderinc"
 #include "res://look/caustics.gdshaderinc"
 
-#define PUSHERS 24
+#define PUSHERS 32
 uniform vec4 pushers[PUSHERS];
 uniform vec4 push_bound = vec4(0.0, -1e6, 0.0, 0.0);   // a sphere around every active pusher: blades outside it skip the loop        // xyz world, w = radius x strength (0 = unused); written by GrassField each frame
-uniform float sway_amp = 0.045;       // metres at the tip (Thalassa aMat.y scale for short grass)
+uniform float sway_amp = 0.10;   // Gary 28 Nov "still read as sharp, needs more sway": doubled, slower (below)       // metres at the tip (Thalassa aMat.y scale for short grass)
 uniform vec2 current_dir = vec2(0.8, 0.6);
 uniform float current_lean = 0.07;    // metres of tip lean down the current
 uniform float thin_start = 4.0;       // metres: beyond this, blades thin out
@@ -30,7 +30,7 @@ uniform vec3 col_tip : source_color = vec3(0.40, 0.58, 0.24);
 uniform vec3 col_old : source_color = vec3(0.50, 0.52, 0.28);    // aged, epiphyte-dusted tips
 uniform float caustic_strength : hint_range(0.0, 3.0) = 1.0;
 // key frame look (tools/lagoon_dress/kf_paint.py grass + the rig's add_sway): every blade droops, pale margins, browning tips
-uniform float droop = 0.42;           // share of blade length the tip hangs over at rest (stiffness 1); the key frame meadow droops
+uniform float droop = 0.75;   // tape grass lies over downstream: arches, not spikes           // share of blade length the tip hangs over at rest (stiffness 1); the key frame meadow droops
 uniform float tile_col_mix = 0.35;     // how much the dressing's own vertex colour sets the base (0 = palette only)
 uniform float saturation = 1.0;       // kf_paint used 1.2; the Mac read lime and noisy (Gary 28 Nov), so the palette carries it
 uniform vec3 col_margin : source_color = vec3(0.851, 0.902, 0.627);   // #d9e6a0 leaf margins
@@ -67,8 +67,8 @@ void vertex() {
 	float f = h01 * h01;
 	vec2 off = vec2(0.0);
 	float stiff = INSTANCE_CUSTOM.y;
-	off.x += sin(TIME * 1.35 + root.z * 0.14 * 6.0 + root.y * 0.18 + INSTANCE_CUSTOM.x) * sway_amp / stiff;
-	off.y += cos(TIME * 1.05 + root.x * 0.13 * 6.0 + root.y * 0.15 + INSTANCE_CUSTOM.x) * sway_amp * 0.7 / stiff;
+	off.x += sin(TIME * 0.9 + root.z * 0.14 * 6.0 + root.y * 0.18 + INSTANCE_CUSTOM.x) * sway_amp / stiff;
+	off.y += cos(TIME * 0.7 + root.x * 0.13 * 6.0 + root.y * 0.15 + INSTANCE_CUSTOM.x) * sway_amp * 0.7 / stiff;
 	off += normalize(current_dir) * current_lean * (0.7 + 0.6 * hash11(INSTANCE_CUSTOM.x));
 	// rest droop: the tip hangs over along the blade's own facing (its curl), soft blades more, so the meadow reads as a
 	// lying, overlapping mass like the key frame rather than stiff upright spikes
@@ -83,10 +83,11 @@ void vertex() {
 		float r = p.w + 0.5 * L;
 		float dl = length(d.xz);
 		float s = clamp(1.0 - length(d) / r, 0.0, 1.0);
-		if (s > 0.0) off += (dl > 1e-3 ? d.xz / dl : vec2(1.0, 0.0)) * s * (2.0 - s) * L * 1.6;   // firm near her, soft at the rim
+		// strength fades with the weight too (not only the radius), so a pusher easing in or out never pops
+		if (s > 0.0) off += d.xz / sqrt(dl * dl + 0.0225) * s * s * (3.0 - 2.0 * s) * L * 1.6 * clamp(p.w / 0.3, 0.0, 1.0);   // direction eases to 0 under the pusher, smoothly (no flip, no kink)   
 	}
 	float ol = length(off);
-	if (ol > 0.92 * L) off *= 0.92 * L / ol;                                       // at most a near-flat blade
+	if (ol > 1e-5) off *= 0.92 * L * tanh(ol / (0.92 * L)) / ol;   // soft limit: saturates smoothly (a hard clamp is a kink = a snap)                                       // at most a near-flat blade
 	float drop = L - sqrt(max(L * L - dot(off, off), 0.0));                        // the tip drops as it leans (length kept)
 	wp.xz += off * f;
 	wp.y -= drop * f;
@@ -121,6 +122,7 @@ void fragment() {
 	AO_LIGHT_AFFECT = 0.6;
 	float z = max(water_y - wpos.y, 0.0);
 	if (water_fill_ao > 0.5) {
+		AO = min(AO, screen_ao(SCREEN_UV));   // CORTAO when on (look/screen_ao.gdshaderinc)
 		ALBEDO *= w_fill_ratio(z, 0.8);
 	} else {
 		EMISSION = ALBEDO * AO * w_fill(z, 0.8);
