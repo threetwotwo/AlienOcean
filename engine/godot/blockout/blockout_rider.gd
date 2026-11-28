@@ -36,6 +36,7 @@ var omega := 0.0
 var _segs: Array = []        # [node, u]
 var _wings: Array = []       # [node, ax(signed), u]
 var _flippers: Array = []    # [pivot, side, front]
+var _boxes: Array = []       # fin / fluke / flipper plates (part of the surface)
 var _mk_nodes := {}          # name -> Marker3D
 var _mk_def := {}            # name -> [u, x, y] (fractions of length)
 var speed := 2.5
@@ -162,6 +163,7 @@ func _build_species(mat: Material) -> void:
 	var box := func(parent: Node3D, size: Vector3, pos: Vector3, rot := Vector3.ZERO) -> MeshInstance3D:
 		var b := MeshInstance3D.new(); var bm := BoxMesh.new(); bm.size = size; b.mesh = bm
 		b.position = pos; b.rotation = rot; b.material_override = mat; parent.add_child(b)
+		_boxes.append(b)
 		return b
 	if fins.has("dorsal"):   # [u, height, chord] in lengths
 		var f: Array = fins.dorsal
@@ -260,10 +262,80 @@ func _swim(tt: float) -> void:
 		var dfn: Array = _mk_def[nm]
 		var u: float = dfn[0]
 		var p := Vector3(dfn[1] * len, dfn[2] * len, (u - 0.5) * len) + Species.body_disp(prof, u, ph, len)
+		if dfn.size() > 4: p.x = signf(dfn[1]) * minf(absf(p.x), float(dfn[4]))     # a broad surface: held no wider than this (m)
 		if dfn.size() > 3: p.x += signf(dfn[1]) * float(dfn[3])     # palm clearance, metres at any size
 		if String(prof.mode) == "flap":
 			p.y += Species.wing_disp(prof, absf(dfn[1] * len) / (float(prof.span) * 0.5 * scale_k), u, ph, float(prof.span) * 0.5 * scale_k)
 		_mk_nodes[nm].position = p
+
+## The live body surface near p (Thalassa queryCreatureSurface): {dist (< 0 inside), normal, point} in world, {} when
+## farther than r + 0.3. The swimming ellipsoid sections and the manta's wings, as built above.
+func surface(p: Vector3, r: float) -> Dictionary:
+	var tf: Transform3D = global_transform
+	tf.basis = tf.basis.orthonormalized()
+	var q := tf.affine_inverse() * p
+	var len: float = LENGTH
+	var best := {}
+	if species == "":
+		var half: float = maxf(0.0, len * 0.5 - RADIUS)
+		var c := Vector3(0, 0, clampf(q.z, -half, half))
+		var d := q - c
+		var dl := d.length()
+		var n := d / dl if dl > 1e-5 else Vector3.UP
+		best = {"dist": dl - float(RADIUS), "n": n, "s": c + n * float(RADIUS)}
+	else:
+		var mode := String(prof.mode)
+		var ph: float = omega * t
+		var u := clampf(q.z / len + 0.5, 0.0, 1.0)
+		var c := Vector3(0, 0, (u - 0.5) * len) + Species.body_disp(prof, u, ph, len)
+		var flat := 0.45 if mode == "flap" else (0.62 if mode == "stroke" else 1.0)
+		var rr := Species.radius(prof, u) * len
+		var rx := maxf(0.01, rr * (1.3 if mode == "stroke" else 1.0))
+		var ry := maxf(0.01, rr * flat)
+		var d2 := Vector2(q.x - c.x, q.y - c.y)
+		var e := sqrt(pow(d2.x / rx, 2) + pow(d2.y / ry, 2))
+		var n := Vector3(d2.x / (rx * rx), d2.y / (ry * ry), 0.0)
+		n = n.normalized() if n.length() > 1e-6 else Vector3.UP
+		var sp := c + (Vector3(d2.x, d2.y, 0) / e if e > 1e-5 else Vector3(0, ry, 0))
+		var dist := d2.length() * (1.0 - 1.0 / e) if e > 1e-5 else -ry
+		var past := absf(q.z) - len * 0.5
+		if past > 0.0: dist = Vector2(maxf(dist, 0.0), past).length()
+		best = {"dist": dist, "n": n, "s": sp}
+		if mode == "flap":
+			# the wings: a plate along the span lifted by the wing wave, chord shrinking toward the tip
+			var half_span: float = float(prof.span) * 0.5 * scale_k
+			var ax := absf(q.x) / half_span
+			if ax < 1.0:
+				var zc := (0.42 - 0.5) * len + ax * len * 0.12
+				var chord := len * 0.55 * (1.0 - 0.75 * ax)
+				if absf(q.z - zc) < chord * 0.5:
+					var yw := Species.wing_disp(prof, ax, 0.42, ph, half_span)
+					var dy := q.y - yw
+					var dw := absf(dy) - 0.015 * len
+					if dw < float(best.dist):
+						var nw := Vector3(0, signf(dy) if absf(dy) > 1e-5 else 1.0, 0)
+						best = {"dist": dw, "n": nw, "s": Vector3(q.x, yw + nw.y * 0.015 * len, q.z)}
+	var out := {"dist": float(best.dist), "normal": (tf.basis * best.n).normalized(), "point": tf * best.s}
+	# the fins, flukes and flippers: thin plates, as boxes
+	for b in _boxes:
+		var bt: Transform3D = (b as Node3D).global_transform
+		bt.basis = bt.basis.orthonormalized()
+		var bq: Vector3 = bt.affine_inverse() * p
+		var hs: Vector3 = ((b as MeshInstance3D).mesh as BoxMesh).size * 0.5
+		var dq := bq.abs() - hs
+		var dpos := Vector3(maxf(dq.x, 0.0), maxf(dq.y, 0.0), maxf(dq.z, 0.0))
+		var outside := dpos.length()
+		var dist := outside + minf(maxf(dq.x, maxf(dq.y, dq.z)), 0.0)
+		if dist >= float(out.dist): continue
+		var nl: Vector3
+		if outside > 1e-6: nl = Vector3(signf(bq.x) * dpos.x, signf(bq.y) * dpos.y, signf(bq.z) * dpos.z) / outside
+		elif dq.x >= dq.y and dq.x >= dq.z: nl = Vector3(signf(bq.x), 0, 0)
+		elif dq.y >= dq.z: nl = Vector3(0, signf(bq.y), 0)
+		else: nl = Vector3(0, 0, signf(bq.z))
+		var nw: Vector3 = (bt.basis * nl).normalized()
+		out = {"dist": dist, "normal": nw, "point": p - nw * dist}
+	if float(out.dist) > r + 0.3: return {}
+	return out
 
 ## Swim probe for tests: the tail tip's displacement, the wing tip's lift and the front flipper's angle at time tt.
 func swim_probe(tt: float) -> Dictionary:

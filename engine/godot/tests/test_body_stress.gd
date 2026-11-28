@@ -40,6 +40,14 @@
 ##                   breath phase only advances, at most 0.6 Hz; signal changes <= 2.5 /s, amplitude <= 1 /s, rate
 ##                          <= 1 rad/s^2 (continuous: no jumps); "effort" cases: the breath rate in the sprint is >= 1.3x
 ##                          the rate at rest and falls again after it
+##  Rest and ride (cases B48+, opts "act"; core/m02_motor/body_act.gd, core/m04_body/pose_rest.gd, pose_ride.gd):
+##  J13 grip       riding (latched), each palm centre (hand frame (0, 0.04, 0)) within 2 cm of its grip marker
+##  J14 creature   the J6 spheres (radius less 2 cm) never inside the creature stand-in's body ellipsoids, wings or
+##                 fins (hands and forearms may touch the fin they hold) for 3 ticks running
+##  J15 resting    seated or lying, each ankle stays within 1 cm of where it came to rest (no foot drift)
+##  J16 outcome    the case reaches the phases it expects (sat / lay / rode / stood up and walked off) or is refused
+##                 when it should be (too small, grips too wide, out of reach)
+##  J4 uses Thalassa's seated / lying neck limits (yaw 1.12 / 1.15, pitch -0.62..0.72 / -0.34..0.56) while resting.
 extends SceneTree
 
 const Packet := preload("res://core/m01_input/input_packet.gd")
@@ -123,6 +131,7 @@ var warm := 0
 var prev := {}
 var ref_spans := {}
 var results: Array = []
+var kit := {}
 # --film <dir>: render every case that is not KNOWN (needs a renderer: xvfb-run ... --rendering-driver vulkan
 # --fixed-fps 15), one PNG per frame into <dir>/<case>/, with the case name and live checks written on screen.
 # --shard i/n runs every n-th case starting at i (to film in parallel).
@@ -287,6 +296,7 @@ func _define_cases() -> void:
 	# Mac breach test: holding ascend and forward from the 2.4 m lagoon floor skimmed 20 m through the air
 	_case("B47 lagoon: breach from the floor, ascend held", "lagoon_pool", {"start": Vector3(0, -1.4, 0), "mode": Motor.Mode.SWIM}, 12.0,
 		func(_t): var k = _pk(Vector2(0, 1)); k.thrust = 1.0; k.ascend = true; return k)
+	_define_act_cases()
 	for m in monkey_runs:
 		var seed := 2000 + m
 		_case("BM monkey seed %d (%ds)" % [seed, int(monkey_secs)], "shore", {"start": Vector3(0, 1.05, 4), "waves": 0.5 if m % 2 == 1 else 0.0},
@@ -329,6 +339,8 @@ func _start_next() -> bool:
 	world = Node3D.new()
 	root.add_child(world)
 	env = Worlds.build(world, cur.kind, cur.p)
+	kit = Worlds.last
+	if cur.opts.has("ride"): _ride_place()
 	body = Body.new()
 	world.add_child(body)
 	body.global_position = cur.p.start
@@ -558,7 +570,10 @@ func _check(p: Dictionary, dt: float) -> void:
 	# J4 neck
 	var hm: Dictionary = p.headMotion
 	var max_yaw := 1.04
-	var nerr: float = maxf(absf(hm.neckYaw) - max_yaw, maxf(-0.58 - hm.neckPitch, hm.neckPitch - 1.08))
+	var nlim := Vector2(-0.58, 1.08)
+	if mode.begins_with("rest_lie"): max_yaw = 1.15; nlim = Vector2(-0.34, 0.56)
+	elif mode.begins_with("rest"): max_yaw = 1.12; nlim = Vector2(-0.62, 1.08)
+	var nerr: float = maxf(absf(hm.neckYaw) - max_yaw, maxf(nlim.x - hm.neckPitch, hm.neckPitch - nlim.y))
 	_w("neck", maxf(0.0, nerr))
 	if nerr > NECK_TOL: _fail("J4", "neck yaw %.2f pitch %.2f past limits" % [hm.neckYaw, hm.neckPitch])
 	var chest_fwd: Vector3 = -p.chestMat.basis.z.normalized()
@@ -700,6 +715,7 @@ func _check(p: Dictionary, dt: float) -> void:
 		_w("leg_overlap", ov)
 		if ov > 0.02: _fail("J8", "legs overlap %.0f mm" % (ov * 1000.0))
 	if cur.opts.has("brain"): _check_brain(p, dt)
+	if cur.opts.has("act"): _check_act(p, dt)
 	for side in ["L", "R"]:
 		var arm3: Dictionary = p["arm" + side]
 		for pt in [arm3.mid.lerp(arm3.eff, 0.5), arm3.eff]:
@@ -968,6 +984,7 @@ func _film_save(path: String) -> void:
 
 func _end_case() -> void:
 	var brain_txt: String = _brain_end() if cur.opts.has("brain") else ""
+	if cur.opts.has("act"): brain_txt += _act_end()
 	var ok: bool = rec.fail.is_empty()
 	var w: Dictionary = rec.worst
 	var summary := "bone %.2f mm, span %.0f%%, elbow %.0f, knee %.0f, knee back %.0f mm, neck +%.2f, head/chest %.0f, pop %.1f m/s, pelvis %.2f m, rock %d ticks, sole under %.0f mm, stand gap %.0f mm, slide %.0f mm, legs %.0f mm, torso %.0f mm" % [
@@ -1009,3 +1026,275 @@ func _finish() -> bool:
 		f.store_string(JSON.stringify({"tick": tick, "fault": fault, "results": results}, "  "))
 	quit(0 if gate_ok else 1)
 	return true
+
+# ---------------------------------------------------------------- rest and ride (B48+)
+## Each case is a sequence of steps [phase, delay, action]: wait until the act is in 'phase' ("" = any, "free" = no
+## activity) for 'delay' seconds, then do 'action' (sit: request the rest, stand / rise / release, ride: latch onto the
+## creature, walk: walk off ahead, look: turn the camera while held). The camera follows her (no snaps when she is let go).
+func _act_case(name: String, kind: String, p: Dictionary, dur: float, steps: Array, opts := {}) -> void:
+	var o := opts.duplicate()
+	o.act = true
+	o.steps = steps
+	_case(name, kind, p, dur, _act_input(steps, o), o)
+
+func _act_input(steps: Array, o: Dictionary) -> Callable:
+	var st := {"i": 0, "since": -1.0, "walk": false, "look": 0.0, "look_t": -1.0}
+	return func(tt):
+		var a = body.motor.act
+		var sw = body.motor.swimmer
+		while st.i < steps.size():
+			var stp: Array = steps[st.i]
+			var ph: String = stp[0]
+			var ok: bool = ph == "" or (ph == "free" and not a.active()) or (a.active() and a.phase == ph)
+			if not ok:
+				st.since = -1.0
+				break
+			if st.since < 0.0: st.since = tt
+			if tt - st.since < float(stp[1]): break
+			var act: String = stp[2]
+			var done := true
+			match act:
+				"sit": done = body.motor.request_rest(_rest_spec(o.rest)) or tt - st.since > float(stp[1]) + 1.0
+				"stand": a.request_stand()
+				"rise": a.request_rise()
+				"release": a.release()
+				"walk": st.walk = true
+				"stop": st.walk = false
+				"look": st.look_t = tt
+				"ride":
+					done = body.motor.request_ride(kit.rider)
+					if not done and (o.get("refuse", false) or tt - st.since > float(stp[1]) + 1.2): done = true     # one try when it must refuse; else gave up (J16 judges)
+					if done and not a.active(): rec.refused = a.refused
+			if not done: break
+			if act == "sit" and not a.active(): rec.refused = a.refused
+			st.i += 1
+			st.since = -1.0
+		var yaw: float = sw.target_yaw
+		var pitch: float = sw.target_pitch
+		if a.active() and a.holding() and a.kind == "rest" and st.look_t >= 0.0:
+			var lt: float = tt - st.look_t
+			yaw = a.seat_yaw + 1.3 * sin(lt * 0.9)
+			pitch = 0.35 * sin(lt * 0.6)
+		var k = _pk(Vector2(0, 0.8) if st.walk else Vector2.ZERO, yaw, pitch)
+		return k
+
+func _rest_spec(which: String) -> Dictionary:
+	var m: Dictionary = kit.markers
+	match which:
+		"stool": return {"kind": "stool", "seat": m.seat, "extent": Vector2(0.2, 0.2)}
+		"bunk": return {"kind": "bunk", "seat": m.sit, "lie": m.lie, "pillow": m.pillow, "extent": Vector2(1.15, 1.15)}
+	# bench seats: the bench runs x -0.8..0.8; her right (marker +X) is world -X
+	var x: float = (m[which] as Transform3D).origin.x
+	return {"kind": "bench", "seat": m[which], "extent": Vector2(0.8 - x, 0.8 + x)}
+
+## Where she waits to latch, in the creature's frame where it will be at the request time: 0.75 of the reach from
+## the grab station she comes at (front: the foremost station, from ahead and above; behind: the rearmost, from
+## behind and above; side: the middle one, from its right flank), raised until her hanging body clears the creature.
+## "far": straight ahead, out of reach. The request comes early (0.15 s) so the creature does not swim through her.
+func _ride_place() -> void:
+	var r: Dictionary = cur.opts.ride
+	var rd = kit.rider
+	var f: Dictionary = rd.frame_at(float(r.get("t_req", 0.15)) + 2.0 / tick)
+	var xf: Transform3D = f.xform
+	var L: float = rd.LENGTH
+	var fr: String = r.get("from", "side")
+	var off := Vector3(0, 0.5, -0.5 * L - 7.0)
+	if fr != "far":
+		var sl: Dictionary = rd.prof.slots
+		var pick := ""
+		for k in sl:
+			var u: float = sl[k].body[0]
+			if pick == "": pick = k
+			var up: float = sl[pick].body[0]
+			match fr:
+				"front": if u < up: pick = k
+				"behind": if u > up: pick = k
+				"side": if absf(u - 0.5) < absf(up - 0.5): pick = k
+		var bd: Array = sl[pick].body
+		var bp := Vector3(bd[1] * L, bd[2] * L, (bd[0] - 0.5) * L)
+		var dir: Vector3 = {"front": Vector3(0, 0.55, -0.83), "behind": Vector3(0, 0.55, 0.83), "side": Vector3(0.94, 0.35, 0)}[fr]
+		if fr == "side" and bp.x < -0.01: dir.x = -dir.x
+		var reach: float = {"manta": 3.6, "turtle": 2.65, "dolphin": 3.25}.get(String(rd.species), 4.0)
+		off = bp + dir * (0.75 * reach)
+		# clear of the body (sections and wings at rest): the eye 1.3 m above anything under it
+		var half: float = 0.5 * L
+		var top := 0.0
+		for i in 9:
+			var zz: float = off.z + (i - 4) * 0.15
+			if absf(zz) < half + 0.3:
+				top = maxf(top, rd.RADIUS * (0.45 if String(rd.prof.mode) == "flap" else 1.0) * 1.2)
+		if String(rd.prof.mode) == "flap" and absf(off.x) < float(rd.prof.span) * 0.5 * rd.scale_k + 0.3: top = maxf(top, 0.25 * L)
+		var over_wing: bool = String(rd.prof.mode) == "flap" and absf(off.x) < float(rd.prof.span) * 0.5 * rd.scale_k + 0.3
+		if fr != "side" or absf(off.x) < rd.RADIUS * 1.6 + 0.4 or over_wing: off.y = maxf(off.y, top + 1.3)
+	cur.p.start = xf * off - Vector3(0, 0.42, 0)     # the body origin (eye - 0.42 swimming)
+
+func _define_act_cases() -> void:
+	var stool := {"start": Vector3(0, 0.05, 2)}
+	var sit_stand := [["", 0.3, "sit"], ["seated", 2.0, "look"], ["seated", 3.0, "stand"], ["free", 0.3, "walk"]]
+	_act_case("B48 stool: walk up, turn, sit, stand, walk off", "stool", stool, 16.0, sit_stand, {"rest": "stool", "expect": ["sit", "seated", "stand", "handoff", "free"]})
+	_act_case("B49 stool: sit and stand three times", "stool", stool, 30.0, [["", 0.3, "sit"], ["seated", 1.0, "stand"], ["free", 0.6, "sit"],
+		["seated", 1.0, "stand"], ["free", 0.6, "sit"], ["seated", 1.0, "stand"]], {"rest": "stool", "expect": ["seated", "handoff", "free"], "count": {"sit": 3}})
+	_act_case("B50 stool: bumped while seated", "stool", stool, 16.0, [["", 0.3, "sit"], ["seated", 6.0, "stand"]], {"rest": "stool", "hits": 0.6, "expect": ["seated", "free"]})
+	_act_case("B51 stool: sit, then walk off at once", "stool", stool, 12.0, [["", 0.3, "sit"], ["seated", 0.0, "stand"], ["free", 0.0, "walk"]], {"rest": "stool", "expect": ["seated", "free"]})
+	_act_case("B52 stool: from behind", "stool", {"start": Vector3(0.3, 0.05, -3.5)}, 18.0, sit_stand, {"rest": "stool", "expect": ["seated", "free"]})
+	_act_case("B53 stool: from the side", "stool", {"start": Vector3(2.5, 0.05, -1.5)}, 18.0, sit_stand, {"rest": "stool", "expect": ["seated", "free"]})
+	var bench := {"start": Vector3(0, 0.05, 2)}
+	var i := 54
+	for sn in ["seat_l", "seat_c", "seat_r"]:
+		_act_case("B%d bench %s: sit, look round, stand, walk off" % [i, sn.substr(5)], "bench", bench, 16.0, sit_stand, {"rest": sn, "expect": ["seated", "free"]})
+		i += 1
+	_act_case("B57 bench from behind, right seat", "bench", {"start": Vector3(0.4, 0.05, -4.0)}, 20.0, sit_stand, {"rest": "seat_r", "expect": ["seated", "free"]})
+	var bunk_seq := [["", 0.3, "sit"], ["lying", 1.5, "look"], ["lying", 5.0, "stand"], ["free", 0.3, "walk"]]
+	_act_case("B58 bunk: sit on the edge, lie down, roll the head, get up, walk off", "bunk", {"start": Vector3(0, 0.05, 1)}, 22.0, bunk_seq,
+		{"rest": "bunk", "expect": ["sit", "seated", "lie", "lying", "rise", "stand", "free"]})
+	_act_case("B59 bunk under a low upper bunk (0.68 m clear)", "bunk", {"start": Vector3(0, 0.05, 1), "clear": 0.68}, 22.0, bunk_seq,
+		{"rest": "bunk", "expect": ["seated", "lying", "free"]})
+	_act_case("B60 bunk: bumped while lying", "bunk", {"start": Vector3(0, 0.05, 1)}, 18.0, [["", 0.3, "sit"], ["lying", 5.0, "stand"]],
+		{"rest": "bunk", "hits": 0.7, "expect": ["lying", "free"]})
+	# riding: the creature stand-ins on their loops (blockout/blockout_rider.gd)
+	var n := 61
+	for sp in ["dolphin", "manta", "turtle", "whale_shark", "humpback"]:
+		for fr in ["front", "side", "behind"]:
+			_act_case("B%d ride %s: latch from the %s, ride, let go" % [n, sp, fr], "ride", {"species": sp, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 12.0,
+				[["", 0.15, "ride"], ["ride", 6.0, "release"]], {"ride": {"from": fr}, "expect": ["latch", "ride", "release", "free"]})
+			n += 1
+	# n = 76
+	_act_case("B76 ride dolphin round the whole loop (dive, turn, climb, turn)", "ride", {"species": "dolphin", "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 32.0,
+		[["", 0.15, "ride"], ["ride", 27.0, "release"]], {"ride": {"from": "side"}, "expect": ["ride", "release", "free"]})
+	_act_case("B77 ride dolphin: let go at full speed in the dive", "ride", {"species": "dolphin", "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 9.0,
+		[["", 0.15, "ride"], ["ride", 1.8, "release"]], {"ride": {"from": "behind"}, "expect": ["ride", "release", "free"]})
+	_act_case("B78 ride dolphin: latch in the middle of a turn", "ride", {"species": "dolphin", "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 13.5,
+		[["", 8.0, "ride"], ["ride", 2.5, "release"]], {"ride": {"from": "side", "t_req": 8.0}, "expect": ["ride", "free"]})
+	_act_case("B79 ride manta: latch in a banked turn", "ride", {"species": "manta", "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 26.0,
+		[["", 19.0, "ride"], ["ride", 3.5, "release"]], {"ride": {"from": "side", "t_req": 19.0}, "expect": ["ride", "free"]})
+	_act_case("B80 dolphin at 0.35 scale (0.9 m): refused, swims on", "ride", {"species": "dolphin", "scale": 0.35, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 5.0,
+		[["", 0.15, "ride"]], {"ride": {"from": "side"}, "refuse": true})
+	_act_case("B81 turtle at 0.5 scale (0.55 m): refused", "ride", {"species": "turtle", "scale": 0.5, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 5.0,
+		[["", 0.15, "ride"]], {"ride": {"from": "side"}, "refuse": true})
+	_act_case("B82 turtle at 2.5 scale: grips too wide, refused", "ride", {"species": "turtle", "scale": 2.5, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 5.0,
+		[["", 0.15, "ride"]], {"ride": {"from": "side"}, "refuse": true})
+	_act_case("B83 turtle at 2.0 scale: rides", "ride", {"species": "turtle", "scale": 2.0, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 11.0,
+		[["", 0.15, "ride"], ["ride", 5.0, "release"]], {"ride": {"from": "side"}, "expect": ["ride", "free"]})
+	_act_case("B84 whale shark at 2.0 scale (20 m): rides", "ride", {"species": "whale_shark", "scale": 2.0, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 11.0,
+		[["", 0.15, "ride"], ["ride", 5.0, "release"]], {"ride": {"from": "side"}, "expect": ["ride", "free"]})
+	_act_case("B85 manta at 2.0 scale: held on its broad back, rides", "ride", {"species": "manta", "scale": 2.0, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 11.0,
+		[["", 0.15, "ride"], ["ride", 5.0, "release"]], {"ride": {"from": "side"}, "expect": ["ride", "free"]})
+	_act_case("B86 dolphin at 1.6 scale: rides", "ride", {"species": "dolphin", "scale": 1.6, "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 11.0,
+		[["", 0.15, "ride"], ["ride", 5.0, "release"]], {"ride": {"from": "side"}, "expect": ["ride", "free"]})
+	_act_case("B87 dolphin out of reach: refused, swims on", "ride", {"species": "dolphin", "start": Vector3.ZERO, "mode": Motor.Mode.SWIM}, 4.0,
+		[["", 0.15, "ride"]], {"ride": {"from": "far"}, "refuse": true})
+
+const HAND_GRIP := 0.02        # m: the project's hand-contact ceiling
+const REST_FOOT_DRIFT := 0.01
+
+func _check_act(p: Dictionary, _dt: float) -> void:
+	var a = body.motor.act
+	if not rec.has("act"): rec.act = {"phases": [], "grip": 0.0, "cre_pen": {}, "foot": {}, "cre_worst": 0.0, "drift": 0.0, "sits": 0}
+	var ra: Dictionary = rec.act
+	var ph: String = a.phase if a.active() else "free"
+	if ra.phases.is_empty() or ra.phases[-1] != ph:
+		ra.phases.append(ph)
+		if ph == "sit": ra.sits += 1
+	# J13 grip
+	if a.active() and a.kind == "ride" and a.phase == "ride":
+		for side in ["L", "R"]:
+			var nm: String = a._mk(a.slot, "hand_l" if side == "L" else "hand_r")
+			var g: Vector3 = a.rider.marker(nm).origin
+			var palm: Vector3 = (p["hand" + side + "Mat"] as Transform3D) * Vector3(0, 0.040, 0)
+			var e := palm.distance_to(g)
+			ra.grip = maxf(ra.grip, e)
+			if e > HAND_GRIP: _fail("J13", "palm%s %.0f mm off its grip" % [side, e * 1000.0])
+	# J14 creature: spheres against the stand-in's real meshes
+	if kit.get("rider") != null:
+		var samples := [["head", p.headMat * Vector3(0, 0.10, 0), 0.095], ["chest", p.chestPos, 0.08], ["pelvis", p.pelvisPos, 0.08]]
+		for side in ["L", "R"]:
+			var arm2: Dictionary = p["arm" + side]
+			var lg2: Dictionary = p["leg" + side].ik
+			samples.append(["uparm" + side, arm2.root.lerp(arm2.mid, 0.6), 0.032])
+			samples.append(["forearm" + side, arm2.mid.lerp(arm2.eff, 0.5), 0.025])
+			samples.append(["hand" + side, (p["hand" + side + "Mat"] as Transform3D) * Vector3(0, 0.05, 0), 0.03])
+			samples.append(["thigh" + side, lg2.root.lerp(lg2.mid, 0.5), 0.048])
+			samples.append(["knee" + side, lg2.mid, 0.038])
+			samples.append(["shin" + side, lg2.mid.lerp(lg2.eff, 0.5), 0.034])
+			samples.append(["foot" + side, (p["leg" + side].finMat as Transform3D) * Vector3(0, 0.08, -0.02), 0.03])
+		var shapes := _creature_shapes(kit.rider)
+		for smp in samples:
+			var key: String = smp[0]
+			var grip_part: bool = key.begins_with("hand") or key.begins_with("forearm")
+			var depth := _creature_depth(shapes, smp[1], smp[2] - PEN_MARGIN, grip_part)
+			ra.cre_worst = maxf(ra.cre_worst, depth)
+			if depth > 0.0:
+				ra.cre_pen[key] = ra.cre_pen.get(key, 0) + 1
+				if ra.cre_pen[key] == PEN_RUN: _fail("J14", "%s inside the creature (%.0f mm)" % [key, depth * 1000.0])
+			else:
+				ra.cre_pen[key] = 0
+	# J15 resting feet
+	if a.active() and a.phase in ["seated", "lying"]:
+		for side in ["L", "R"]:
+			var ank: Vector3 = p["leg" + side].ik.eff
+			var k2: String = a.phase + side
+			if not ra.foot.has(k2): ra.foot[k2] = ank
+			var d: float = ank.distance_to(ra.foot[k2])
+			ra.drift = maxf(ra.drift, d)
+			if d > REST_FOOT_DRIFT: _fail("J15", "%s foot%s drifted %.0f mm" % [a.phase, side, d * 1000.0])
+	else:
+		ra.foot = {}
+
+## The creature stand-in's visible solids: [kind, inverse transform, transform, size] for its ellipsoids and boxes
+func _creature_shapes(rd) -> Array:
+	var out := []
+	var stack: Array = [rd]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		for c in n.get_children(): stack.append(c)
+		if n is MeshInstance3D and n.visible:
+			var gt: Transform3D = (n as MeshInstance3D).global_transform
+			if n.mesh is SphereMesh: out.append(["ell", gt.affine_inverse(), gt, (n.mesh as SphereMesh).radius])
+			elif n.mesh is BoxMesh: out.append(["box", gt.affine_inverse(), gt, (n.mesh as BoxMesh).size])
+			elif n.mesh is CapsuleMesh: out.append(["cap", gt.affine_inverse(), gt, Vector2((n.mesh as CapsuleMesh).radius, (n.mesh as CapsuleMesh).height)])
+	return out
+
+## How deep a sphere (c, r) reaches into the stand-in (> 0 overlaps). Boxes are fins / wings / pads: skipped for
+## the parts that hold them.
+func _creature_depth(shapes: Array, c: Vector3, r: float, grip_part: bool) -> float:
+	var best := -INF
+	for sh in shapes:
+		var q: Vector3 = (sh[1] as Transform3D) * c
+		var gt: Transform3D = sh[2]
+		match sh[0]:
+			"ell":
+				var rad: float = sh[3]
+				var L := q.length()
+				var dir := q / L if L > 1e-6 else Vector3.UP
+				var R: float = (gt.basis * (dir * rad)).length()       # the ellipsoid's radius toward the point (world)
+				var dw: float = (gt.basis * q).length()                # the point's distance from the centre (world)
+				best = maxf(best, R + r - dw)
+			"box":
+				if grip_part: continue
+				var hs: Vector3 = sh[3] * 0.5
+				var dq := q.abs() - hs
+				var outside := Vector3(maxf(dq.x, 0), maxf(dq.y, 0), maxf(dq.z, 0)).length()
+				var inside := minf(maxf(dq.x, maxf(dq.y, dq.z)), 0.0)
+				best = maxf(best, r - (outside + inside))
+			"cap":
+				var rr: float = sh[3].x
+				var hh: float = maxf(0.0, sh[3].y * 0.5 - rr)
+				var cc := Vector3(0, clampf(q.y, -hh, hh), 0)
+				best = maxf(best, rr + r - (q - cc).length())
+	return best
+
+func _act_end() -> String:
+	var ra: Dictionary = rec.get("act", {"phases": [], "grip": 0.0, "cre_worst": 0.0, "drift": 0.0, "sits": 0})
+	if cur.opts.get("refuse", false):
+		if ra.phases.has("latch") or ra.phases.has("sit"): _fail("J16", "should have been refused, went %s" % ",".join(ra.phases))
+		elif rec.get("refused", "") == "": _fail("J16", "no refusal recorded")
+	else:
+		var want: Array = cur.opts.get("expect", [])
+		var at := 0
+		for ph in ra.phases:
+			if at < want.size() and ph == want[at]: at += 1
+		if at < want.size(): _fail("J16", "never reached '%s' (went %s)" % [want[at], ",".join(ra.phases)])
+		var cnt: Dictionary = cur.opts.get("count", {})
+		if cnt.has("sit") and ra.sits < cnt.sit: _fail("J16", "sat %d times, wanted %d" % [ra.sits, cnt.sit])
+	return ", grip %.0f mm, creature %.0f mm, rest foot drift %.0f mm%s, phases %s" % [maxf(0.0, ra.grip) * 1000.0, maxf(0.0, ra.cre_worst) * 1000.0,
+		ra.drift * 1000.0, (", refused: " + rec.refused) if rec.get("refused", "") != "" else "", ",".join(ra.phases)]
