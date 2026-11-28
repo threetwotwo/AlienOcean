@@ -1,5 +1,11 @@
 # Changelog (Semantic Versioning; Unreal era filed as 0.1-0.5, Godot work starts at 0.6.0, 1.0.0 = first playable slice)
 
+## 0.6.0-dev (28 Nov 2026, look thread): the sun under water is as wide as the waves make it
+- Blind critique item 6 ("shadows razor-hard regardless of height"): the sun light had no angular size. Under water it is now
+  the refracted disc (0.53 / 1.333 deg) widened by the waves' slope, each facet bending the beam by (1 - 1/1.333) x slope:
+  WorldRoot.sea_rms_slope 0.06 (calm lagoon, the key frame rig's) -> 2.1 deg, so a shadow 3 m above the sand gets a ~11 cm
+  penumbra while contact shadows stay crisp (table coral, 0.4 m: ~1.5 cm, no visible change). Above water: 0.53 deg.
+
 ## 0.6.0-dev (28 Nov 2026, look thread): clearer water, distance fades to blue
 - Blind critique (Gemini + Fable, item 8): "fog is one teal colour". Checked with grey cards (tools/lagoon_shots.gd AO_FOG_CARDS=1,
   flat and standing at 3-15 m): the view path already loses each band at its own rate (scene x exp(-c L) + glow), but at
