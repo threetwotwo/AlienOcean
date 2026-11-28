@@ -25,7 +25,7 @@ layout(set = 0, binding = 3, std140) uniform Params {
 	vec4 p5;          // width, height
 	vec4 p6;          // Bloom (0 off, 1 key frame), BloomThr (exposed units), Vignette (corner light lost), BloomMax (excess cap)
 	vec4 p7;          // PSF weights 0-3
-	vec4 p8;          // PSF weight 4, Keep (1 energy kept, 0 added glow)
+	vec4 p8;          // PSF weight 4, Keep (1 energy kept, 0 added glow), IsoFloor, IsoK (look/bloom.glsl lone-texel rule)
 } P;
 layout(set = 0, binding = 4) uniform sampler2D glare0;
 layout(set = 0, binding = 5) uniform sampler2D glare1;
@@ -114,6 +114,17 @@ void main() {
 	// camera veiling glare (bloom): same exposed units as the pyramid's prefilter (look/bloom.glsl)
 	if (P.p6.x > 0.0) {
 		vec3 ex = clamp(c - P.p6.y, vec3(0.0), vec3(P.p6.w));
+		ex = mix(ex, vec3(0.0), bvec3(isnan(c) || isinf(c)));   // as the prefilter: a broken texel gives no glare
+		// the same lone-texel rule as the pyramid's prefilter (neighbours in the same exposed units)
+		float kx = Exposure * exp2(Bias) / max(BufScale, 1e-30);
+		vec3 nb = vec3(0.0);
+		for (int q = 0; q < 4; q++) {
+			ivec2 o4 = q == 0 ? ivec2(1, 0) : q == 1 ? ivec2(-1, 0) : q == 2 ? ivec2(0, 1) : ivec2(0, -1);
+			vec3 bn = texelFetch(color_src, clamp(px + o4, ivec2(0), sz - 1), 0).rgb;
+			bn = mix(bn, vec3(0.0), bvec3(isnan(bn) || isinf(bn)));
+			nb = max(nb, clamp(bn * kx * max(P.DG.rgb, vec3(0.0)) - P.p6.y, vec3(0.0), vec3(P.p6.w)));
+		}
+		ex = min(ex, max(vec3(P.p8.z), P.p8.w * nb));
 		vec3 g = P.p7.x * texture(glare0, uv).rgb + P.p7.y * texture(glare1, uv).rgb + P.p7.z * texture(glare2, uv).rgb
 		       + P.p7.w * texture(glare3, uv).rgb + P.p8.x * texture(glare4, uv).rgb;
 		c = max(c + P.p6.x * (g - P.p8.y * ex), vec3(0.0));

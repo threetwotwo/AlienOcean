@@ -4,6 +4,7 @@
 ## B2 shape: the glare's radial profile matches the key frame's PSF (develop_v7.py: gaussians sigma 1.5/4/12/36/90 px at 960
 ##    wide, weights .45/.25/.17/.09/.04) at 6, 15, 40, 100 and 220 px, within 30 %.
 ## B3 no positional flicker: the square slides 0.13 px a frame for 8 frames; the wide halo (per unit of excess) varies < 3 %.
+## B4 lone hot pixel: a 1 px point at 5000 (a sun glint on one pixel) gives at most bloom_iso_floor of glare, not its full excess.
 ## Planted fault --fault: PSF weights skewed to the core ([.9,.1,0,0,0]); B2 must fail.
 ## Run: xvfb-run -a godot --path . --rendering-driver vulkan --script res://tools/bloom_check.gd [-- --fault]
 extends SceneTree
@@ -65,6 +66,8 @@ func _process(_d: float) -> bool:
 	for k in 5:
 		var p: Array = d.parts[k]; var sz: Vector2i = p[1]
 		e_out += fx.bloom_w[k] * _sum(p[0], sz.x * sz.y, func(v): return v) * float(W * H) / float(sz.x * sz.y)
+	if phase == 2:
+		_lone(e_in, e_out); return false
 	if phase == 0:
 		var r1 := e_out / maxf(e_in, 1e-9)
 		var b1 := absf(r1 - 1.0) < 0.03
@@ -96,6 +99,16 @@ func _process(_d: float) -> bool:
 	for v in halo: dev = maxf(dev, absf(v / m - 1.0))
 	var b3 := dev < 0.03
 	print("B3 halo steady while the square slides (max deviation %.2f %%): %s" % [dev * 100.0, "PASS" if b3 else "FAIL"]); ok = ok and b3
+	if phase == 1:
+		phase = 2; frame = 0
+		quad.position = Vector3(0.5, 0.5, 0); (quad.mesh as QuadMesh).size = Vector2(0.9, 0.9)   # inside one pixel
+		(quad.material_override as ShaderMaterial).shader.code = "shader_type spatial; render_mode unshaded; void fragment() { ALBEDO = vec3(5000.0); }"
+		halo.clear()
+		return false
+	return false
+
+func _lone(e_in: float, e_out: float) -> void:
+	var b4 := e_in > 1000.0 and e_out <= fx.bloom_iso_floor * 1.05
+	print("B4 lone hot pixel: excess %.0f, glare %.1f (most %.1f): %s" % [e_in, e_out, fx.bloom_iso_floor, "PASS" if b4 else "FAIL"]); ok = ok and b4
 	print("BLOOM CHECK: %s" % ("PASS" if ok else "FAIL"))
 	quit(0 if ok else 1)
-	return false

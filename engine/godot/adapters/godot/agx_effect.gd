@@ -26,6 +26,8 @@ var mode := 0                  # 0 AgX, 1 identity (calibration), 2 constant 0.5
 var bloom := 1.0
 var bloom_thr := 4.5           # exposed units (0.18 = middle grey): key frame threshold 3.0 before its exposure +0.6 stop
 var bloom_max := 2048.0        # excess cap per pixel (exposed units): high enough for the sun's halo, stops a stray hot pixel ruling the frame
+var bloom_iso_floor := 16.0    # a lone hot texel gives at most this much glare (exposed units), or bloom_iso_k x its brightest neighbour
+var bloom_iso_k := 2.0
 var bloom_keep := 1.0          # 1 = energy kept (the key frame's glare: light leaves its pixel), 0 = the glow is added on top (round 6 look)
 var bloom_w := PackedFloat32Array([0.45, 0.25, 0.17, 0.09, 0.04])   # PSF weights for sigma BLOOM_SIG (key frame develop_v7.py)
 const BLOOM_SIG := [1.5, 4.0, 12.0, 36.0, 90.0]                     # px at 960 wide; scaled to the internal width
@@ -135,7 +137,7 @@ func _tex(binding: int, rid: RID) -> RDUniform:
 func _bloom_pass(cl: int, dst: RID, src: RID, dsz: Vector2i, ssz: Vector2i, a: Vector4, b: Vector4, dir: Vector2, cap: float) -> void:
 	rd.compute_list_bind_uniform_set(cl, UniformSetCacheRD.get_cache(bloom_shader, 0, [_img(0, dst), _tex(1, src)]), 0)
 	var pcf := PackedFloat32Array([a.x, a.y, a.z, a.w, b.x, b.y, b.z, b.w, dir.x, dir.y, float(dsz.x), float(dsz.y),
-		float(ssz.x), float(ssz.y), cap, 0.0])
+		float(ssz.x), float(ssz.y), cap, bloom_iso_floor])
 	rd.compute_list_set_push_constant(cl, pcf.to_byte_array(), 64)
 	rd.compute_list_dispatch(cl, (dsz.x + 7) / 8, (dsz.y + 7) / 8, 1)
 	rd.compute_list_add_barrier(cl)
@@ -161,7 +163,7 @@ func _bloom(rsb: RenderSceneBuffersRD, view: int, src: RID, size: Vector2i) -> A
 	var bvec := Vector4(exposure * pow(2.0, bias) / maxf(buf_scale, 1e-30), dg.x, dg.y, dg.z)
 	var cl := rd.compute_list_begin()
 	rd.compute_list_bind_compute_pipeline(cl, bloom_pipeline)
-	_bloom_pass(cl, tx.call("d1"), src, _lvl(size, 1), size, Vector4(0, 0, 0, bloom_thr), bvec, Vector2.ZERO, bloom_max)
+	_bloom_pass(cl, tx.call("d1"), src, _lvl(size, 1), size, Vector4(0, 0, 0, bloom_thr), bvec, Vector2(bloom_iso_k, 0), bloom_max)
 	for lv in range(1, top):
 		_bloom_pass(cl, tx.call("d%d" % (lv + 1)), tx.call("d%d" % lv), _lvl(size, lv + 1), _lvl(size, lv), Vector4(1, 0, 0, 0), Vector4.ZERO, Vector2.ZERO, 0.0)
 	for k in plan.size():
@@ -220,7 +222,7 @@ func _render_callback(_type: int, render_data: RenderData) -> void:
 			emit_keep, emit_from, night_sky, float(mode),
 			float(size.x), float(size.y), 0.0, 0.0,
 			bloom if glare.size() == 5 else 0.0, bloom_thr, vignette, bloom_max,
-			bloom_w[0], bloom_w[1], bloom_w[2], bloom_w[3], bloom_w[4], bloom_keep, 0.0, 0.0])
+			bloom_w[0], bloom_w[1], bloom_w[2], bloom_w[3], bloom_w[4], bloom_keep, bloom_iso_floor, bloom_iso_k])
 		rd.buffer_update(ubo, 0, f.size() * 4, f.to_byte_array())
 		var u0 := RDUniform.new(); u0.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE; u0.binding = 0; u0.add_id(color)
 		var u1 := RDUniform.new(); u1.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE; u1.binding = 1; u1.add_id(sampler); u1.add_id(copy)

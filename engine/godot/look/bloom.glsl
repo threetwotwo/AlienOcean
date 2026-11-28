@@ -15,8 +15,8 @@ layout(set = 0, binding = 1) uniform sampler2D src;
 layout(push_constant, std430) uniform PC {
 	vec4 a;   // mode, sigma (src px), radius (taps), threshold (exposed units)
 	vec4 b;   // scale (buffer -> exposed), depth gain rgb
-	vec4 c;   // dir x, dir y, dst w, dst h
-	vec4 d;   // src w, src h, excess cap (exposed units), unused
+	vec4 c;   // dir x, dir y (prefilter: IsoK, unused), dst w, dst h
+	vec4 d;   // src w, src h, excess cap (exposed units), IsoFloor (lone texel's most, exposed units)
 } pc;
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -32,13 +32,22 @@ void main() {
 	vec3 o;
 	if (pc.a.x < 0.5) {
 		// prefilter: each source texel's light above the threshold first, then a 4x4 tent (1 3 3 1) to half size; thresholding
-		// filtered samples instead would lose the energy at every bright edge
-		ivec2 sm = ivec2(pc.d.xy) - 1; ivec2 b = 2 * p - 1;
+		// filtered samples instead would lose the energy at every bright edge. A lone hot texel (a sub-pixel sun glint that
+		// aliases on and off from frame to frame) may give at most IsoFloor, or IsoK x its brightest 4-neighbour: the sun disc
+		// and glint lines (bright neighbours) keep their full glare, a single flashing pixel can't throw a halo. agx_post.glsl
+		// takes exactly the same amount off the pixel, so energy is still kept.
+		ivec2 sm = ivec2(pc.d.xy) - 1; ivec2 b = 2 * p - 2;
+		vec3 e[36];
+		for (int j = 0; j < 6; j++) for (int i = 0; i < 6; i++) {
+			vec3 v = texelFetch(src, clamp(b + ivec2(i, j), ivec2(0), sm), 0).rgb;
+			v = mix(v, vec3(0.0), bvec3(isnan(v) || isinf(v)));   // a broken texel (NaN / fp16 overflow) gives no glare
+			e[j * 6 + i] = clamp(v * pc.b.x * pc.b.yzw - pc.a.w, vec3(0.0), vec3(pc.d.z));
+		}
 		const float tw[4] = float[](0.125, 0.375, 0.375, 0.125);
 		o = vec3(0.0);
-		for (int j = 0; j < 4; j++) for (int i = 0; i < 4; i++) {
-			vec3 v = texelFetch(src, clamp(b + ivec2(i, j), ivec2(0), sm), 0).rgb;
-			o += tw[i] * tw[j] * clamp(v * pc.b.x * pc.b.yzw - pc.a.w, vec3(0.0), vec3(pc.d.z));
+		for (int j = 1; j < 5; j++) for (int i = 1; i < 5; i++) {
+			vec3 nb = max(max(e[j * 6 + i - 1], e[j * 6 + i + 1]), max(e[(j - 1) * 6 + i], e[(j + 1) * 6 + i]));
+			o += tw[i - 1] * tw[j - 1] * min(e[j * 6 + i], max(vec3(pc.d.w), pc.c.x * nb));
 		}
 	} else if (pc.a.x < 1.5) {
 		// Call of Duty 13-tap downsample (Jimenez 2014): four 2x2 boxes at the corners, one in the middle
