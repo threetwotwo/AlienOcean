@@ -24,6 +24,8 @@
 ##   D8 Thalassa v20.19 social behaviours (wildlife-ecosystem.js section 1): calm-diver circling (species `curious`),
 ##      silent-observation viewing ring (actor kind "observer"), escort of a ridden creature (kind "ride"); its m/s2
 ##      accelerations go through the Katz split
+##   D9 graded alarm (schoollab v31): only the actor's own startles and the first burst_hops (1) hops of the wave burst;
+##      later hops are agitated (AGITATED 0.45: a turn away and 1.35 x speed); burst_hops < 0 = school.py (the golden)
 extends RefCounted
 
 const Rng := preload("res://core/m31_school/school_rng.gd")
@@ -56,6 +58,9 @@ var s := PackedFloat64Array()   # startle level 0..1
 var t_on := PackedFloat64Array()
 var t_alert := PackedFloat64Array()   # last time it fled an actor (keeps the alarm on, D6)
 var cdir := PackedVector3Array()  # escape direction of the last startle
+const AGITATED := 0.45          # D9: the startle level of a fish the wave only agitates (bursting is > 0.5)
+var burst_hops := 2             # D9: hops of the wave that still burst (< 0: all, as school.py)
+var hop := PackedInt32Array()    # D9: wave hops from a direct startle (0 = startled by the actor itself)
 var calm := PackedFloat64Array()  # 1 calm .. 0 scared, eases back after a threat (personal space follows it)
 var turn_rate := PackedFloat64Array()
 var yaw_rate := PackedFloat64Array()   # signed rad/s about world up
@@ -90,6 +95,8 @@ func setup(params: Dictionary, n: int, seed_: int, body_m: float, origin_m: Vect
 	for a in [x, x_prev, e, cdir, _wall_pt, _wall_n]: a.resize(N)
 	for a in [v, L, v0i, phase, s, t_on, t_alert, calm, turn_rate, yaw_rate, _floor_y]: a.resize(N)
 	_swept.resize(N)
+	hop.resize(N); hop.fill(1000000)
+	burst_hops = int(params.get("burst_hops", 1))
 	nb.resize(N * int(p.k))
 	nb.fill(-1)
 	var c: Vector3 = home_rel_bl if home_rel_bl != null else Vector3.ZERO
@@ -124,6 +131,7 @@ func load_state(xs: Array, es: Array, vs: Array, Ls: Array, v0s: Array, ph: Arra
 func poke(i: int, away: Vector3 = Vector3.ZERO) -> void:
 	t_on[i] = t
 	s[i] = 1.0
+	hop[i] = 0
 	cdir[i] = away.normalized() if away.length() > 0.0 else e[i]
 	calm[i] = 0.0
 
@@ -190,6 +198,7 @@ func step(env: Dictionary = {}) -> void:
 	var S := PackedVector3Array(); S.resize(N)
 	var dvv := PackedFloat64Array(); dvv.resize(N)
 	var trig := PackedByteArray(); trig.resize(N)
+	var hop_new := PackedInt32Array(); hop_new.resize(N)
 	var nearest_j := PackedInt32Array(); nearest_j.resize(N)
 	var nearest_d := PackedFloat64Array(); nearest_d.resize(N)
 	var pairs_on: bool = p.get("overlap_pairs", true)
@@ -302,6 +311,7 @@ func step(env: Dictionary = {}) -> void:
 		S[i] = Sv - ei * par
 		# startle cascade: a neighbour's startle ONSET seen after the latency (window centred on it, D1)
 		var hit_any := false
+		var hmin := 1000000
 		var away := Vector3.ZERO
 		var refr := (t - t_on[i]) > REFRACTORY
 		for q in cnt:
@@ -314,9 +324,11 @@ func step(env: Dictionary = {}) -> void:
 			var pr: float = 1.0 / (1.0 + exp(-0.302 + 1.421 * log(maxf(dk[q], 0.3)) + 0.126 * rank)) * light * p.startle_k
 			if cas_u[i * kk + q] < pr:
 				hit_any = true
+				hmin = mini(hmin, hop[j])
 				away -= (x[j] - xi) / maxf(dk[q], 1e-9)
 		if hit_any and refr:
 			trig[i] = 1
+			hop_new[i] = mini(hmin + 1, 1000000)
 			by_cascade += 1
 			cdir[i] = away.normalized() if away.length() > 1e-9 else ei
 		for q in kk:
@@ -467,17 +479,29 @@ func step(env: Dictionary = {}) -> void:
 		var refr := (t - t_on[i]) > REFRACTORY
 		if direct and refr and trig[i] == 0:
 			trig[i] = 1
+			hop_new[i] = 0
 			by_actor += 1
 			cdir[i] = flee      # D3
+		# D9 graded alarm (schoollab v31, Gary 1 Nov "sharper school shape ... a pocket round the predator"): only the
+		# fish the threat startles itself and the first burst_hops hops of the wave burst; further out the wave passes as
+		# agitation (a turn away and a little more speed), as real schools do (flash expansion near the predator,
+		# Gerlotto et al. 2006). burst_hops < 0 = every hop bursts (school.py, the golden).
+		var lvl := 0.0
 		if trig[i] == 1:
 			t_on[i] = t
 			calm[i] = 0.0
-		s[i] = maxf(s[i] * exp(-dt / 0.25), float(trig[i]))
+			hop[i] = hop_new[i]
+			lvl = 1.0 if (burst_hops < 0 or hop[i] <= burst_hops) else AGITATED
+		s[i] = maxf(s[i] * exp(-dt / 0.25), lvl)
 		calm[i] = minf(calm[i] + dt / p.calm_T, 1.0)
 		var burst := s[i] > 0.5
+		var agit := not burst and s[i] > 0.2 and burst_hops >= 0 and hop[i] > burst_hops   # agitated by the wave (not a burst fading)
 		if burst:
 			var cd := cdir[i] * 6.0
 			Si += cd - ei * cd.dot(ei)
+		elif agit:
+			var ca := cdir[i] * 2.0
+			Si += ca - ei * ca.dot(ei)
 		# turn, rate limited
 		Si -= ei * Si.dot(ei)
 		var w: float = Si.length() * p.k_turn
@@ -501,7 +525,7 @@ func step(env: Dictionary = {}) -> void:
 		e[i] = en
 		turn_rate[i] = w
 		# speed
-		var vt: float = p.burst_v if burst else maxf(v0i[i], flee_v)
+		var vt: float = p.burst_v if burst else maxf(v0i[i] * (1.35 if agit else 1.0), flee_v)
 		dvv[i] += (vt - v[i]) / (0.12 if burst else (p.tau_v if flee_v <= v0i[i] else p.flee_tau))
 		v[i] = clampf(v[i] + dvv[i] * dt, p.vmin * p.v0, p.burst_v + 2.0)
 	# move (all fish), then the overlap guard from the moved positions (as school.py); the swept guard against rock after
@@ -649,12 +673,18 @@ func metrics() -> Dictionary:
 	return {"P": (esum / N).length(), "M": (msum / N).length(), "nnd_mean": _mean(nnd), "nnd_min": sorted[0],
 		"nnd_med": sorted[N / 2], "iid": iid / (N * (N - 1)), "speed": vm,
 		"speed_cv": sqrt(maxf(vs2 / N - vm * vm, 0.0)) / maxf(vm, 1e-9), "close": float(close) / N,
-		"startled": _count_burst(), "centre_m": origin + c * bl}
+		"startled": _count_burst(), "alarmed": _count_alarmed(), "centre_m": origin + c * bl}
 
 func _mean(a: PackedFloat64Array) -> float:
 	var sm := 0.0
 	for q in a: sm += q
 	return sm / maxf(a.size(), 1)
+
+func _count_alarmed() -> int:
+	var n := 0
+	for q in s:
+		if q > 0.2: n += 1
+	return n
 
 func _count_burst() -> int:
 	var n := 0

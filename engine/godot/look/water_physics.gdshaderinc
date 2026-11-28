@@ -10,6 +10,7 @@ global uniform float water_es0;
 global uniform float water_ek0;
 global uniform float water_exposure;
 global uniform float water_glow_k;
+global uniform float water_glow_ms;  // 1 = forward scattering kept on the ray (similarity relation), 0 = all scattering lost (as ported)
 global uniform vec4 water_sand;
 global uniform vec3 water_amb_ref;   // the scene's ambient colour (env ambient / exposure, nits): the fill's reference (WorldRoot)
 global uniform float water_fill_ao;  // 1 = the water's fill goes through Godot's ambient path (SSAO, SSIL, AO occlude it), 0 = emission
@@ -21,7 +22,9 @@ vec3 w_G(vec3 k, float L) {
 }
 // in-scattered light (nits) along a ray from depth z0 (m under the surface), direction d (y up), length L
 vec3 w_glow(vec3 d, float z0, float L) {
-	vec3 c = water_a + water_b;
+	// the haze's own loss: light scattered forward (HG g = W_G) stays on the ray, so the glow builds up to b J / (a + b (1 - g))
+	// (the similarity relation), not b J / (a + b) (28 Nov: the far water read navy, the underside's mirror with it)
+	vec3 c = water_a + water_b * mix(1.0, 1.0 - W_G, water_glow_ms);
 	// the floor the sand's bounce comes from is never above the ray's deepest point: past the lagoon floor (open water, a drop-off)
 	// a downward ray would otherwise integrate an upwelling that grows exp(+Ku) without end: the white void (test level, 28 Nov)
 	float H = max(water_y - water_floor_y, z0 + max(-d.y, 0.0) * L + 0.05);

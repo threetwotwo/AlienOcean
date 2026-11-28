@@ -59,6 +59,8 @@ const SDFGI_RESET_STOPS := 3.0
 @export var motes := true                 # marine snow under water (blind critique r1 row 6); AO_MOTES=0 in the shot tool
 @export var gi_k := 1.0                    # art lever: GI strength (SDFGI energy). 1 = physical (the water's fill + the sand's real bounce)
 @export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)
+## the haze keeps its forward-scattered light (similarity relation, 28 Nov): 1 = on, 0 = as ported (AO_GLOW_MS=0)
+static var glow_ms := float(OS.get_environment("AO_GLOW_MS")) if OS.get_environment("AO_GLOW_MS") != "" else 1.0
 @export var light_neutral := 1.0          # Gary picked "Full" 27 Nov 16:53Z
 ## The god rays under the water (Unreal GodK): the light net's map summed along each view ray. false = off (checks).
 @export var god_rays := true:
@@ -289,7 +291,9 @@ func apply(cam_y: float) -> Dictionary:
 	sky_mat.set_shader_parameter("under_k", 1.0)
 	sky_mat.set_shader_parameter("under_down", ek / PI)
 	sky_mat.set_shader_parameter("under_up", eu / PI)
-	RenderingServer.global_shader_parameter_set("water_amb_sky", 1.0 if env.sdfgi_enabled or _gi_reset > 0 else 0.0)
+	var amb_sky := env.sdfgi_enabled or _gi_reset > 0
+	RenderingServer.global_shader_parameter_set("water_amb_sky", 1.0 if amb_sky else 0.0)
+	var floor_amb := ek / PI      # the ambient the floor's shaders divide their fill by (water_physics w_fill_ratio), floor facing up
 	if under:
 		light.look_at_from_position(Vector3.ZERO, -tr, Vector3.FORWARD if absf(tr.y) > 0.99 else Vector3.UP)
 		light.light_intensity_lux = beam_h * WaterOptics.FRESNEL_SUN / tr.y
@@ -306,6 +310,7 @@ func apply(cam_y: float) -> Dictionary:
 		env.ambient_light_color = Color(amb.x / mx, amb.y / mx, amb.z / mx) if mx > 0.0 else Color.BLACK
 		env.ambient_light_energy = mx
 		RenderingServer.global_shader_parameter_set("water_amb_ref", amb / maxf(exposure, 1e-12))
+		if not amb_sky: floor_amb = amb / maxf(exposure, 1e-12)
 	else:
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		var dz := dome(Vector3.UP, _dome_sun)
@@ -315,6 +320,7 @@ func apply(cam_y: float) -> Dictionary:
 		env.ambient_light_energy = st.skylux / PI * exposure
 		var ac: Color = env.ambient_light_color * (st.skylux / PI)
 		RenderingServer.global_shader_parameter_set("water_amb_ref", Vector3(ac.r, ac.g, ac.b))
+		if not amb_sky: floor_amb = Vector3(ac.r, ac.g, ac.b)
 		light.look_at_from_position(Vector3.ZERO, -up_air, Vector3.FORWARD if absf(up_air.y) > 0.99 else Vector3.UP)
 		light.light_intensity_lux = beam_h / maxf(up_air.y, 0.02)
 		light.light_color = tint
@@ -323,6 +329,9 @@ func apply(cam_y: float) -> Dictionary:
 		# not the air's full beam (Godot's indirect energy is one scalar: the luminance of that loss)
 		var lum_att := att.r * 0.2126 + att.g * 0.7152 + att.b * 0.0722
 		light.light_indirect_energy = WaterOptics.FRESNEL_SUN * maxf(up_air.y, 0.02) / tr.y * lum_att
+	# the sea floor map's capture has no sky and no GI, so its floor lost the water's fill (sky through the surface + sand
+	# bounce) and the mirror under the surface read navy (Gary's T1 shot, 28 Nov): give its capture the same ambient
+	if is_instance_valid(_surface) and _surface.floor_map: _surface.floor_map.set_ambient(floor_amb)
 	# SDFGI keeps its probes' light over many frames: after a jump in the light (the hour slider, a teleport across day and night)
 	# that cache is the old light, shown at the new exposure (surface thread, 28 Nov: noon-lit sand blown out at 23:00).
 	# A jump of more than SDFGI_RESET_STOPS in EV100 drops the cache: GI off until two frames have been drawn without it, then
@@ -357,7 +366,7 @@ static func declare_globals() -> void:
 	var defs := {"water_y": [F, LagoonWaterField.SURFACE_Y], "water_floor_y": [F, 0.0],
 		"water_a": [V, Vector3.ZERO], "water_b": [V, Vector3.ZERO], "water_kd": [V, Vector3.ZERO], "water_ku": [V, Vector3.ZERO],
 		"water_sun_w": [V, Vector3.UP], "water_es0": [F, 0.0], "water_ek0": [F, 0.0], "water_exposure": [F, 1.0],
-		"water_glow_k": [F, 1.0], "water_zref": [F, 2.0], "water_sky_nits": [F, 0.0], "water_rrs": [V, Vector3.ZERO],
+		"water_glow_k": [F, 1.0], "water_glow_ms": [F, 1.0], "water_zref": [F, 2.0], "water_sky_nits": [F, 0.0], "water_rrs": [V, Vector3.ZERO],
 		"water_sand": [RenderingServer.GLOBAL_VAR_TYPE_COLOR, Color.WHITE],
 		# the light net (look/caustics.gdshaderinc): its map, and x 1 = read the map / 0 = per pixel, y the net's time (-1 = TIME)
 		"water_caus_map": [RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D, RID()],
@@ -386,6 +395,7 @@ func _push_water(water_y: float, sun_up_air: Vector3, beam_h_lux: float, sky_lux
 	rs.global_shader_parameter_set("water_ek0", sky_lux * WaterOptics.FRESNEL_SKY * sky_fill_k)      # horizontal lux of the sky just under
 	rs.global_shader_parameter_set("water_exposure", exposure)
 	rs.global_shader_parameter_set("water_glow_k", glow_k)
+	rs.global_shader_parameter_set("water_glow_ms", glow_ms)
 	rs.global_shader_parameter_set("water_fill_ao", 1.0 if fill_occluded else 0.0)
 	rs.global_shader_parameter_set("water_sand", WaterOptics.SAND)
 	rs.global_shader_parameter_set("water_sky_nits", sky_lux / PI)   # clear sky as a uniform dome (stand-in for the surface)
