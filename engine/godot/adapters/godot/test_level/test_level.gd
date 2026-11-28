@@ -311,6 +311,18 @@ func _bench_measure(secs: float) -> Dictionary:
 		"tick_ms": snappedf(game.stats.tick_ms, 0.01), "draw_calls": P.get_monitor(P.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 		"triangles": P.get_monitor(P.RENDER_TOTAL_PRIMITIVES_IN_FRAME)}
 
+func _bench_floor(secs: float) -> Dictionary:
+	## as _bench_measure, holding the camera on the floor while it measures
+	var done := false
+	var hold := func():
+		while not done:
+			if game.cam: game.cam.pitch = -1.15
+			await get_tree().process_frame
+	hold.call()
+	var r: Dictionary = await _bench_measure(secs)
+	done = true
+	return r
+
 ## Stand at the key-frame view; measure everything on, then each system off in turn (back on after), then all of them off.
 ## Writes playtest_reports/bench_<utc>.json (IssueReport.root_dir) and returns its path.
 func run_bench(settle := 2.0, secs := 4.0) -> String:
@@ -345,6 +357,22 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 		if not n in ["half_res", "lagoon", "grass_v2"]: set_toggle(n, false)
 	await get_tree().create_timer(settle).timeout
 	rows.append({"case": "all effects off (lagoon kept)", "r": await _bench_measure(secs)})
+	apply_state(s0)
+	# the floor view (Gary: slowest when looking at the floor): everything on, then the lagoon (floor material) off
+	teleport(1)
+	await get_tree().create_timer(settle).timeout
+	var fl: Array = []
+	for k in 2:
+		if k == 1: set_toggle("lagoon", false)
+		var tend := Time.get_ticks_msec() + int(settle * 1000.0)
+		while Time.get_ticks_msec() < tend:
+			if game.cam: game.cam.pitch = -1.15
+			await get_tree().process_frame
+		var r: Dictionary = await _bench_floor(secs)
+		fl.append(r)
+	set_toggle("lagoon", true)
+	rows.append({"case": "floor view, everything on", "r": fl[0]})
+	rows.append({"case": "floor view, lagoon off", "r": fl[1], "saves_ms": snappedf(fl[0].frame_ms - fl[1].frame_ms, 0.01)})
 	apply_state(s0)
 	DisplayServer.window_set_vsync_mode(vs0)
 	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_RESIZE_DISABLED, false)
