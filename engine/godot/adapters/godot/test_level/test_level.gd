@@ -179,10 +179,7 @@ func set_toggle(n: String, on: bool) -> void:
 		"caustics": wr.caustics.enabled = on
 		"agx": wr.set_agx(on)
 		"taa": get_viewport().use_taa = on
-		"ssao": wr.set_ao("ssao" if on else ("off" if not wr.ao_mode in ["cortao", "gtao", "vbao"] else wr.ao_mode))
-		"cortao": wr.set_ao("cortao" if on else "ssao")   # CORTAO in place of SSAO (ao thread 28 Nov); off = back to SSAO
-		"gtao": wr.set_ao("gtao" if on else "ssao")       # AO head to head: XeGTAO in CORTAO's place
-		"vbao": wr.set_ao("vbao" if on else "ssao")       # AO head to head: visibility bitmask in CORTAO's place
+		"ssao", "cortao", "gtao", "vbao": _set_ao_toggle(wr, n, on)
 		"ssil": wr.env.ssil_enabled = on
 		"shadows": wr.light.shadow_enabled = on
 		"half_res":
@@ -485,3 +482,13 @@ func run_bench(settle := 2.0, secs := 4.0) -> String:
 	bench_running = false
 	bench_done.emit(path)
 	return path
+
+var _ao_prev := "off"
+func _set_ao_toggle(wr: WorldRoot, mode: String, on: bool) -> void:
+	## the AO switches are one choice (ssao / cortao (default) / gtao / vbao): on = that one, off = back to the one before it
+	if on:
+		if wr.ao_mode != mode: _ao_prev = wr.ao_mode
+		wr.set_ao(mode)
+	elif wr.ao_mode == mode:
+		wr.set_ao(_ao_prev if _ao_prev != mode else "off")
+
