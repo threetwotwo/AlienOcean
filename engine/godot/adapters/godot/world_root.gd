@@ -40,9 +40,9 @@ const UNDER_WHITE_FADE_M := 0.20      # v183: faded in over the camera's first 0
 @export var fill_occluded := true          # the water's fill light goes through Godot's ambient, so SSAO / SSIL occlude it (false = as before, unoccluded)
 @export var cdom := 0.05                   # art lever (a real condition): yellow substance in the water; key frame look 0.05 (Gary card 28 Nov; Unreal LOOK_SET 0.03); less = bluer haze
 @export var scat_k := 0.40                 # art lever (a real condition): particles in the water, Unreal LOOK_SET 0.40; less = clearer
-@export var sky_fill_k := 0.6              # art lever: share of the sky's light that enters the water (1 = physical: 11 % of the light on the
+@export var sky_fill_k := 0.8              # art lever: share of the sky's light that enters the water (1 = physical: 11 % of the light on the
                                            # 4 m sand at noon). The key frame (Blender, 28 Nov passes) has 7 %: 0.6 here. Feeds the fill, the GI's
-                                           # water light field and the haze alike.
+                                           # water light field and the haze alike. Gary picked 0.8, between the two (card, 28 Nov 02:02Z).
 @export var under_white := Vector3.ZERO      # look check: the under-water camera balance (zero = the place's UNDER_WHITE)
 @export var gi_k := 1.0                    # art lever: GI strength (SDFGI energy). 1 = physical (the water's fill + the sand's real bounce)
 @export var glow_k := 1.0                  # Gary picked "Brighter" (haze 1.0; Unreal GlowK was 2.5)

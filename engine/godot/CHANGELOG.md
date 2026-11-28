@@ -5,7 +5,7 @@
   same (AO_SDFGI_SKY=0 / AO_SUN=0), key frame camera. Sun pass (incl. bounce): shadow L* Blender 39.3, Godot 38.2 (match).
   Sky pass: 7 % of the light on the sand in the key frame, 11 % in Godot (WorldRoot numbers at 4 m, noon).
 - Art lever WorldRoot.sky_fill_k (AO_SKY_FILL): share of the sky's light entering the water, scaling water_ek0, the ambient,
-  the GI's water light field and the haze alike. Default 0.6 = the key frame's 7 % (1 = physical). Shadow / rock / sand:
+  the GI's water light field and the haze alike. Default 0.8: Gary picked between the key frame's 7 % (0.6) and physical (1.0) on 28 Nov 02:02Z. Shadow / rock / sand:
   51 / 49 / 74 -> 47 / 47 / 73 (key frame 44 / 41-43 / 78). Gary picks (card); 1.0 restores the physical share.
 - Fix (surface thread report): above water SDFGI drew milky 3-6 m blotches on the sand seen through the surface. The GI's
   sky is now the water light field at any eye height, and above water the sun's light_indirect_energy is the share entering
