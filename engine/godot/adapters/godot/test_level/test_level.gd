@@ -199,7 +199,7 @@ func set_toggle(n: String, on: bool) -> void:
 	_relight()
 
 ## The upscaler behind half_res. AO_UPSCALER = fsr | fsr2 | metalfx | metalfx_temporal picks one; by default AMD FSR 2, a temporal
-## upscaler that does its own anti-aliasing (TAA stays off). FSR 1 was the default (8.8 ms vs MetalFX temporal 11.5 ms on the M1 Pro),
+## upscaler that does its own anti-aliasing (TAA stays off); MetalFX temporal where the GPU has it (Apple silicon). FSR 1 was the default (8.8 ms vs MetalFX temporal 11.5 ms on the M1 Pro),
 ## but it is spatial, with no anti-aliasing: Gary's fullscreen playtest (28 Nov) showed stair-stepped grass, pixelation and shimmer.
 ## At 2704x1756 FSR 2 draws the grass clean where FSR 1 aliases (look thread, plans/godot_look/iq_28nov.jpg); Gary approved the cost.
 static func upscaler() -> int:
@@ -211,7 +211,9 @@ static func upscaler() -> int:
 		"fsr2": return Viewport.SCALING_3D_MODE_FSR2
 		"metalfx": return Viewport.SCALING_3D_MODE_METALFX_SPATIAL if mfx_s else Viewport.SCALING_3D_MODE_FSR
 		"metalfx_temporal": return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR
-	return Viewport.SCALING_3D_MODE_FSR2  # default FSR 2 (28 Nov, image quality): temporal, anti-aliased
+	# default: a temporal upscaler (anti-aliased). On Apple silicon MetalFX temporal, Apple's own, run natively; FSR 2 cost 8 ms at
+	# Mac fullscreen (41.3 vs 32.5 ms all on, 28 Nov). Elsewhere FSR 2.
+	return Viewport.SCALING_3D_MODE_METALFX_TEMPORAL if mfx_t else Viewport.SCALING_3D_MODE_FSR2
 
 func _set_collider(on: bool) -> void:
 	_show_collider = on
