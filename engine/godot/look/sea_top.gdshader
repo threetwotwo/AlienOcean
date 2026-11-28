@@ -1,4 +1,4 @@
-// Sea seen from above 0.8.2 (water surface thread): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
+// Sea seen from above 0.9.0 (water surface thread; 0.9.0: the bent ray marched through the screen, every object alike): the lagoon's top side on the FFT sea (look/sea_waves.gdshaderinc).
 // 0.2.0 (28 Nov): the water's own colour, one model from the lagoon's sand to the open sea (Rrs x Ed where the floor
 // fades; it read jet black: the lagoon's path only saw the floor).
 // 0.5.0 (28 Nov): the sun's glitter sparkles (the tank's moon sparkle, run for the sun).
@@ -22,6 +22,8 @@ render_mode unshaded, cull_back, world_vertex_coords, fog_disabled, shadows_disa
 #include "res://look/sea_waves.gdshaderinc"
 #include "res://look/sea_bathy.gdshaderinc"
 #include "res://look/sea_floor_map.gdshaderinc"
+#include "res://look/sea_march.gdshaderinc"
+global uniform vec4 sea_god;            // god rays on, frame mod 8, frames averaged (TAA / FSR 2 / MetalFX temporal) 1/0 (WorldRoot)
 global uniform vec3 water_sun_air;
 global uniform float water_sun_lux;
 #include "res://look/sea_foam_shade.gdshaderinc"   // the whitecaps' look (after the lines above: it uses them)
@@ -45,8 +47,7 @@ global uniform float sea_crest_glow;    // art lever on the light through the cr
 uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 uniform float nq = 32.0;
 uniform float sun_size = 1.0;
-uniform float sea_body_wobble = 3.0;   // art lever (0.8.2): how much the waves wiggle the edges of things under the surface (1 = the waves' true share)
-uniform float sea_body_veil = 2.5;     // art lever (0.8.2): how much water a body under the surface is seen through, as a multiple of the true path
+uniform float sea_body_veil = 1.0;     // art lever (0.8.2; 0.9.0: 1 = the true path, Gary asked for physically correct): how much water a body under the surface is seen through, x the true path
 uniform float sea_horizon_lift = 1.0;   // art lever: how far up the sky the rough sea's mean mirrored ray comes from (1 = as measured)
 varying vec2 still;
 varying vec3 wi;
@@ -152,101 +153,83 @@ void fragment() {
 	vec3 qg = (INV_VIEW_MATRIX * vec4(vp.xyz, 1.0)).xyz;   // what the straight view meets (Godot)
 	vec3 q = sea_isl(qg);
 	float h = clamp(wi.z - q.z, 0.0, 60.0);                // its depth under this bit of surface
-	vec2 shift = (T.xy / max(-T.z, 0.05) + V.xy / max(V.z, 0.05)) * h;   // bent landing - straight landing
-	// 0.7.0: two passes. The bend assumes the floor lies at the straight view's depth h; where the floor rises toward the
-	// eye (looking down past a reef wall) the bent point lands on the shallow reef flat and its sand glowed cyan over
-	// the deep (water surface thread, 28 Nov). The second pass bends again by the depth found there (a fixed-point step).
 	vec2 tl = T.xy / max(-T.z, 0.05);                       // m along per m down
-	float Hg = max(wi.z - floor_top(wi.xy), 0.0);
-	for (int k = 0; k < 4; k++) Hg = mix(Hg, max(wi.z - floor_top(wi.xy + tl * Hg), 0.0), 0.7);   // damped: walls
-	// 0.8.2 (Gary 28 Nov: bodies under the surface "flat and cut out", independent review): the mean bend slides the picture
-	// along an upright body, so its sides stayed straight; only the waves' share of the bend moves an edge sideways. A body
-	// (anything standing clear above the floor map, which leaves movers out) is drawn from the screen moved by that share
-	// alone, scaled by the art lever and capped at 8 cm: a wiggle of its own outline, never a copy
-	vec3 T0 = refract(-V, vec3(0.0, 0.0, 1.0), 1.0 / 1.333);
-	vec2 dw = (tl - T0.xy / max(-T0.z, 0.05)) * min(h / max(V.z, 0.2), 2.0) * sea_body_wobble;
-	dw *= min(1.0, 0.08 / max(length(dw), 1e-5));
-	vec4 cw = PROJECTION_MATRIX * VIEW_MATRIX * vec4(sea_gdt(q + vec3(dw, 0.0)), 1.0);
-	vec2 uvw = clamp(cw.xy / cw.w * 0.5 + 0.5, vec2(0.0), vec2(1.0));
-	vec4 vw = INV_PROJECTION_MATRIX * vec4(uvw * 2.0 - 1.0, texture(depth_tex, uvw).r, 1.0);
-	float hw = wi.z - sea_isl((INV_VIEW_MATRIX * vec4(vw.xyz / vw.w, 1.0)).xyz).z;
-	// the wiggle never carries a shallower thing out over deeper water beside it (a fringe of the body on the water: the
-	// ghost rule's test, 0.8.1): edges move inward only
-	if (hw < 0.0 || hw < 0.5 * h - 0.1) { uvw = SCREEN_UV; hw = h; }
-	float body = smoothstep(0.08, 0.30, Hg - hw);
-	bool occl = false;                                      // the bent ray's sample lands on a body (it hides the floor there)
-	vec2 uvb = SCREEN_UV; float hb = h;
-	for (int it = 0; it < 2; it++) {
-		float hs = it == 0 ? h : clamp(hb, 0.0, h);
-		vec3 qb = q + vec3(shift * (hs / max(h, 1e-4)), 0.0);
-		vec4 cs = PROJECTION_MATRIX * VIEW_MATRIX * vec4(sea_gdt(qb), 1.0);
-		uvb = cs.xy / cs.w * 0.5 + 0.5;
-		// near the screen edge (the screen may not hold the bent point) the shift is squeezed: it goes at most half way
-		// to the edge along its line, so rows stay in order (a clamp smears the edge row into streaks)
-		vec2 du = uvb - SCREEN_UV;
-		vec2 room = mix((vec2(1.0) - SCREEN_UV) / max(du, vec2(1e-6)), -SCREEN_UV / min(du, vec2(-1e-6)), step(du, vec2(0.0)));
-		uvb = SCREEN_UV + du * clamp(min(room.x, room.y) * 0.5, 0.0, 1.0);   // at most half way to the edge: a smooth squeeze
-		float db = texture(depth_tex, uvb).r;
-		vec4 vb = INV_PROJECTION_MATRIX * vec4(uvb * 2.0 - 1.0, db, 1.0);
-		vb.xyz /= vb.w;
-		hb = wi.z - sea_isl((INV_VIEW_MATRIX * vec4(vb.xyz, 1.0)).xyz).z;
-		if (it == 0 && Hg - hb > 0.4) { occl = true; break; }   // 0.8.2: never bend again by a body's depth (a third patch)
-		if (hb < 0.0 || hb > h - 0.5) break;                  // above the water (an edge), or the floor where it was assumed
-	}
-	// the bent point is above the water (an edge), or still on something far shallower than the floor it was bent for
-	// (a body or rock between: sampling it there drew it twice, Gary 28 Nov "a doubling of the player body"): no shift
-	// 0.8.1: and the point sampled must lie beyond this bit of surface, seen from the eye: the bent ray goes on away from
-	// the eye, so it cannot meet anything nearer. In shallow water (a girl standing on a rock skirt, 0.5 m of water behind
-	// her) her submerged hips, nearer than the water seen beside them, passed the depth test above and were drawn a
-	// second time on that water (Gary 28 Nov playtest, "double ghosting of refraction still present")
-	float kb = (hb < 0.0 || hb < 0.5 * h - 0.25) ? 0.0 : 1.0;
-	if (kb > 0.0 && length(V.xy) > 0.05) {
-		vec4 vs = INV_PROJECTION_MATRIX * vec4(uvb * 2.0 - 1.0, texture(depth_tex, uvb).r, 1.0);
-		vec3 qs = sea_isl((INV_VIEW_MATRIX * vec4(vs.xyz / vs.w, 1.0)).xyz);   // the point the bent sample shows
-		kb *= smoothstep(-0.3, -0.05, dot(qs.xy - wi.xy, -normalize(V.xy)));
-	}
-	if (occl) kb = 0.0;
-	// 0.8.2: a body pixel is its own picture moved by the waves; elsewhere the bent sample. Where the bent sample was
-	// refused (kb 0: a body hides the floor the ray lands on) the unshifted screen showed the floor 0.9 m out of register,
-	// a body-shaped patch beside her (the "halo"): the landing model fills it now (wsc below), not the screen
-	vec3 scene = mix(textureLod(screen_tex, uvb, 0.0).rgb, textureLod(screen_tex, uvw, 0.0).rgb, body);
-	float hsc = mix(max(hb, 0.0), hw, body);               // the depth of what the screen shows there
 	vec3 c = water_a + water_b;
-	// 0.8.0: where the bent ray really lands, followed through the floor map (adapters/godot/sea_floor_map.gd: the floor's
-	// light and top round the eye) and past it the floor beyond (sea_bathy). The screen alone cannot say: at a slant the
-	// straight view runs far past the floor under this point (down a reef's slope it found the floor 300 m on and 60 m
-	// down, so the slope read near black between the shallow cyan and the floor beyond: Gary 28 Nov "the dark blue area
-	// between the cyans"), and near the line it shows a rock a few cm under it 3 m off, which the bent ray, diving 41-49
-	// deg from the vertical, never meets (it was seen as clearly as looking down, a hard cut-out: Gary 28 Nov "a cardboard
-	// effect" at the waterline). The screen's picture is kept where its depth agrees with the landing (the near floor,
-	// rocks under the eye) and fades out as the view goes grazing, where it holds nothing the bent ray sees.
-	// the landing's light: the screen's, where the eye sees that very spot (the drawn floor as lit, net and all), else the
-	// floor map's, else the floor beyond's sand at that depth
-	vec3 lw = vec3(wi.xy + tl * Hg, wi.z - Hg);
-	vec4 lc = PROJECTION_MATRIX * VIEW_MATRIX * vec4(sea_gdt(lw), 1.0);
-	vec2 luv = lc.xy / lc.w * 0.5 + 0.5;
-	vec3 fl = vec3(-1.0);
-	if (lc.w > 0.0 && all(greaterThan(luv, vec2(0.002))) && all(lessThan(luv, vec2(0.998)))) {
-		float dl = texture(depth_tex, luv).r;
-		vec4 vl = INV_PROJECTION_MATRIX * vec4(luv * 2.0 - 1.0, dl, 1.0);
-		vec3 sl = sea_isl((INV_VIEW_MATRIX * vec4(vl.xyz / vl.w, 1.0)).xyz);
-		if (dl > 1e-7 && distance(sl, lw) < 0.3 + 0.01 * distance(cam, lw)) fl = textureLod(screen_tex, luv, 0.0).rgb / max(water_exposure, 1e-12);
+	// the landing without the screen: the bent ray marched down through the floor map's heightfield to its top (0.9.0: 5
+	// steps and the crossing; the old damped fixed point collapsed at walls), past it the floor beyond (sea_bathy). `wall`:
+	// the ray entered the heightfield through its side (a rock), not through open floor
+	float tf = (h + 1.0) / max(-T.z, 0.05);
+	{
+		float tm = min(tf, 40.0), tp = 0.0, gp = wi.z - floor_top(wi.xy);
+		for (int k = 1; k <= 5; k++) {
+			float t = tm * float(k) / 5.0;
+			vec3 p = wi + T * t;
+			float g = p.z - floor_top(p.xy);
+			if (g <= 0.0) { tf = mix(tp, t, clamp(gp / max(gp - g, 1e-3), 0.0, 1.0)); break; }
+			tp = t; gp = g;
+		}
 	}
-	if (fl.x < 0.0) {                                       // the floor map's light is a 1 m average: give it the light net (0.8.2)
-		fl = floor_light(lw.xy);
-		if (fl.x >= 0.0) fl *= caustic_sun(sea_gdt(lw), Hg, water_sun_w, 0.05, TIME, 1.0);
+	float Hg = max(tf * max(-T.z, 0.05), 0.0);
+	// 0.9.0 (Gary 28 Nov: "a root fix, physically correct for all object underwater, not just a patch fix for player
+	// model"): the bent ray is marched through the screen's depth (look/sea_march.gdshaderinc) to whatever it meets, the
+	// same for sand, rock, grass, her and every fish: each is seen where the waves bend it, and moves as they move. Gone
+	// with it: the straight-depth shift and its fixed-point pass (0.7.0), the refusal of nearer samples (0.8.1), and the
+	// movers' capped wiggle and occlusion rule (0.8.2); those patched cases are what a march does by itself
+	vec2 uvh = SCREEN_UV;
+	vec3 occ = vec3(0.0);
+	float th = 0.0;
+	float tmax = clamp((max(Hg, h) + 1.0) / max(-T.z, 0.05), 1.0, 40.0);
+	if (V.z > 0.03 && depth > 1e-7) {
+		// steps by the ray's length on the screen (4 px each, 3..12); one that moves under 1.5 px is the straight view
+		vec4 ce = PROJECTION_MATRIX * VIEW_MATRIX * vec4(sea_gdt(wi + T * tmax), 1.0);
+		float span = ce.w > 1e-4 ? length((ce.xy / ce.w * 0.5 + 0.5 - SCREEN_UV) * VIEWPORT_SIZE) : 1e3;
+		if (span < 1.5) th = h / max(-T.z, 0.05);
+		else {
+			float jit = sea_god.z > 0.5 ? sea_ign(FRAGCOORD.xy + 5.588238 * sea_god.y) : 0.5;
+			th = sea_march(wi, T, tmax, clamp(int(span / 4.0), 3, 12), jit, PROJECTION_MATRIX * VIEW_MATRIX, INV_PROJECTION_MATRIX, depth_tex, uvh, occ);
+		}
 	}
-	if (fl.x < 0.0) fl = sea_bathy_sand(Hg);
-	float Lg = min(min(Hg, 60.0) / max(-T.z, 0.05), 400.0);
-	vec3 under = (fl * exp(-c * Lg) + w_glow(sea_gdt(T), 0.0, Lg)) * water_exposure;
-	bool nofloor = depth <= 1e-7;                           // nothing drawn under this point (and none of the screen shows)
-	// the screen is kept unless it lies well deeper than the landing (the straight view ran on past the floor the bent ray
-	// meets: a reef's slope); something nearer (a rock, a body, a fish) stays where the screen has it, as the bend has
-	// already placed it (0.7.0); only the slant fades it, below
-	float agree = nofloor ? 0.0 : 1.0 - smoothstep(0.5, 1.5, max(hsc - Hg, 0.0) / max(3.0, 0.5 * Hg));
-	float wsc = agree * smoothstep(0.10, 0.30, V.z) * max(kb, body);   // the view's slant, not the facet's (waves must not flicker it)
+	float hsc = th * max(-T.z, 0.0);                        // the depth of what the ray meets
+	vec3 ph = wi + T * th;
+	// art lever (sea_body_veil, 1 = the true path): a thing standing clear above the floor map is seen through this much more water
+	float body = th > 0.0 ? smoothstep(0.08, 0.30, ph.z - floor_top(ph.xy)) : 0.0;
+	vec3 scene = textureLod(screen_tex, uvh, 0.0).rgb;
+	float edge = min(min(uvh.x, 1.0 - uvh.x), min(uvh.y, 1.0 - uvh.y));
+	float wsc = th > 0.0 ? smoothstep(0.03, 0.12, V.z) * smoothstep(0.0, 0.03, edge) : 0.0;
+	vec3 under = vec3(0.0);
+	if (wsc < 1.0) {
+		// where the march found nothing the screen can show. If the ray went behind a static thing (the floor map's march
+		// enters it through a side at about the same distance) it meets that thing's hidden side: the thing's own colour
+		// where the ray went behind it, darker (its unlit side), through the water to there. Otherwise (behind a mover, off
+		// the screen, ran out) the static floor: the screen's own picture of the landing where the eye sees that very spot,
+		// else the floor map's light with the light net, else the floor beyond's sand at that depth
+		vec3 lw = wi + T * tf;
+		float gw = lw.z - floor_top(lw.xy + tl * 0.05);
+		if (occ.z > 0.0 && abs(occ.z - tf) < 0.5 + 0.2 * occ.z && floor_top(lw.xy) > lw.z - 0.05 && gw < -0.1) {
+			vec3 oc = textureLod(screen_tex, occ.xy, 0.0).rgb;
+			float Lo = min(occ.z, 400.0);
+			under = oc * 0.6 * exp(-c * Lo) + w_glow(sea_gdt(T), 0.0, Lo) * water_exposure;
+		} else {
+			vec4 lc = PROJECTION_MATRIX * VIEW_MATRIX * vec4(sea_gdt(lw), 1.0);
+			vec2 luv = lc.xy / lc.w * 0.5 + 0.5;
+			vec3 fl = vec3(-1.0);
+			if (lc.w > 0.0 && all(greaterThan(luv, vec2(0.002))) && all(lessThan(luv, vec2(0.998)))) {
+				float dl = textureLod(depth_tex, luv, 0.0).r;
+				vec4 vl = INV_PROJECTION_MATRIX * vec4(luv * 2.0 - 1.0, dl, 1.0);
+				vec3 sl = sea_isl((INV_VIEW_MATRIX * vec4(vl.xyz / vl.w, 1.0)).xyz);
+				if (dl > 1e-7 && distance(sl, lw) < 0.3 + 0.01 * distance(cam, lw)) fl = textureLod(screen_tex, luv, 0.0).rgb / max(water_exposure, 1e-12);
+			}
+			if (fl.x < 0.0) {
+				fl = floor_light(lw.xy);
+				if (fl.x >= 0.0) fl *= caustic_sun(sea_gdt(lw), Hg, water_sun_w, 0.05, TIME, 1.0);
+			}
+			if (fl.x < 0.0) fl = sea_bathy_sand(Hg);
+			float Lg = min(min(Hg, 60.0) / max(-T.z, 0.05), 400.0);
+			under = (fl * exp(-c * Lg) + w_glow(sea_gdt(T), 0.0, Lg)) * water_exposure;
+		}
+	}
 	if (wsc > 0.0) {
-		float Lp = min(min(hsc, 60.0) / max(-T.z, 0.05), 400.0) * mix(1.0, sea_body_veil, body);
+		float Lp = min(th, 400.0) * mix(1.0, sea_body_veil, body);
 		under = mix(under, scene * exp(-c * Lp) + w_glow(sea_gdt(T), 0.0, Lp) * water_exposure, wsc);
 	}
 	float H = mix(Hg, hsc, wsc);

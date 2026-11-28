@@ -82,6 +82,7 @@ static var glow_ms := float(OS.get_environment("AO_GLOW_MS")) if OS.get_environm
 	set(v):
 		god_rays = v
 		if under_mat: under_mat.set_shader_parameter("god_k", 1.0 if v else 0.0)
+		_sea_god()
 @export var depth_colour_share := DEPTH_WB   # art direction lever (27 Nov: Gary 'art direction trumps'); Unreal 0.25
 const DEPTH_WB := 0.25                # the share given back
 const DEPTH_WB_PATH := 1.2            # m of water per m of depth (sky light)
@@ -220,6 +221,7 @@ func attach_camera(cam: Camera3D) -> void:
 	var qm := QuadMesh.new(); qm.size = Vector2(2, 2); q.mesh = qm
 	var qmat := ShaderMaterial.new(); qmat.shader = load("res://look/underwater_view.gdshader"); q.material_override = qmat
 	under_mat = qmat; qmat.set_shader_parameter("god_k", 1.0 if god_rays else 0.0)
+	SeaSurface.globals(); _sea_god()
 	q.gi_mode = GeometryInstance3D.GI_MODE_DISABLED   # a screen pass, not a solid: never in SDFGI / VoxelGI
 	q.extra_cull_margin = 16384.0; q.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; q.layers = 1 << 3   # layer 4: the eye's own quads (the sea floor map's captures skip it)
 	cam.add_child(q)
@@ -231,10 +233,19 @@ func _process(_dt: float) -> void:
 	if under_mat == null: return
 	var vp := get_viewport()
 	under_mat.set_shader_parameter("god_frame", float(Engine.get_frames_drawn() % 8) if vp and temporal(vp) else 0.0)
+	_sea_god()
+
+func _sea_god() -> void:
+	## the same god-ray switch and frame for the sea's underside, which adds the eye's water path itself (look/sea_under 0.4.0)
+	if under_mat == null: return
+	var vp := get_viewport()
+	var tmp := vp != null and temporal(vp)
+	RenderingServer.global_shader_parameter_set(&"sea_god", Vector4(1.0 if god_rays else 0.0, float(Engine.get_frames_drawn() % 8) if tmp else 0.0, 1.0 if tmp else 0.0, 0.0))
 
 func set_eye_wave(h: float) -> void:
 	## the wave's height over the still level at the eye (m): the under-water view treats the surface as there (GameRoot)
 	if under_mat: under_mat.set_shader_parameter("eye_wave", h)
+	if under_mat: RenderingServer.global_shader_parameter_set(&"sea_eye_wave", h)
 
 static func temporal(vp: Viewport) -> bool:
 	## frames are averaged on this viewport (TAA, FSR 2 or MetalFX temporal), so per-frame noise may move on each frame
